@@ -8,15 +8,15 @@ from shapely.ops import unary_union
 
 
 def build_rotor(radius, zmin, zmax):
-    outer = Point(0, 0).buffer(radius, quad_segments=96)
-    inner = Point(0, 0).buffer(radius * 0.073, quad_segments=48)
+    outer = Point(0, 0).buffer(radius, quad_segs=96)
+    inner = Point(0, 0).buffer(0.073, quad_segs=48)
     holes = []
-    for i in range(24):
-        angle = 2 * np.pi * i / 24
-        for j in [0.118, 0.149, 0.179]:
-            hole = Point(radius * 0.0043 * np.cos(angle + j), radius * 0.0043 * np.sin(angle + j)).buffer(radius * 0.0043, quad_segments=8)
+    for row_index, row in enumerate([0.118, 0.149, 0.179]):
+        for i in range(24):
+            angle = 2 * np.pi * i / 24 + row_index * .11
+            hole = Point(row * np.cos(angle), row * np.sin(angle)).buffer(.0043, quad_segs=8)
             holes.append(hole)
-    polygon = outer.difference(unary_union(holes))
+    polygon = outer.difference(unary_union([inner] + holes))
     assert len(polygon.interiors) == 73
     mesh = trimesh.creation.extrude_polygon(polygon, height=0.016, engine='earcut')
     if zmax > 0:
