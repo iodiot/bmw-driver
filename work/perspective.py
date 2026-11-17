@@ -1,0 +1,10 @@
+from pathlib import Path
+p=Path('outputs/bmw-viewer/car-v9.html')
+s=p.read_text(encoding='utf-8')
+s=s.replace('<summary>Controls</summary>','<summary>Controls</summary><div class="row"><label><input type="checkbox" id="perspective" checked> Perspective camera</label></div>')
+s=s.replace('const camera=new THREE.OrthographicCamera','const orthoCamera=new THREE.OrthographicCamera')
+s=s.replace('camera.position.set(6,2.7,6);','const perspectiveCamera=new THREE.PerspectiveCamera(34,innerWidth/innerHeight,.01,100);let camera=perspectiveCamera;camera.position.set(6,2.7,6);')
+s=s.replace('const clock=new THREE.Clock();',"document.querySelector('#perspective').onchange=e=>{const next=e.target.checked?perspectiveCamera:orthoCamera;next.position.copy(camera.position);next.quaternion.copy(camera.quaternion);next.up.copy(camera.up);next.zoom=1;camera=next;camera.updateProjectionMatrix();controls.object=camera;controls.update()};const clock=new THREE.Clock();")
+s=s.replace('camera.left=-extent*innerWidth/innerHeight;camera.right=extent*innerWidth/innerHeight;camera.updateProjectionMatrix();','orthoCamera.left=-extent*innerWidth/innerHeight;orthoCamera.right=extent*innerWidth/innerHeight;orthoCamera.updateProjectionMatrix();perspectiveCamera.aspect=innerWidth/innerHeight;perspectiveCamera.updateProjectionMatrix();')
+p.write_text(s,encoding='utf-8')
+Path('outputs/bmw-viewer/index.html').write_text(s,encoding='utf-8')

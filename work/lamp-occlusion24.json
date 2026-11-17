@@ -1,0 +1,232 @@
+{
+  "body_triangle_count": 275071,
+  "sample_count": 45,
+  "occluded_samples": 0,
+  "checks": [
+    {
+      "index": 0,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 31,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 62,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 93,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 124,
+      "body_hit_m": 1.891506532227371,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 155,
+      "body_hit_m": 1.8851485137464479,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 186,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 217,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 248,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 279,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 310,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 341,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 372,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 403,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 434,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 465,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 496,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 527,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 558,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 589,
+      "body_hit_m": 1.8860138076474269,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 620,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 651,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 682,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 713,
+      "body_hit_m": 1.882760742143411,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 744,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 775,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 806,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 837,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 868,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 899,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 930,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 961,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 992,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 1023,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 1054,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 1085,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 1116,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 1147,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 1178,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 1209,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 1240,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 1271,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 1302,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 1333,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    },
+    {
+      "index": 1365,
+      "body_hit_m": null,
+      "body_ahead_of_lens": false
+    }
+  ]
+}

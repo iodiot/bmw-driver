@@ -1,0 +1,86 @@
+{
+  "dimensions_mm": {
+    "length_mm": 4910.0000858306885,
+    "body_width_mm": 1891.9999599456787,
+    "height_from_ground_mm": 1450.9999752044678,
+    "mirror_width_mm": 2118.99995803833,
+    "wheelbase_mm": 2964.0,
+    "front_track_mm": 1627.0,
+    "rear_track_mm": 1582.0,
+    "front_overhang_mm": 836.000078201294,
+    "rear_overhang_mm": 1110.0000076293945
+  },
+  "closed_door_shells": {
+    "Door_skin_Front_Left": true,
+    "Door_skin_Front_Right": true,
+    "Door_skin_Rear_Left": true,
+    "Door_skin_Rear_Right": true
+  },
+  "opening_motion": {
+    "Hood_pivot": {
+      "attached_meshes": 11,
+      "mean_motion_m": [
+        -0.4037066881778728,
+        0.708035980444841,
+        0.0
+      ]
+    },
+    "Trunk_pivot": {
+      "attached_meshes": 35,
+      "mean_motion_m": [
+        0.13529961346055064,
+        0.40102126141842187,
+        -1.3010426069826053e-18
+      ]
+    },
+    "Door_pivot_Front_Left": {
+      "attached_meshes": 11,
+      "mean_motion_m": [
+        0.2537328957771027,
+        0.0,
+        -0.4493042338100871
+      ]
+    },
+    "Door_pivot_Front_Right": {
+      "attached_meshes": 11,
+      "mean_motion_m": [
+        0.2537328957771027,
+        0.0,
+        0.4493042338100871
+      ]
+    },
+    "Door_pivot_Rear_Left": {
+      "attached_meshes": 9,
+      "mean_motion_m": [
+        0.24513556802671588,
+        0.0,
+        -0.45503617533878205
+      ]
+    },
+    "Door_pivot_Rear_Right": {
+      "attached_meshes": 9,
+      "mean_motion_m": [
+        0.24513556802671588,
+        0.0,
+        0.45503617533878205
+      ]
+    }
+  },
+  "normals_exported_on_meshes": 508,
+  "animation_clips": 7,
+  "steel_rotors": 4,
+  "deep_red_caliper_meshes": 12,
+  "brake_rotor_rgba": [
+    72,
+    76,
+    82,
+    255
+  ],
+  "caliper_rgba": [
+    105,
+    1,
+    7,
+    255
+  ],
+  "wheel_spin_nodes": 4
+}

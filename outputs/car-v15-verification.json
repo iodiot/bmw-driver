@@ -1,0 +1,32 @@
+{
+  "dimensions_mm": {
+    "length_mm": 4910.0000858306885,
+    "body_width_mm": 1891.9999599456787,
+    "height_from_ground_mm": 1450.9999752044678,
+    "mirror_width_mm": 2118.99995803833,
+    "wheelbase_mm": 2964.0,
+    "front_track_mm": 1627.0,
+    "rear_track_mm": 1582.0,
+    "front_overhang_mm": 836.000078201294,
+    "rear_overhang_mm": 1110.0000076293945
+  },
+  "maximum_dimension_error_mm": 8.58306884765625e-05,
+  "panel_boundary_errors": {
+    "Left": {
+      "quarter_to_shoulder_mm": 0.0,
+      "deck_to_shoulder_mm": 0.0,
+      "quarter_to_lower_return_mm": 0.0
+    },
+    "Right": {
+      "quarter_to_shoulder_mm": 0.0,
+      "deck_to_shoulder_mm": 0.0,
+      "quarter_to_lower_return_mm": 0.0
+    }
+  },
+  "symmetry_errors_mm": {
+    "Rear_quarter_continuous_": 0.0,
+    "Rear_shoulder_continuous_": 0.0,
+    "Rear_bumper_lower_return_": 0.0
+  },
+  "four_wheel_rig_preserved": true
+}

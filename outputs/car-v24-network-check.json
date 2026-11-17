@@ -1,0 +1,26 @@
+{
+  "checked_utc": "2026-11-17T05:52:15.224579+00:00",
+  "url": "https://calgary-surely-certificates-opposed.trycloudflare.com/car-v24.html?paused=1",
+  "files": {
+    "index": {
+      "status": 200,
+      "bytes": 5983,
+      "sha256": "8a3101c37e9dea8dd44a708512845abd14806a732e6ab14bc9206bd0a8748d80"
+    },
+    "car-v24.html": {
+      "status": 200,
+      "bytes": 5983,
+      "sha256": "8a3101c37e9dea8dd44a708512845abd14806a732e6ab14bc9206bd0a8748d80"
+    },
+    "viewer-v24.js": {
+      "status": 200,
+      "bytes": 15555,
+      "sha256": "f00e0515d0d3f5753ca7b3b8792cf4eac9bcee514f34171de34bd53b992ac4cd"
+    },
+    "bmw-rear-joints-v24.glb": {
+      "status": 200,
+      "bytes": 48852300,
+      "sha256": "0cd771bd81c022a3cdd342031128d966fbb745977982ba5bfd5caad80843408c"
+    }
+  }
+}

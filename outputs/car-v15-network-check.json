@@ -1,0 +1,12 @@
+{
+  "index": {
+    "status": 200,
+    "bytes": 7936,
+    "sha256": "a6560bc539daa58048ecf76c37489382e8fc4558ddf6fb02f405a5e0835516a9"
+  },
+  "bmw-quarter-refined-v15.glb": {
+    "status": 200,
+    "bytes": 17800728,
+    "sha256": "6f04e5ccd4b7387d1cf926e218e05ec2b82080c7b8519353519594038db4366f"
+  }
+}

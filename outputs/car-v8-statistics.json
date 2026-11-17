@@ -1,0 +1,11 @@
+{
+  "version": 8,
+  "method": "Quick geometric blockout, rear wheels reused from front",
+  "objects": 379,
+  "vertices": 395182,
+  "triangles": 781216,
+  "bytes": 9645812,
+  "MiB": 9.199,
+  "wheels": 4,
+  "scope": "Full exterior blockout; no interior detail"
+}

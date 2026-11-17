@@ -1,0 +1,30 @@
+{
+  "checked_utc": "2026-11-17T05:24:49.029322+00:00",
+  "url": "https://calgary-surely-certificates-opposed.trycloudflare.com/car-v23.html?detail=surface",
+  "files": {
+    "index": {
+      "status": 200,
+      "bytes": 5983,
+      "sha256": "436669432b5591c5bc8d1190414b559ed9f233ba3f7fe56d5ff0d08bd9cb11df",
+      "resolution": "system DNS"
+    },
+    "car-v23.html": {
+      "status": 200,
+      "bytes": 5983,
+      "sha256": "436669432b5591c5bc8d1190414b559ed9f233ba3f7fe56d5ff0d08bd9cb11df",
+      "resolution": "system DNS"
+    },
+    "viewer-v23.js": {
+      "status": 200,
+      "bytes": 15221,
+      "sha256": "3a7803f90f1628e500ffb34aaf062a5098302691211ec1e8b8019384871a102c",
+      "resolution": "system DNS"
+    },
+    "bmw-surface-normals-v23.glb": {
+      "status": 200,
+      "bytes": 36832948,
+      "sha256": "c7cbb58bfe626803dd3c045d416fcd327f20d99076221c13293a9703b428cc49",
+      "resolution": "system DNS"
+    }
+  }
+}

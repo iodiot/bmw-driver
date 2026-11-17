@@ -1,0 +1,83 @@
+{
+  "dimensions_mm": {
+    "length_mm": 4910.0000858306885,
+    "body_width_mm": 1891.9999599456787,
+    "height_from_ground_mm": 1450.9999752044678,
+    "mirror_width_mm": 2118.99995803833,
+    "wheelbase_mm": 2964.0,
+    "front_track_mm": 1627.0,
+    "rear_track_mm": 1582.0,
+    "front_overhang_mm": 836.000078201294,
+    "rear_overhang_mm": 1110.0000076293945
+  },
+  "lamp_sections": {
+    "Taillamp_Right_Outer_Lens": {
+      "closed": true,
+      "thickness_mm": [
+        2.7997859304059767,
+        2.8002060292510516
+      ],
+      "frontmost_x_mm": -2241.750478744507
+    },
+    "Taillamp_Right_Inner_Lens": {
+      "closed": true,
+      "thickness_mm": [
+        2.79998779296875,
+        2.8002262115478516
+      ],
+      "frontmost_x_mm": -2546.2963581085205
+    },
+    "Taillamp_Left_Outer_Lens": {
+      "closed": true,
+      "thickness_mm": [
+        2.7997859304059767,
+        2.8002060292510516
+      ],
+      "frontmost_x_mm": -2241.750478744507
+    },
+    "Taillamp_Left_Inner_Lens": {
+      "closed": true,
+      "thickness_mm": [
+        2.79998779296875,
+        2.8002262115478516
+      ],
+      "frontmost_x_mm": -2546.2963581085205
+    }
+  },
+  "maximum_outer_lamp_symmetry_error_mm": 0.0,
+  "real_body_opening_ray_checks": {
+    "Rear": {
+      "body_occludes_lens": false,
+      "nearest_body_behind_ray_origin_m": null,
+      "lens_point_mm": [
+        -2530.094861984253,
+        788.7662649154663,
+        654.9635529518127
+      ],
+      "outward_normal": [
+        -0.9811935424804688,
+        -0.010419484227895737,
+        0.192745178937912
+      ]
+    },
+    "Side": {
+      "body_occludes_lens": false,
+      "nearest_body_behind_ray_origin_m": 1.9459901747471366,
+      "lens_point_mm": [
+        -2287.6737117767334,
+        816.5996670722961,
+        925.8915185928345
+      ],
+      "outward_normal": [
+        -0.04983121529221535,
+        0.0012449059868231416,
+        0.9987568855285645
+      ]
+    }
+  },
+  "minimum_curve_radius_mm": 104.11118911779229,
+  "housing_depth_mm": 56,
+  "other_meshes_preserved": 531,
+  "animation_clips": 7,
+  "wheel_spin_groups": 4
+}

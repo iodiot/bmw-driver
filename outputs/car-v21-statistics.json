@@ -1,0 +1,15 @@
+{
+  "version": 21,
+  "objects": 604,
+  "vertices": 513552,
+  "triangles": 1009430,
+  "bytes": 22211288,
+  "MiB": 21.182,
+  "wheel_spin_groups": 4,
+  "panel_animation_clips": 6,
+  "method": "Wrapped outer rear lamps and rounded quarter-panel openings; no SF3D generation",
+  "outer_lamp_spine_length_mm": 533.89,
+  "body_panels_rebuilt": 8,
+  "body_triangles_cut": 6490,
+  "lens_thickness_mm": 2.8
+}

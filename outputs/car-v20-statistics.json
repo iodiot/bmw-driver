@@ -1,0 +1,17 @@
+{
+  "version": 20,
+  "objects": 604,
+  "vertices": 470563,
+  "triangles": 923689,
+  "bytes": 19989556,
+  "MiB": 19.064,
+  "wheel_spin_groups": 4,
+  "panel_animation_clips": 6,
+  "method": "Explicit rear-lamp construction; no new SF3D generation",
+  "rear_lamp_meshes": 126,
+  "closed_lens_sections": 4,
+  "lens_thickness_mm": 2.8,
+  "guide_to_lens_gap_x_mm": 9.2,
+  "housing_depth_mm": 56,
+  "bumper_anchor_adjustment_mm": 15.269
+}

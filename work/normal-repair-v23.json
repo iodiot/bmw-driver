@@ -1,0 +1,296 @@
+{
+  "meshes": {
+    "Cabin_pillars_and_roof_rail_Left": {
+      "vertices_before": 3680,
+      "vertices_after": 6552,
+      "triangles": 8812,
+      "physically_closed": true
+    },
+    "Cabin_pillars_and_roof_rail_Right": {
+      "vertices_before": 3680,
+      "vertices_after": 6552,
+      "triangles": 8812,
+      "physically_closed": true
+    },
+    "Fender_Right_outer": {
+      "vertices_before": 5150,
+      "vertices_after": 13426,
+      "triangles": 23528,
+      "physically_closed": true
+    },
+    "Fender_Left_outer": {
+      "vertices_before": 5150,
+      "vertices_after": 13426,
+      "triangles": 23528,
+      "physically_closed": true
+    },
+    "Hood_shell": {
+      "vertices_before": 15714,
+      "vertices_after": 16418,
+      "triangles": 31424,
+      "physically_closed": true
+    },
+    "Windshield": {
+      "vertices_before": 14162,
+      "vertices_after": 14834,
+      "triangles": 28320,
+      "physically_closed": true
+    },
+    "Roof": {
+      "vertices_before": 20114,
+      "vertices_after": 20914,
+      "triangles": 40224,
+      "physically_closed": true
+    },
+    "Rear_windshield": {
+      "vertices_before": 14162,
+      "vertices_after": 14834,
+      "triangles": 28320,
+      "physically_closed": true
+    },
+    "Body_door_jambs_Right": {
+      "vertices_before": 6492,
+      "vertices_after": 39778,
+      "triangles": 72984,
+      "physically_closed": true
+    },
+    "Window_Left_Front": {
+      "vertices_before": 2240,
+      "vertices_after": 2760,
+      "triangles": 4560,
+      "physically_closed": true
+    },
+    "Window_frame_Left_Front": {
+      "vertices_before": 3468,
+      "vertices_after": 5018,
+      "triangles": 6952,
+      "physically_closed": true
+    },
+    "Door_skin_Front_Right": {
+      "vertices_before": 4228,
+      "vertices_after": 30806,
+      "triangles": 58752,
+      "physically_closed": true
+    },
+    "Door_trim_Front_Right": {
+      "vertices_before": 1974,
+      "vertices_after": 2442,
+      "triangles": 3944,
+      "physically_closed": true
+    },
+    "Window_Left_Rear": {
+      "vertices_before": 2338,
+      "vertices_after": 2874,
+      "triangles": 4808,
+      "physically_closed": true
+    },
+    "Window_frame_Left_Rear": {
+      "vertices_before": 3578,
+      "vertices_after": 5172,
+      "triangles": 7188,
+      "physically_closed": true
+    },
+    "Door_skin_Rear_Right": {
+      "vertices_before": 3704,
+      "vertices_after": 33788,
+      "triangles": 64020,
+      "physically_closed": true
+    },
+    "Door_trim_Rear_Right": {
+      "vertices_before": 1560,
+      "vertices_after": 1958,
+      "triangles": 3116,
+      "physically_closed": true
+    },
+    "Body_door_jambs_Left": {
+      "vertices_before": 6492,
+      "vertices_after": 39778,
+      "triangles": 72984,
+      "physically_closed": true
+    },
+    "Window_Right_Front": {
+      "vertices_before": 2240,
+      "vertices_after": 2760,
+      "triangles": 4560,
+      "physically_closed": true
+    },
+    "Window_frame_Right_Front": {
+      "vertices_before": 3468,
+      "vertices_after": 5018,
+      "triangles": 6952,
+      "physically_closed": true
+    },
+    "Door_skin_Front_Left": {
+      "vertices_before": 4228,
+      "vertices_after": 30806,
+      "triangles": 58752,
+      "physically_closed": true
+    },
+    "Door_trim_Front_Left": {
+      "vertices_before": 1974,
+      "vertices_after": 2442,
+      "triangles": 3944,
+      "physically_closed": true
+    },
+    "Window_Right_Rear": {
+      "vertices_before": 2338,
+      "vertices_after": 2874,
+      "triangles": 4808,
+      "physically_closed": true
+    },
+    "Window_frame_Right_Rear": {
+      "vertices_before": 3578,
+      "vertices_after": 5172,
+      "triangles": 7188,
+      "physically_closed": true
+    },
+    "Door_skin_Rear_Left": {
+      "vertices_before": 3704,
+      "vertices_after": 33788,
+      "triangles": 64020,
+      "physically_closed": true
+    },
+    "Door_trim_Rear_Left": {
+      "vertices_before": 1560,
+      "vertices_after": 1958,
+      "triangles": 3116,
+      "physically_closed": true
+    },
+    "Trunk_lid": {
+      "vertices_before": 19190,
+      "vertices_after": 19966,
+      "triangles": 38376,
+      "physically_closed": true
+    }
+  },
+  "diagnostics": {
+    "Cabin_pillars_and_roof_rail_Left": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Cabin_pillars_and_roof_rail_Right": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Fender_Right_outer": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Fender_Left_outer": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Hood_shell": {
+      "old_boundary_error_deg_p50_p95_max": [
+        42.558548235945835,
+        46.84979586136,
+        56.02862649113971
+      ],
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Windshield": {
+      "old_boundary_error_deg_p50_p95_max": [
+        38.523401639826325,
+        58.83525108335611,
+        63.84388901810726
+      ],
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Roof": {
+      "old_boundary_error_deg_p50_p95_max": [
+        41.32135178811,
+        41.882349273760695,
+        48.65967974342614
+      ],
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Rear_windshield": {
+      "old_boundary_error_deg_p50_p95_max": [
+        40.94973177597862,
+        54.38003102081567,
+        60.312241077439886
+      ],
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Body_door_jambs_Right": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Window_Left_Front": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Window_frame_Left_Front": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Door_skin_Front_Right": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Door_trim_Front_Right": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Window_Left_Rear": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Window_frame_Left_Rear": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Door_skin_Rear_Right": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Door_trim_Rear_Right": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Body_door_jambs_Left": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Window_Right_Front": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Window_frame_Right_Front": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Door_skin_Front_Left": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Door_trim_Front_Left": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Window_Right_Rear": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Window_frame_Right_Rear": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Door_skin_Rear_Left": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Door_trim_Rear_Left": {
+      "old_boundary_error_deg_p50_p95_max": null,
+      "repaired_boundary_error_deg": 0.0
+    },
+    "Trunk_lid": {
+      "old_boundary_error_deg_p50_p95_max": [
+        33.217799746930034,
+        43.17275281972628,
+        52.62077674003974
+      ],
+      "repaired_boundary_error_deg": 0.0
+    }
+  }
+}

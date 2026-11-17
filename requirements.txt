@@ -1,0 +1,9 @@
+numpy
+trimesh
+scipy
+shapely
+triangle
+mapbox-earcut
+Pillow
+requests
+pymupdf

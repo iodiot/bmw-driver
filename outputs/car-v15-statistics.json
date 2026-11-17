@@ -1,0 +1,12 @@
+{
+  "version": 15,
+  "objects": 449,
+  "vertices": 521392,
+  "triangles": 1020375,
+  "bytes": 17800728,
+  "MiB": 16.976,
+  "method": "Rear quarter / trunk refinement; no new SF3D generation",
+  "retained_meshes_identical": 434,
+  "wheel_spin_groups": 4,
+  "shared_quarter_shoulder_boundary_error_mm": 0.0
+}

@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {DrivingSimulation} from '../outputs/bmw-viewer/driving-physics-v16.js';
+const dt=1/120;
+const tick=(s,input,n)=>{for(let i=0;i<n;i++)s.step(dt,input,true);};
+const a=new DrivingSimulation();tick(a,{},120);assert(Math.abs(a.x-8.333333)<.01);assert.equal(a.z,0);
+tick(a,{accelerate:true},240);assert(a.speed>17);assert(a.pitch>0);
+const beforeBrake=a.speed;tick(a,{brake:true},60);assert(a.speed<beforeBrake);assert(a.pitch<0);
+tick(a,{brake:true},600);assert.equal(a.speed,0);assert(a.speed>=0);
+const left=new DrivingSimulation(),right=new DrivingSimulation();tick(left,{left:true},120);tick(right,{right:true},120);
+assert(left.z<0&&right.z>0);assert(left.roll>0&&right.roll<0);assert(Math.abs(left.z+right.z)<1e-9);assert(Math.abs(left.roll+right.roll)<1e-9);
+const turnRoll=left.roll;tick(left,{},480);assert(Math.abs(left.roll)<.0001);assert(Math.abs(turnRoll)>.02);assert(Math.abs(left.steer)<.0001);
+const paused=new DrivingSimulation();paused.step(1/30,{accelerate:true,left:true},false);assert.equal(paused.x,0);assert.equal(paused.distance,0);
+console.log(JSON.stringify({motion:true,acceleration:true,brakingToZero:true,symmetricSteering:true,outwardBodyRoll:true,suspensionReturnsToLevel:true,pause:true,turnRollDegrees:turnRoll*180/Math.PI}));

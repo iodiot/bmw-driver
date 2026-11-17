@@ -1,0 +1,118 @@
+{
+  "server": "glowrush_3d",
+  "backend": "Stable Fast 3D",
+  "body_prompt_id": "64a8455f-0449-4f61-af37-d90e6951b24c",
+  "wheel_prompt_id": "4b27397d-3dae-434b-8b79-92b26372cd1b",
+  "body_workflow": {
+    "1": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "bmw-f10-shell-v4.png"
+      }
+    },
+    "2": {
+      "class_type": "StableFast3DLoader",
+      "inputs": {}
+    },
+    "3": {
+      "class_type": "StableFast3DSampler",
+      "inputs": {
+        "model": [
+          "2",
+          0
+        ],
+        "image": [
+          "1",
+          0
+        ],
+        "mask": [
+          "5",
+          0
+        ],
+        "foreground_ratio": 0.9,
+        "texture_resolution": 2048,
+        "remesh": "triangle",
+        "vertex_count": 20000
+      }
+    },
+    "4": {
+      "class_type": "StableFast3DSave",
+      "inputs": {
+        "mesh": [
+          "3",
+          0
+        ],
+        "filename_prefix": "BMW-F10-Shell-v4"
+      }
+    },
+    "5": {
+      "class_type": "InvertMask",
+      "inputs": {
+        "mask": [
+          "1",
+          1
+        ]
+      }
+    }
+  },
+  "wheel_workflow": {
+    "1": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "bmw-f10-wheel-v4.png"
+      }
+    },
+    "2": {
+      "class_type": "StableFast3DLoader",
+      "inputs": {}
+    },
+    "3": {
+      "class_type": "StableFast3DSampler",
+      "inputs": {
+        "model": [
+          "2",
+          0
+        ],
+        "image": [
+          "1",
+          0
+        ],
+        "mask": [
+          "5",
+          0
+        ],
+        "foreground_ratio": 0.9,
+        "texture_resolution": 2048,
+        "remesh": "triangle",
+        "vertex_count": 20000
+      }
+    },
+    "4": {
+      "class_type": "StableFast3DSave",
+      "inputs": {
+        "mesh": [
+          "3",
+          0
+        ],
+        "filename_prefix": "BMW-F10-Wheel-v4"
+      }
+    },
+    "5": {
+      "class_type": "InvertMask",
+      "inputs": {
+        "mask": [
+          "1",
+          1
+        ]
+      }
+    }
+  },
+  "postprocessing": [
+    "Body axis alignment and scale",
+    "Open wheel arches",
+    "Welded-position surface smoothing with original UVs retained",
+    "Circular tire circumference and separate rubber material",
+    "Four independent wheel pivots",
+    "glTF wheel rotation animation"
+  ]
+}

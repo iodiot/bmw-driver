@@ -1,0 +1,9 @@
+*.glb binary
+*.pdf binary
+*.npz binary
+*.npy binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.hdr binary

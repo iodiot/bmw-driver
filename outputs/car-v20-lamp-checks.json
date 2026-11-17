@@ -1,0 +1,18 @@
+{
+  "Outer": {
+    "cover_watertight": true,
+    "cover_thickness_x_mm": 2.8,
+    "guide_front_depth_mm": 12,
+    "cover_back_depth_mm": 2.8,
+    "minimum_guide_to_cover_gap_x_mm": 9.2,
+    "housing_depth_mm": 56
+  },
+  "Inner": {
+    "cover_watertight": true,
+    "cover_thickness_x_mm": 2.8,
+    "guide_front_depth_mm": 12,
+    "cover_back_depth_mm": 2.8,
+    "minimum_guide_to_cover_gap_x_mm": 9.2,
+    "housing_depth_mm": 56
+  }
+}

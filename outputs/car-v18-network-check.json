@@ -1,0 +1,36 @@
+{
+  "checked_utc": "2026-11-16T16:34:22.688735+00:00",
+  "url": "https://country-win-determines-fell.trycloudflare.com/?version=18",
+  "files": {
+    "index": {
+      "status": 200,
+      "bytes": 5874,
+      "sha256": "632a99026fb5f667135fd6b62e5c41956eaec5aaa205aa1d60765d87286288aa"
+    },
+    "viewer-v18.js": {
+      "status": 200,
+      "bytes": 12730,
+      "sha256": "622d091b651381419abb7a95ecbe76500374c97dcd4a7134daacbea34f0e75a6"
+    },
+    "glass-sky-v18.js": {
+      "status": 200,
+      "bytes": 1776,
+      "sha256": "d7cbf527e0bdfcc4bca2f5327068f40700ae14c43ca68e40ec61b41d17c8ab1b"
+    },
+    "road-v16.js": {
+      "status": 200,
+      "bytes": 1949,
+      "sha256": "30fda2dac79ea69387b76fa1b3fb0a4e2b7232b99036a25807528a45acd3d7ba"
+    },
+    "driving-physics-v16.js": {
+      "status": 200,
+      "bytes": 2040,
+      "sha256": "b88434d96f777764d0a00fc55f1788c9ae38b79fbbd4096fcd0f6e3618bff637"
+    },
+    "bmw-opening-panels-v18.glb": {
+      "status": 200,
+      "bytes": 14867212,
+      "sha256": "476eb9c8ef2996029c7d9e6df5dd0b464279c4c8de2f4e4a938550e808a37b94"
+    }
+  }
+}

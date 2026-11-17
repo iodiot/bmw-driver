@@ -1,0 +1,26 @@
+{
+  "checked_utc": "2026-11-17T06:13:49.011768+00:00",
+  "url": "https://calgary-surely-certificates-opposed.trycloudflare.com/car-v25.html?paused=1",
+  "files": {
+    "index": {
+      "status": 200,
+      "bytes": 5987,
+      "sha256": "18ac05da90ddda714a188b8a3ab38a556a6ad3c7c3fe39e331c4eefc4defbaa7"
+    },
+    "car-v25.html": {
+      "status": 200,
+      "bytes": 5987,
+      "sha256": "18ac05da90ddda714a188b8a3ab38a556a6ad3c7c3fe39e331c4eefc4defbaa7"
+    },
+    "viewer-v25.js": {
+      "status": 200,
+      "bytes": 15794,
+      "sha256": "254056cba39af42c7bdc92b6ca3c90dd8721f13747b59dad6479e338452abf98"
+    },
+    "bmw-window-frames-v25.glb": {
+      "status": 200,
+      "bytes": 58017332,
+      "sha256": "45aad5377c43d91ce2d49502613a376a03491ed29f3338bf65218b604a7e0944"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "checked_utc": "2026-11-16T17:08:03.773437+00:00",
+  "url": "https://country-win-determines-fell.trycloudflare.com/?version=20&detail=rear",
+  "files": {
+    "index": {
+      "status": 200,
+      "bytes": 5972,
+      "sha256": "a8431297770acb8a8836f2417a39980370c35019f66293f3ef1dcd68c0aa2d67"
+    },
+    "viewer-v20.js": {
+      "status": 200,
+      "bytes": 14123,
+      "sha256": "c97e557d1f79273983074b7842c2547bb1da03a98ac9455335778934483a4c3f"
+    },
+    "bmw-volumetric-taillights-v20.glb": {
+      "status": 200,
+      "bytes": 19989556,
+      "sha256": "f96f6a8214f0ce2910f23306d945557381ed3ea58bf85315a2defd3313009569"
+    }
+  }
+}

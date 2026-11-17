@@ -1,0 +1,28 @@
+{
+  "version": 6,
+  "method": "Explicit geometric construction; not a new Glow Rush generation",
+  "objects": 123,
+  "vertices": 88519,
+  "triangles": 174046,
+  "honeycomb_cells": 405,
+  "grille_slats": 18,
+  "LED_rings": 4,
+  "hood_surface_grid": [
+    97,
+    81
+  ],
+  "bytes": 2561160,
+  "materials": {
+    "paint": 13,
+    "dark": 40,
+    "rubber": 16,
+    "chrome": 29,
+    "housing": 4,
+    "lens": 4,
+    "led": 6,
+    "amber": 2,
+    "glass": 2,
+    "mesh": 3
+  },
+  "scope": "Standalone hood and front module; approximate F10 study, not manufacturer CAD"
+}

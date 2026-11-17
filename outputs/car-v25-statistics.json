@@ -1,0 +1,17 @@
+{
+  "version": 25,
+  "objects": 643,
+  "vertices": 1406100,
+  "triangles": 2239704,
+  "bytes": 58017332,
+  "MiB": 55.33,
+  "wheel_spin_groups": 4,
+  "panel_animation_clips": 6,
+  "method": "Window aperture/frame reconstruction; no new SF3D generation",
+  "new_frame_meshes": 40,
+  "glazed_openings": 6,
+  "profiled_door_frames": 4,
+  "frame_width_mm": 22,
+  "frame_body_clearance_mm": 3.5,
+  "new_raw_generations": 0
+}
