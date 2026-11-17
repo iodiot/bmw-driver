@@ -1,9 +1,0 @@
-{
-  "version": 12,
-  "objects": 384,
-  "vertices": 406449,
-  "triangles": 795306,
-  "bytes": 14308812,
-  "MiB": 13.646,
-  "method": "Uniform side topology and corrected rim/tire fit; no new Glow Rush generation"
-}

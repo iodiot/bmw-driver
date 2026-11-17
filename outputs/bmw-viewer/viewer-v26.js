@@ -1,18 +1,24 @@
-import {reflectSkyOnGlass} from './glass-sky-v18.js?revision=2';
-import {blackAutomotivePaint} from './paint-finish-v19.js';
+import {reflectSkyOnGlass} from './glass-sky-v18.js?revision=sky-motion';
+import {blackAutomotivePaint} from './paint-finish-v19.js?revision=body-pass';
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import {setupEnvironment} from './environment-v12.js';
-import {setupRoad} from './road-v16.js?revision=2';
-import {DrivingSimulation} from './driving-physics-v16.js?revision=2';
+import {setupEnvironment} from './environment-v12.js?revision=sky-motion';
+import {setupRoad} from './road-v16.js?revision=suspension3';
+import {DrivingSimulation} from './driving-physics-v16.js?revision=finish-pass';
 
 const $=s=>document.querySelector(s);
 const query=new URLSearchParams(location.search);
 const projection=query.get('view');
-const compareBefore=query.get('compare')==='before';
-const modelFile=compareBefore?'./bmw-rear-joints-v24.glb?revision=3':'./bmw-perforated-brakes-v26.glb?revision=2';
+const modelFile='./bmw-perforated-brakes-v26.glb?revision=finish-boundary';
 const detailMode=query.get('detail');
+const inspectionAngles={
+ roof:{position:[.35,1.75,1.65],target:[-.48,1.36,.48]},
+ 'front-body':{position:[3.5,1.15,1.9],target:[1.82,.67,.30]},
+ 'rear-arch':{position:[-1.48,.96,2.0],target:[-1.48,.61,.87]},
+ 'front-arch':{position:[1.48,.96,2.0],target:[1.48,.61,.87]}
+};
+let mirrorCameraTouched=false;
 const detailView=['rear','side','surface','joints','lamp','antenna','windshield','rear-glass'].includes(detailMode);
 const scene=new THREE.Scene();
 const extent=projection==='top'?3.05:projection==='front'||projection==='rear'?1.35:projection==='side'?Math.max(1.15,2.8/(innerWidth/innerHeight)):3.3;
@@ -23,11 +29,12 @@ const renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:tru
 renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.9;
 document.body.appendChild(renderer.domElement);renderer.domElement.tabIndex=0;
-renderer.domElement.addEventListener('pointerdown',()=>renderer.domElement.focus({preventScroll:true}));
+renderer.domElement.addEventListener('pointerdown',()=>{mirrorCameraTouched=true;renderer.domElement.focus({preventScroll:true});});
+renderer.domElement.addEventListener('wheel',()=>{mirrorCameraTouched=true;},{passive:true});
 scene.add(new THREE.HemisphereLight(0xdceeff,0x243246,1));
 const key=new THREE.DirectionalLight(0xffffff,2.4);key.position.set(4,6,2);scene.add(key);scene.add(key.target);
 const fill=new THREE.DirectionalLight(0xa0caff,1);fill.position.set(-2,2,-4);scene.add(fill);scene.add(fill.target);
-setupEnvironment(scene,renderer,key);
+const environment=setupEnvironment(scene,renderer,key);
 const road=setupRoad(scene);
 const controls=new OrbitControls(camera,renderer.domElement);controls.target.set(...(detailView?(detailMode==='surface'?[-.53,.98,0]:detailMode==='side'?[-2.4,.81,.76]:[-2.48,.81,.55]):[-.15,.75,0]));
 if(detailMode==='joints'){
@@ -45,13 +52,15 @@ if(detailMode==='windshield'){
 if(detailMode==='rear-glass'){
  camera.position.set(-3.6,1.85,1.05);controls.target.set(-1.65,1.25,0);
 }
+if(detailMode==='mirror'){camera.position.set(-.05,1.15,1.25);controls.target.set(.52,1.07,.97);}
+if(detailMode==='quarter'){const side=query.get('side')==='left'?-1:1;camera.position.set(-3.15,1.60,side*2.25);controls.target.set(-1.98,1.01,side*.73);}
 if(detailMode==='wheel'){camera.position.set(1.482,.48,2.0);controls.target.set(1.482,.34675,.8135);}
-controls.enableDamping=true;controls.autoRotateSpeed=.5;controls.minZoom=.5;controls.maxZoom=6;
+controls.enableDamping=detailMode!=='mirror';controls.update();controls.autoRotateSpeed=.5;controls.minZoom=.5;controls.maxZoom=6;
 const sim=new DrivingSimulation(), input={}, held=new Set();
 const carFrame=new THREE.Group();carFrame.name='Vehicle movement';scene.add(carFrame);
 const bodyMotion=new THREE.Group();bodyMotion.name='Suspended body';bodyMotion.position.y=.55;carFrame.add(bodyMotion);
 let loaded=false, driving=true, hoodRoot, opening=0, steeringPreview=0, rpm=30, spinning=false,tailLightsOn=true;
-let wheelPivots=[], steeringPivots=[], leds=[], rearLeds=[];
+let wheelPivots=[], steeringPivots=[], leds=[], rearLeds=[], suspensionMounts=[];
 const panelRoots={}, panelTargets={}, panelSpecs={
  Hood_pivot:{axis:'z',sign:1,id:'hood',output:'angle'},
  Trunk_pivot:{axis:'z',sign:-1,id:'trunk',output:'trunk-angle'},
@@ -69,8 +78,8 @@ new GLTFLoader().load(modelFile,g=>{
   g.scene.traverse(o=>{
     if(o.name==='Hood_pivot')hoodRoot=o;if(panelSpecs[o.name])panelRoots[o.name]=o;
     if(o.name.startsWith('Wheel_spin_'))wheelPivots.push(o);
-    if(o.name.startsWith('Steering_'))steeringPivots.push(o);
-    if(o.name.startsWith('Steering_')||o.name.startsWith('Rear_mount_'))wheelMounts.push(o);
+    if(/^Steering_(Left|Right)$/.test(o.name))steeringPivots.push(o);
+    if(/^(Steering|Rear_mount)_(Left|Right)$/.test(o.name))wheelMounts.push(o);
     if(o.isMesh){
       if(o.material.name==='Taillamp ruby cover'||o.material.name==='Taillamp clear cover'){
         const ruby=o.material.name==='Taillamp ruby cover',old=o.material;
@@ -84,6 +93,7 @@ new GLTFLoader().load(modelFile,g=>{
         `);};
         o.material.customProgramCacheKey=()=> 'molded-taillamp-cover-v20';
       }
+      if(o.material.name==='Mirror gloss black base')o.material=new THREE.MeshPhysicalMaterial({name:'Mirror gloss black base',color:0x080a0d,metalness:0,roughness:.32,clearcoat:.3,clearcoatRoughness:.25,envMapIntensity:.3,specularIntensity:.25,side:THREE.DoubleSide});
       if(o.material.name==='Black sapphire paint')o.material=blackAutomotivePaint(o.material);
       if(o.material.name==='Reflective automotive glass'&&!o.geometry.attributes.normal)o.geometry.computeVertexNormals();
       if(o.material.name==='Reflective automotive glass')o.material=reflectSkyOnGlass(new THREE.MeshPhysicalMaterial({
@@ -98,9 +108,12 @@ new GLTFLoader().load(modelFile,g=>{
     }
   });
   // Wheel mounts remain level with the road while the sprung body leans.
-  for(const mount of wheelMounts)carFrame.attach(mount);
+  for(const mount of wheelMounts){
+    carFrame.attach(mount);
+    suspensionMounts.push({node:mount,restY:mount.position.y,index:sim.wheels.findIndex(w=>w.name===mount.name)});
+  }
   loaded=true;$('#status').textContent='Ready';
-  document.body.dataset.loaded='true';document.body.dataset.version=compareBefore?'24':'26';document.body.dataset.wheels=wheelPivots.length;
+  document.body.dataset.loaded='true';document.body.dataset.version='26';document.body.dataset.wheels=wheelPivots.length;
 },undefined,e=>{$('#status').hidden=false;$('#status').textContent='Unable to load: '+e.message;});
 
 function setDriving(enabled){
@@ -196,7 +209,7 @@ if(projection){
 if(detailView||projection||query.get('paused')==='1')setDriving(false);
 const clock=new THREE.Clock(), up=new THREE.Vector3(0,1,0);let telemetryTime=0;
 renderer.setAnimationLoop(()=>{
-  const dt=Math.min(clock.getDelta(),1/30), oldHeading=sim.heading, oldPosition=carFrame.position.clone();
+  const dt=Math.min(clock.getDelta(),1/15), oldHeading=sim.heading, oldPosition=carFrame.position.clone();
   sim.step(dt,input,driving&&loaded);
   carFrame.position.set(sim.x,0,sim.z);carFrame.rotation.y=sim.heading;
   const movement=carFrame.position.clone().sub(oldPosition);
@@ -205,6 +218,9 @@ renderer.setAnimationLoop(()=>{
   offset.applyAxisAngle(up,sim.heading-oldHeading);
   controls.target.add(movement);camera.position.copy(controls.target).add(offset);
   bodyMotion.rotation.set(sim.roll,0,sim.pitch);bodyMotion.position.y=.55+sim.heave;
+  for(const mount of suspensionMounts){
+    if(mount.index>=0)mount.node.position.y=mount.restY+sim.wheels[mount.index].offset;
+  }
   for(const [name,root] of Object.entries(panelRoots))root.rotation[panelSpecs[name].axis]=THREE.MathUtils.damp(root.rotation[panelSpecs[name].axis],panelTargets[name],7,dt);
   if(pendingResume&&Object.keys(panelRoots).every(n=>Math.abs(panelRoots[n].rotation[panelSpecs[n].axis])<.006))setDriving(true);
   for(const pivot of steeringPivots){
@@ -226,7 +242,11 @@ renderer.setAnimationLoop(()=>{
   telemetryTime+=dt;
   if(telemetryTime>.1){
     telemetryTime=0;document.body.dataset.panelsOpen=Object.keys(panelRoots).filter(n=>Math.abs(panelRoots[n].rotation[panelSpecs[n].axis])>.03).length;$('#velocity').textContent=driving?Math.round(sim.speed*3.6)+' km/h':pendingResume?'Closing panels…':'Paused';
-    Object.assign(document.body.dataset,{speed:sim.speed.toFixed(3),steering:sim.steer.toFixed(4),roll:sim.roll.toFixed(4),pitch:sim.pitch.toFixed(4),tailLights:String(tailLightsOn),distance:sim.distance.toFixed(2),vehicleX:sim.x.toFixed(2),vehicleZ:sim.z.toFixed(2),driving:String(driving)});
+    Object.assign(document.body.dataset,{speed:sim.speed.toFixed(3),steering:sim.steer.toFixed(4),roll:sim.roll.toFixed(4),pitch:sim.pitch.toFixed(4),tailLights:String(tailLightsOn),heave:sim.heave.toFixed(4),wheelOffsets:sim.wheels.map(w=>w.offset.toFixed(4)).join(','),wheelGround:sim.wheels.map(w=>w.ground.toFixed(4)).join(','),distance:sim.distance.toFixed(2),vehicleX:sim.x.toFixed(2),vehicleZ:sim.z.toFixed(2),driving:String(driving)});
   }
-  controls.update();renderer.render(scene,camera);
+  if(detailMode==='quarter'&&!mirrorCameraTouched){const side=query.get('side')==='left'?-1:1;camera.position.set(-3.15,1.60,side*2.25);controls.target.set(-1.98,1.01,side*.73);}
+  if(detailMode==='mirror-shell'&&!mirrorCameraTouched){camera.position.set(1.05,1.35,1.65);controls.target.set(.54,1.065,.96);}
+  if(detailMode==='mirror'&&!mirrorCameraTouched){camera.position.set(-.08,1.14,1.20);controls.target.set(.53,1.07,.96);}
+  if(inspectionAngles[detailMode]&&!mirrorCameraTouched){camera.position.set(...inspectionAngles[detailMode].position);controls.target.set(...inspectionAngles[detailMode].target);}
+  controls.update();environment.update(dt,camera);renderer.render(scene,camera);
 });

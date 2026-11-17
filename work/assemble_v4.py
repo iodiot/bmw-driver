@@ -21,7 +21,7 @@ v = (v-(lo+hi)/2)/(hi-lo)*[4.91,1.22,1.89]
 v[:,1] += .84
 body.vertices = v
 axles = [1.46,-1.50]
-# Cut empty wheel arches through the AI shell so generated wheel wells cannot cover tires.
+# Cut empty wheel arches through the base shell so generated wheel wells cannot cover tires.
 centres = body.triangles_center
 keep = np.ones(len(body.faces),dtype=bool)
 for x in axles:
