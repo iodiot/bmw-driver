@@ -1,0 +1,56 @@
+{
+  "rotors": {
+    "Rear_copy_Drilled_brake_rotor_Right": {
+      "radius_m": 0.1979999989271164,
+      "thickness_mm": 16,
+      "holes": 72,
+      "hole_diameter_mm": 8.6,
+      "vertices": 5760,
+      "triangles": 11808,
+      "watertight": true,
+      "winding_consistent": true,
+      "euler": -144
+    },
+    "Rear_copy_Drilled_brake_rotor_Left": {
+      "radius_m": 0.1979999989271164,
+      "thickness_mm": 16,
+      "holes": 72,
+      "hole_diameter_mm": 8.6,
+      "vertices": 5760,
+      "triangles": 11808,
+      "watertight": true,
+      "winding_consistent": true,
+      "euler": -144
+    },
+    "Drilled_brake_rotor_Left": {
+      "radius_m": 0.20000000298023224,
+      "thickness_mm": 16,
+      "holes": 72,
+      "hole_diameter_mm": 8.6,
+      "vertices": 5760,
+      "triangles": 11808,
+      "watertight": true,
+      "winding_consistent": true,
+      "euler": -144
+    },
+    "Drilled_brake_rotor_Right": {
+      "radius_m": 0.20000000298023224,
+      "thickness_mm": 16,
+      "holes": 72,
+      "hole_diameter_mm": 8.6,
+      "vertices": 5760,
+      "triangles": 11808,
+      "watertight": true,
+      "winding_consistent": true,
+      "euler": -144
+    }
+  },
+  "original_binary_prefix_preserved": true,
+  "nodes_animations_materials_and_non_brake_meshes_unchanged": true,
+  "exported_glb_reloaded": true,
+  "exported_rotor_topology_verified": true,
+  "planar_cap_normals_verified": true,
+  "other_meshes_identical": true,
+  "buffer_ranges_valid": true,
+  "visual_review": "Wheel close-up: flat steel faces, visible holes, red caliper retained"
+}

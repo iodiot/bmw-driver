@@ -4,8 +4,6 @@
   "version": "0.25.0",
   "scripts": {
     "viewer:install": "npm ci --ignore-scripts --prefix outputs/bmw-viewer",
-    "viewer": "python -m http.server 5195 --bind 127.0.0.1 --directory outputs/bmw-viewer",
-    "ai": "node tools/local-ai.mjs",
-    "ai:status": "node tools/local-ai.mjs status"
+    "viewer": "python -m http.server 5195 --bind 127.0.0.1 --directory outputs/bmw-viewer"
   }
 }

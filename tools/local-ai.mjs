@@ -16,6 +16,7 @@ Requires ignored .local-ai/connection.json with absolute routerRoot and configPa
 The source repository must have a clean committed HEAD. Results stay in a separate worktree.`;
 
 async function main() {
+  throw Error('Local models are disabled for BMW at the owner\'s request.');
   if (!args.length || args.includes('--help')) { console.log(help); return; }
   const connection = JSON.parse(await fs.readFile(path.join(root, '.local-ai/connection.json'), 'utf8'));
   for (const key of ['routerRoot', 'configPath']) {

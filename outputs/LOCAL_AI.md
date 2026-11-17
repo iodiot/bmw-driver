@@ -1,5 +1,7 @@
 # Local coding connection
 
+**Disabled for this project at the owner's request on 2026-11-17.** The project was removed from the router configuration. The instructions below are historical and must not be used unless the owner explicitly enables local models again.
+
 This project uses an independently installed Hybrid Router and Ollama on the Windows machine. The selected model is **qwen2.5-coder:7b**. The BMW project has `cloud: false`; the launcher sends every request with `mode: local`. It never invokes the cloud backend as a fallback.
 
 From the repository folder:
