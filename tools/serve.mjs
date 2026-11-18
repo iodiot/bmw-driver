@@ -12,6 +12,7 @@ if (!Number.isInteger(port) || port < 0 || port > 65535)
   throw new Error('Choose a port between 0 and 65535.');
 const types = {
   '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json',
   '.glb': 'model/gltf-binary',

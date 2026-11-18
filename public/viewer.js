@@ -13,8 +13,23 @@ import { setupBodyWater } from './body-water.js';
 import { setupWipers } from './wipers.js';
 import { setupBrakes } from './brakes.js';
 import { RenderQuality } from './render-quality.js';
+import { setupInstruments } from './instruments.js';
 
 const $ = (s) => document.querySelector(s);
+const instruments = setupInstruments($('#instruments'));
+const settings = $('#settings');
+settings.addEventListener('toggle', () => {
+  if (settings.open) clearInput();
+});
+document.addEventListener('pointerdown', (e) => {
+  if (settings.open && !settings.contains(e.target)) settings.open = false;
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && settings.open) {
+    settings.open = false;
+    settings.querySelector('summary').focus();
+  }
+});
 document.body.dataset.capture = String(new URLSearchParams(location.search).get('capture') === '1');
 const scene = new THREE.Scene();
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -84,7 +99,9 @@ function resetView() {
     controls.update();
     return;
   }
-  const offset = new THREE.Vector3(4.8, 1.9, 5.6).applyAxisAngle(up, heading);
+  const offset = new THREE.Vector3(4.8, 1.9, 5.6)
+    .multiplyScalar(Math.max(1, 0.9 / camera.aspect))
+    .applyAxisAngle(up, heading);
   camera.position.set(x, 0, z).add(offset);
   controls.target.set(x, 0.75, z);
   controls.update();
@@ -134,6 +151,7 @@ $('#pause').onclick = () => setDriving(!driving);
 function restart(x = 0) {
   if (!sim) return;
   sim.reset();
+  instruments.reset();
   exhaust.reset();
   brakes.reset();
   sim.x = x;
@@ -159,7 +177,7 @@ const actions = {
   KeyD: 'right',
 };
 addEventListener('keydown', (e) => {
-  if (e.target.matches('input,textarea,select')) return;
+  if (e.target.closest('input,textarea,select,button,summary,a')) return;
   if (e.code === 'Space') {
     e.preventDefault();
     if (!e.repeat) setDriving(!driving);
@@ -321,8 +339,6 @@ renderer.setAnimationLoop(() => {
     telemetryTime += dt;
     if (telemetryTime > 0.1) {
       telemetryTime = 0;
-      $('#speed').textContent = Math.round(sim.speed * 3.6) + ' km/h';
-      $('#gear').textContent = 'D' + sim.powertrain.gear;
       $('#travel').textContent =
         sim.wheels.map((w) => Math.round(w.compression * 1000)).join(' / ') + ' mm';
       Object.assign(document.body.dataset, {
@@ -346,6 +362,7 @@ renderer.setAnimationLoop(() => {
       });
     }
   }
+  instruments.update(dt, sim, nightMode);
   controls.update(dt);
   rain.update(dt, camera, sim, nightMode);
   document.body.dataset.orbit = String(controls.autoRotate);

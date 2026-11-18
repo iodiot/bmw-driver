@@ -4,6 +4,8 @@
 
 The current driving scene uses the imported BMW M5 F10 model in Black Sapphire Metallic (475). It includes rotating and steering wheels, independent suspension, road bumps and potholes, brake lights, drifting clouds, Orbit and Wireframe controls. Night mode adds a moonlit dusk sky and automatically switches on the low beams and rear running lights.
 
+A compact F10-style instrument cluster sits at the bottom right, with white-lit 0–330 km/h and 0–8000 rpm dials, red needles, the current DCT gear and trip distance. Its smoothly damped needles follow the live driving simulation. The visual layout is adapted from the [original BMW M5 black-panel instruments](https://www.press.bmwgroup.com/usa/article/detail/T0114798EN_US/introducing-the-all-new-5th-generation-bmw-m5?language=en_US). The collapsible Settings menu at the top right holds driving, weather, camera and wireframe controls, plus suspension telemetry; Escape or clicking the scene closes it.
+
 The standard 560 hp / 680 Nm F10 powertrain uses a seven-speed M DCT with automatic upshifts, downshifts and kickdown. The top-right display shows the transmission and current gear (D1–D7). Full-throttle acceleration is calibrated to approximately 0–100 km/h in 4.4 seconds and 0–200 km/h in 13.0 seconds, with the standard electronic limit of 250 km/h, using the [original BMW launch figures](https://www.press.bmwgroup.com/global/article/detail/T0113556EN/the-new-bmw-m5?language=en). The optional 305 km/h M Driver’s Package is not enabled.
 
 Engine ratings, gear ratios, mass, drag and tyre dimensions follow [BMW technical data](https://www.ausmotive.com/downloads/BMW/M5-press-kit-Feb2012.pdf). Drivetrain losses, launch grip, clutch transitions and automatic shift strategy are simplified model assumptions calibrated to the launch figures for ideal dry conditions. The demo initially cruises at 30 km/h; after using the accelerator or brake, releasing the pedals lets it coast.
@@ -39,6 +41,7 @@ For another available port, use `npm start -- --port 0` and open the printed add
 
 ## Controls
 
+- Settings: open or collapse the controls at the top right.
 - Drive / Pause or Space: start and pause driving.
 - W / Up: accelerate; S / Down: brake.
 - A / Left and D / Right: steer.
@@ -53,6 +56,7 @@ For another available port, use `npm start -- --port 0` and open the printed add
 ## Files
 
 - `public/index.html` and `public/viewer.js`: the current interface and scene.
+- `public/instruments.js` and `interface.css`: animated F10-style instruments and the collapsible settings menu.
 - `public/vehicle-rig.js`, `driving-physics.js`, `brake-lights.js` and `headlights.js`: wheel rig, driving and lights.
 - `public/powertrain.js`: standard F10 engine, seven-speed M DCT and speed limiter.
 - `public/brakes.js` and `brake-heat.js`: modeled M Compound brakes and energy-driven rotor heat.

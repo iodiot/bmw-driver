@@ -61,6 +61,7 @@ await build({
 await cp(new URL('../public/assets/', import.meta.url), new URL('assets/', output), {
   recursive: true,
 });
+await cp(new URL('../public/interface.css', import.meta.url), new URL('interface.css', output));
 await cp(
   new URL('../node_modules/three/LICENSE', import.meta.url),
   new URL('THIRD-PARTY-LICENSES.txt', output)
