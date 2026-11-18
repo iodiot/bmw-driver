@@ -27,7 +27,9 @@ const obfuscated = JavaScriptObfuscator.obfuscate(application.outputFiles[0].tex
   identifierNamesGenerator: 'hexadecimal',
   renameGlobals: false,
   stringArray: true,
-  stringArrayEncoding: ['base64'],
+  // Runtime Base64 decoding in numeric/rendering loops overwhelms frame time.
+  // Keep renamed identifiers and string indirection without encoding helpers.
+  stringArrayEncoding: [],
   stringArrayThreshold: 0.7,
   controlFlowFlattening: false,
   deadCodeInjection: false,

@@ -257,7 +257,29 @@ for (let i = 0; i < marker.count; i++)
     Number(wipers.surface.vertexIds.has(i)),
     'Only the front glass can be cleared; rear, side and headlamp glass remain untouched'
   );
-for (let i = 0; i < 70; i++) wipers.update(1 / 60, { raining: true, speed: 20 });
+const sampleWindshield = wipers.surface.sample.bind(wipers.surface);
+let runtimeSamples = 0;
+wipers.surface.sample = (...args) => {
+  runtimeSamples++;
+  return sampleWindshield(...args);
+};
+for (let i = 0; i < 70; i++) {
+  wipers.update(1 / 60, { raining: true, speed: 20 });
+  // The two bottom profile corners straddle the rubber's contact centre.
+  for (const assembly of wipers.group.children) {
+    const positions = assembly.children[2].geometry.attributes.position;
+    for (let j = 0; j < positions.count; j += 4) {
+      const centre = new THREE.Vector3().fromBufferAttribute(positions, j);
+      centre.add(new THREE.Vector3().fromBufferAttribute(positions, j + 3)).multiplyScalar(0.5);
+      const contact = sampleWindshield(wipers.surface.project(centre), 0.0014);
+      assert.ok(
+        contact && centre.distanceTo(contact.point) < 0.002,
+        'Interpolated rubber must follow the glass within 2 mm throughout the stroke'
+      );
+    }
+  }
+}
+assert.equal(runtimeSamples, 0, 'Rain frames must not resample windshield triangles');
 assert.ok(wipers.motion.active && wipers.motion.sweep > 0);
 assert.ok(
   wipers.mask.data.some((v) => v > 0),

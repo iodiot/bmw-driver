@@ -10,6 +10,8 @@ Light exhaust vapor exits all four tailpipes, rises and disperses in the car's w
 
 Rain is independent of Night. It adds falling drops, road ripples, overcast lighting, shorter visibility and a wet reflective asphalt surface in either lighting mode.
 
+Falling rain and ripples use two GPU-instanced draws, with no per-drop CPU animation or per-frame particle-buffer uploads. Wiper shapes are fitted to the windshield once and interpolated during playback. Rendering starts within a four-million-pixel Retina budget and adjusts canvas resolution under sustained load, while keeping the interface sharp and retaining all particles and suspension updates.
+
 Water beads accumulate on painted panels and remain after the rain stops. Gravity drains them slowly; airflow stretches and moves them rearward as speed increases. The paint gradually returns to its dry finish.
 
 The windshield, rear window and side glass also collect beads and longer running drops. Their flow follows the slope of each pane and changes with vehicle speed, while retaining glass transparency.
@@ -54,6 +56,7 @@ For another available port, use `npm start -- --port 0` and open the printed add
 - `public/brakes.js` and `brake-heat.js`: modeled M Compound brakes and energy-driven rotor heat.
 - `public/environment.js`, `road.js`, `road-profile.js` and `rain.js`: sky, weather, asphalt and tyre contact surface.
 - `public/body-water.js` and `wipers.js`: surface drops, automatic front wipers and their synchronized clearing mask.
+- `public/render-quality.js`: bounded Retina resolution and gradual adaptation to sustained frame load.
 - `public/assets/bmw-m5-f10.glb`: the only car asset.
 - `public/assets/ATTRIBUTION.md`: model author, source, license and adaptations.
 - `tools/serve.mjs`: local server.

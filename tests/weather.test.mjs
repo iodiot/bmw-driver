@@ -81,6 +81,18 @@ for (let i = 0; i < 1800; i++) {
   rain.update(1 / 60, camera, state, true);
 }
 const [drops, ripples] = rain.group.children;
+for (const mesh of [drops, ripples]) {
+  assert.ok(mesh.geometry.isInstancedBufferGeometry, 'Weather must stay GPU-instanced');
+  assert.equal(mesh.geometry.attributes.position.count, 4, 'Instances share a single quad');
+  const seeds = mesh.geometry.attributes.rainSeed;
+  const version = seeds.version;
+  rain.update(1 / 60, camera, state, true);
+  assert.equal(
+    seeds.version,
+    version,
+    'Particle animation must not upload per-drop state each frame'
+  );
+}
 assert.equal(drops.geometry.instanceCount, 9600);
 assert.equal(ripples.geometry.instanceCount, 900);
 assert.equal(rain.group.children.length, 2);

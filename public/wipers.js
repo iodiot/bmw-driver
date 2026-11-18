@@ -241,6 +241,7 @@ function strip(segments, profile, material) {
     new Float32Array((segments + 1) * profile.length * 3),
     3
   );
+  positions.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute('position', positions);
   const indices = [];
   for (let i = 0; i < segments; i++)
@@ -381,7 +382,54 @@ export function setupWipers(rig, bodyWater) {
       );
       return p;
     }
-    return { spec, pose, previous: pose(0) };
+    // Fit the flexible blades to the glass once. Runtime only interpolates the
+    // fitted stroke; it does not resample hundreds of windshield triangles or
+    // rebuild vertex normals on every rainy frame.
+    const steps = 64;
+    const strips = [arm.mesh, blade.mesh, rubber.mesh].map((mesh) => ({
+      position: mesh.geometry.attributes.position,
+      frames: [],
+      normals: [],
+      mesh,
+    }));
+    const joints = [];
+    for (let i = 0; i <= steps; i++) {
+      pose(i / steps);
+      for (const strip of strips) {
+        strip.frames.push(strip.position.array.slice());
+        strip.normals.push(strip.mesh.geometry.attributes.normal.array.slice());
+      }
+      joints.push({ position: connector.position.clone(), rotation: connector.quaternion.clone() });
+    }
+    for (const strip of strips) {
+      strip.normal = strip.mesh.geometry.attributes.normal;
+      strip.normal.setUsage(THREE.DynamicDrawUsage);
+    }
+    function cachedPose(sweep) {
+      const frame = THREE.MathUtils.clamp(sweep, 0, 1) * steps;
+      const a = Math.min(Math.floor(frame), steps - 1),
+        b = a + 1,
+        blend = frame - a;
+      for (const strip of strips) {
+        for (let j = 0; j < strip.position.array.length; j++) {
+          strip.position.array[j] = THREE.MathUtils.lerp(
+            strip.frames[a][j],
+            strip.frames[b][j],
+            blend
+          );
+          strip.normal.array[j] = THREE.MathUtils.lerp(
+            strip.normals[a][j],
+            strip.normals[b][j],
+            blend
+          );
+        }
+        strip.position.needsUpdate = strip.normal.needsUpdate = true;
+      }
+      connector.position.lerpVectors(joints[a].position, joints[b].position, blend);
+      connector.quaternion.slerpQuaternions(joints[a].rotation, joints[b].rotation, blend);
+      return wiperPose(spec, sweep);
+    }
+    return { spec, pose: cachedPose, previous: cachedPose(0) };
   });
   return {
     group,

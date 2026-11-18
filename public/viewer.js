@@ -12,13 +12,15 @@ import { setupRain } from './rain.js';
 import { setupBodyWater } from './body-water.js';
 import { setupWipers } from './wipers.js';
 import { setupBrakes } from './brakes.js';
+import { RenderQuality } from './render-quality.js';
 
 const $ = (s) => document.querySelector(s);
 document.body.dataset.capture = String(new URLSearchParams(location.search).get('capture') === '1');
 const scene = new THREE.Scene();
-const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const renderQuality = new RenderQuality(devicePixelRatio);
+renderer.setPixelRatio(renderQuality.resize(innerWidth, innerHeight));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.9;
 document.body.appendChild(renderer.domElement);
@@ -95,6 +97,7 @@ $('#wireframe').onchange = (e) => {
   for (const m of materials) m.wireframe = e.target.checked;
 };
 function applyWeather() {
+  renderQuality.reset();
   environment.setWeather(nightMode, rainMode);
   road.setRain(rainMode);
   rain.setEnabled(rainMode);
@@ -180,6 +183,7 @@ addEventListener('keyup', (e) => {
 addEventListener('blur', clearInput);
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) setDriving(false);
+  renderQuality.reset();
 });
 new GLTFLoader().load(
   './assets/bmw-m5-f10.glb',
@@ -243,11 +247,17 @@ new GLTFLoader().load(
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
+  renderer.setPixelRatio(renderQuality.resize(innerWidth, innerHeight));
   renderer.setSize(innerWidth, innerHeight);
 });
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
-  const dt = Math.min(clock.getDelta(), 1 / 15);
+  const frameDt = clock.getDelta();
+  const dt = Math.min(frameDt, 1 / 15);
+  if (sim && !document.hidden) {
+    const ratio = renderQuality.update(frameDt);
+    if (Math.abs(renderer.getPixelRatio() - ratio) > 0.001) renderer.setPixelRatio(ratio);
+  }
   if (sim) {
     const oldHeading = sim.heading,
       previousBrakeEnergy = sim.brakeEnergy,
