@@ -31,7 +31,7 @@ npm ci --ignore-scripts
 npm start
 ```
 
-Open http://127.0.0.1:52259/ in the Codex browser panel. Keep the server running while using the viewer.
+Open http://127.0.0.1:52259/ in a browser. Keep the server running while using the viewer.
 
 For another available port, use `npm start -- --port 0` and open the printed address.
 
