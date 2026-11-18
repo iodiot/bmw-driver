@@ -78,7 +78,7 @@ html = html.replace(
 );
 html = html.replace('src="./viewer.js"', 'src="./demo.js"');
 html = html.replace(
-  '</body>',
+  /[ \t]*<\/body>/,
   `
   <a class="credits" href="./assets/ATTRIBUTION.md" target="_blank" rel="noopener"
      aria-label="Model credits and license" style="position:fixed;bottom:5px;right:10px;color:#9aa8b8;font:10px system-ui;opacity:.7">Model credits</a>
