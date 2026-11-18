@@ -39,6 +39,18 @@
       font-size: 25px;
       font-weight: 650;
     }
+    .transmission {
+      display: flex;
+      justify-content: flex-end;
+      align-items: baseline;
+      gap: 10px;
+      margin-top: 4px;
+      font-size: 12px;
+    }
+    #gear {
+      font-size: 20px;
+      font-weight: 650;
+    }
     .travel {
       margin-top: 8px;
       font-size: 12px;
@@ -94,6 +106,12 @@
       top: 64px;
       color: #28323c;
     }
+    body[data-capture='true'] header,
+    body[data-capture='true'] .telemetry,
+    body[data-capture='true'] .tools,
+    body[data-capture='true'] .credits {
+      display: none;
+    }
     body[data-night='true'] h1,
     body[data-night='true'] .telemetry,
     body[data-night='true'] #status {
@@ -134,6 +152,9 @@
   <header><h1>BMW M5 F10</h1></header>
   <div class="telemetry" aria-label="Vehicle telemetry">
     <div id="speed">0 km/h</div>
+    <div class="transmission" aria-label="Transmission">
+      <span>7-speed M DCT</span><span id="gear" aria-label="Current gear">D1</span>
+    </div>
     <div class="travel">Suspension compression<span id="travel">0 / 0 / 0 / 0 mm</span></div>
   </div>
   <p id="status" role="status">Preparing wheels…</p>

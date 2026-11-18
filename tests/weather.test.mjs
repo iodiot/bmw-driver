@@ -3,6 +3,42 @@ import * as THREE from 'three';
 import { setupRain } from '../public/rain.js';
 import { setupRoad } from '../public/road.js';
 import { roadHeight } from '../public/road-profile.js';
+import { cloudDrift, createSky, positionCelestialLight } from '../public/environment.js';
+
+const sky = createSky();
+const celestialLight = new THREE.DirectionalLight();
+const savedDrift = cloudDrift.value;
+for (const isNight of [false, true]) {
+  const direction = sky.material.uniforms[isNight ? 'moonDirection' : 'sunDirection'].value;
+  assert.ok(Math.abs(direction.length() - 1) < 1e-12);
+  for (const anchor of [new THREE.Vector3(), new THREE.Vector3(12000, 0, -700)]) {
+    for (const drift of [0, 0.8, 3.2]) {
+      cloudDrift.value = drift;
+      positionCelestialLight(celestialLight, anchor, isNight);
+      const towardLight = celestialLight.position
+        .clone()
+        .sub(celestialLight.target.position)
+        .normalize();
+      assert.ok(
+        towardLight.distanceTo(direction) < 1e-12,
+        'Direct light and the visible celestial source must share a world direction regardless of travel or cloud motion'
+      );
+      assert.ok(celestialLight.target.position.distanceTo(anchor) < 1e-12);
+      const incident = towardLight.clone().negate();
+      const reflected = incident.reflect(new THREE.Vector3(0, 1, 0));
+      assert.ok(
+        reflected.y > 0 &&
+          new THREE.Vector2(reflected.x, reflected.z)
+            .add(new THREE.Vector2(direction.x, direction.z))
+            .length() < 1e-12,
+        'The wet-road specular ray must reflect the actual sky-source direction'
+      );
+    }
+  }
+}
+cloudDrift.value = savedDrift;
+sky.geometry.dispose();
+sky.material.dispose();
 
 const scene = new THREE.Scene();
 const ground = new THREE.Mesh(
@@ -45,8 +81,8 @@ for (let i = 0; i < 1800; i++) {
   rain.update(1 / 60, camera, state, true);
 }
 const [drops, ripples] = rain.group.children;
-assert.equal(drops.geometry.instanceCount, 4800);
-assert.equal(ripples.geometry.instanceCount, 512);
+assert.equal(drops.geometry.instanceCount, 9600);
+assert.equal(ripples.geometry.instanceCount, 900);
 assert.equal(rain.group.children.length, 2);
 const time = drops.material.uniforms.rainTime.value;
 rain.setEnabled(false);

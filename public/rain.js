@@ -26,7 +26,7 @@ export function setupRain(scene) {
     vehiclePosition: { value: new THREE.Vector3() },
     vehicleForward: { value: new THREE.Vector2(1, 0) },
     bodyLean: { value: new THREE.Vector3() },
-    rainColor: { value: new THREE.Color(0xb5c5d2) },
+    rainColor: { value: new THREE.Color(0xe1edf5) },
   };
   const common = `
     attribute vec3 rainSeed;
@@ -67,27 +67,28 @@ export function setupRain(scene) {
       void main() {
         float fallSpeed = 10. + rainSeed.z * 5.;
         vec2 drift = vec2(.7, .22) * rainTime;
-        vec2 offset = mod(rainSeed.xz * 64. + drift - cameraPosition.xz + 32., 64.) - 32.;
+        // Keep more drops close enough to read at the normal driving-camera distance.
+        vec2 offset = mod(rainSeed.xz * 48. + drift - cameraPosition.xz + 24., 48.) - 24.;
         vec3 drop = vec3(cameraPosition.x + offset.x,
-                         fract(rainSeed.y - rainTime * fallSpeed / 18.) * 18.,
+                         fract(rainSeed.y - rainTime * fallSpeed / 16.) * 16.,
                          cameraPosition.z + offset.y);
         vec3 velocity = vec3(.7, -fallSpeed, .22) - cameraVelocity;
         vec4 head = viewMatrix * vec4(drop, 1.);
-        vec4 tail = viewMatrix * vec4(drop - velocity * .012, 1.);
+        vec4 tail = viewMatrix * vec4(drop - velocity * .020, 1.);
         vec2 axis = normalize(tail.xy - head.xy + vec2(.00001));
         vec2 sideways = vec2(axis.y, -axis.x);
         vec4 viewPosition = mix(head, tail, uv.y);
-        viewPosition.xy += sideways * position.x * max(.004, -head.z * .001);
+        viewPosition.xy += sideways * position.x * max(.007, -head.z * .0016);
         gl_Position = projectionMatrix * viewPosition;
 
         vec2 local = localToCar(drop.xz);
         float roof = local.x > -1.3 && local.x < .75 ? 1.43 : .96;
         roof += bodyLean.x + bodyLean.y * local.x - bodyLean.z * local.y;
         float sheltered = abs(local.x) < 2.45 && abs(local.y) < .9 && drop.y < roof ? 1. : 0.;
-        vVisibility = (1. - smoothstep(24., 32., length(offset))) *
-                      smoothstep(.4, 1.2, distance(drop, cameraPosition)) *
+        vVisibility = (1. - smoothstep(18., 24., length(offset))) *
+                      smoothstep(.8, 1.8, distance(drop, cameraPosition)) *
                       smoothstep(0., .15, drop.y - roadHeight(drop.xz)) *
-                      (1. - smoothstep(16., 18., drop.y)) * (1. - sheltered);
+                      (1. - smoothstep(14., 16., drop.y)) * (1. - sheltered);
         vBeam = headlightVisibility(drop);
         vUv = uv;
       }
@@ -100,9 +101,9 @@ export function setupRain(scene) {
       varying float vBeam;
 
       void main() {
-        float crossSection = 1. - smoothstep(.10, .5, abs(vUv.x - .5));
-        float ends = smoothstep(0., .15, vUv.y) * (1. - smoothstep(.6, 1., vUv.y));
-        float alpha = crossSection * ends * vVisibility * mix(.33, .20 + vBeam * .35, night);
+        float crossSection = 1. - smoothstep(.16, .5, abs(vUv.x - .5));
+        float ends = smoothstep(0., .12, vUv.y) * (1. - smoothstep(.7, 1., vUv.y));
+        float alpha = crossSection * ends * vVisibility * mix(.60, .38 + vBeam * .42, night);
         if (alpha < .001) discard;
         vec3 color = mix(rainColor, vec3(1., .93, .82), vBeam * night * .85);
         gl_FragColor = vec4(color, alpha);
@@ -129,7 +130,7 @@ export function setupRain(scene) {
         vec2 hit = fract(rainSeed.xz + floor(cycle) * vec2(.371, .613)) * 36.;
         vec2 offset = mod(hit - cameraPosition.xz + 18., 36.) - 18.;
         vec2 centre = cameraPosition.xz + offset;
-        vec2 horizontal = centre + vec2(position.x, -position.y) * (.045 + age * .28);
+        vec2 horizontal = centre + vec2(position.x, -position.y) * (.06 + age * .36);
         vec3 worldPosition = vec3(horizontal.x, roadHeight(horizontal) + .008, horizontal.y);
         gl_Position = projectionMatrix * viewMatrix * vec4(worldPosition, 1.);
         vec2 local = localToCar(centre);
@@ -150,7 +151,7 @@ export function setupRain(scene) {
       void main() {
         float radius = length((vUv - .5) * 2.);
         float ring = 1. - smoothstep(.04, .15, abs(radius - .72));
-        float alpha = ring * vVisibility * mix(.19, .10 + vBeam * .25, night);
+        float alpha = ring * vVisibility * mix(.32, .18 + vBeam * .32, night);
         if (alpha < .001) discard;
         gl_FragColor = vec4(mix(rainColor, vec3(1., .93, .82), night * vBeam), alpha);
         #include <colorspace_fragment>
@@ -161,8 +162,8 @@ export function setupRain(scene) {
   const group = new THREE.Group();
   group.name = 'Rain and road splashes';
   group.visible = false;
-  const drops = new THREE.Mesh(rainGeometry(4800), streakMaterial);
-  const splashes = new THREE.Mesh(rainGeometry(512), splashMaterial);
+  const drops = new THREE.Mesh(rainGeometry(9600), streakMaterial);
+  const splashes = new THREE.Mesh(rainGeometry(900), splashMaterial);
   drops.name = 'Falling rain';
   splashes.name = 'Rain ripples';
   drops.frustumCulled = splashes.frustumCulled = false;
@@ -170,8 +171,8 @@ export function setupRain(scene) {
   scene.add(group);
   const previousCamera = new THREE.Vector3();
   let cameraReady = false;
-  const dayColor = new THREE.Color(0xb5c5d2);
-  const nightColor = new THREE.Color(0x798da6);
+  const dayColor = new THREE.Color(0xe1edf5);
+  const nightColor = new THREE.Color(0xa2bdd5);
 
   return {
     group,

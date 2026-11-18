@@ -1,4 +1,5 @@
 import { roadHeight } from './road-profile.js';
+import { M5Powertrain, m5Specifications } from './powertrain.js';
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 export const wheelLayout = [
   { name: 'Steering_Left', x: 1.482, z: 0.8135, r: 0.34675 },
@@ -10,14 +11,15 @@ export class DrivingSimulation {
   constructor(layout = wheelLayout) {
     this.layout = layout.map((w) => ({ ...w }));
     this.wheelbase = Math.max(...layout.map((w) => w.x)) - Math.min(...layout.map((w) => w.x));
+    this.powertrain = new M5Powertrain();
     this.reset();
   }
-  reset() {
+  reset(speed = 30 / 3.6) {
     Object.assign(this, {
       x: 0,
       z: 0,
       heading: 0,
-      speed: 8.333333,
+      speed,
       steer: 0,
       roll: 0,
       rollVelocity: 0,
@@ -29,7 +31,9 @@ export class DrivingSimulation {
       yawRate: 0,
       distance: 0,
       pedalUsed: false,
+      brakeEnergy: 0,
     });
+    this.powertrain.reset(this.speed);
     this.wheels = this.layout.map((w) => ({
       ...w,
       offset: 0,
@@ -40,7 +44,7 @@ export class DrivingSimulation {
     }));
   }
   step(dt, input = {}, enabled = true) {
-    if (!enabled) return this;
+    if (!enabled || dt <= 0) return this;
     dt = clamp(dt, 0, 1 / 15);
     const steps = Math.max(1, Math.ceil(dt * 240)),
       h = dt / steps;
@@ -50,14 +54,11 @@ export class DrivingSimulation {
   integrate(dt, input) {
     if (input.accelerate || input.brake) this.pedalUsed = true;
     const previousSpeed = this.speed;
-    const acceleration = input.brake
-      ? -15
-      : input.accelerate
-        ? 6.2 * (1 - this.speed / 55)
-        : this.pedalUsed
-          ? -0.18 - 0.0009 * this.speed * this.speed
-          : 0;
-    this.speed = clamp(this.speed + acceleration * dt, 0, 44.4444);
+    const acceleration = this.powertrain.step(dt, this.speed, input, !this.pedalUsed);
+    this.speed = clamp(this.speed + acceleration * dt, 0, m5Specifications.topSpeed);
+    if (input.brake)
+      this.brakeEnergy +=
+        0.5 * m5Specifications.mass * (previousSpeed * previousSpeed - this.speed * this.speed);
     this.acceleration = (this.speed - previousSpeed) / dt;
     const limit = Math.min(
       (25 * Math.PI) / 180,

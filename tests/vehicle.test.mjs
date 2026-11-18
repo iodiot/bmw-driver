@@ -9,6 +9,7 @@ import { setupHeadlights } from '../public/headlights.js';
 import { exhaustOutlets } from '../public/exhaust.js';
 import { setupBodyWater } from '../public/body-water.js';
 import { setupWipers, wiperSpecs, wiperPose } from '../public/wipers.js';
+import { setupBrakes } from '../public/brakes.js';
 
 // Geometry-only loading in Node: the browser verifies the original textures.
 const bytes = fs.readFileSync(new URL('../public/assets/bmw-m5-f10.glb', import.meta.url));
@@ -304,6 +305,63 @@ for (const w of rig.wheels) {
 }
 console.log(
   'Geometry: 11944 triangles and original normals/UVs preserved; four centred wheels, 1008 triangles each.'
+);
+const originalWheels = rig.wheels.map((w) => ({
+  geometry: w.spin.children[0].geometry,
+  positions: w.spin.children[0].geometry.attributes.position.array.slice(),
+  material: w.spin.children[0].material,
+}));
+const brakeSystem = setupBrakes(rig);
+for (const assembly of brakeSystem.assemblies) {
+  const { wheel, rotor, caliper, spec, scale, index } = assembly;
+  assert.equal(rotor.parent, wheel.spin, 'Rotor rotates with its wheel');
+  assert.equal(
+    caliper.parent,
+    wheel.mount,
+    'Caliper follows suspension/steering and never wheel spin'
+  );
+  assert.equal(wheel.spin.children[0].geometry, originalWheels[index].geometry);
+  assert.deepEqual(
+    wheel.spin.children[0].geometry.attributes.position.array,
+    originalWheels[index].positions
+  );
+  assert.equal(wheel.spin.children[0].material, originalWheels[index].material);
+  assert.ok(
+    (spec.diameter / 2 + 0.03) * scale < wheel.r * 0.7,
+    'Caliper and rotor fit inside the rim barrel'
+  );
+  rig.root.updateMatrixWorld(true);
+  const fixedMatrix = caliper.matrixWorld.clone();
+  const oldPoint = new THREE.Vector3(0.15, 0, 0).applyMatrix4(rotor.matrixWorld);
+  wheel.spin.rotation.z += 0.7;
+  rig.root.updateMatrixWorld(true);
+  assert.deepEqual(caliper.matrixWorld.elements, fixedMatrix.elements);
+  assert.ok(
+    new THREE.Vector3(0.15, 0, 0).applyMatrix4(rotor.matrixWorld).distanceTo(oldPoint) > 0.02
+  );
+  wheel.mount.position.y += 0.03;
+  if (wheel.front) wheel.mount.rotation.y = 0.2;
+  rig.root.updateMatrixWorld(true);
+  assert.ok(!caliper.matrixWorld.equals(fixedMatrix), 'Caliper must move with the wheel upright');
+  wheel.mount.position.y -= 0.03;
+  wheel.mount.rotation.y = 0;
+}
+const blueCaliper = brakeSystem.assemblies[0].caliper.children[0].material;
+const originalBlue = blueCaliper.color.getHex();
+for (let i = 0; i < 600; i++) brakeSystem.update(1 / 60, { energy: 15000, speed: 50 });
+assert.ok(brakeSystem.assemblies[0].metal.emissiveIntensity > 0);
+assert.equal(blueCaliper.color.getHex(), originalBlue, 'Heat cannot recolor the blue calipers');
+assert.equal(blueCaliper.emissive.getHex(), 0);
+assert.equal(
+  brakeSystem.assemblies[0].rotor
+    .getObjectByName('Unheated aluminium disc hat')
+    .material.emissive.getHex(),
+  0
+);
+brakeSystem.reset();
+assert.ok(brakeSystem.assemblies.every((a) => a.metal.emissiveIntensity === 0));
+console.log(
+  'Brakes: four drilled vented rotors, fixed blue calipers, steering/suspension attachment and original wheels preserved.'
 );
 for (const speed of [30, 60, 160]) {
   const results = [];

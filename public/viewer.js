@@ -11,8 +11,10 @@ import { setupExhaust } from './exhaust.js';
 import { setupRain } from './rain.js';
 import { setupBodyWater } from './body-water.js';
 import { setupWipers } from './wipers.js';
+import { setupBrakes } from './brakes.js';
 
 const $ = (s) => document.querySelector(s);
+document.body.dataset.capture = String(new URLSearchParams(location.search).get('capture') === '1');
 const scene = new THREE.Scene();
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setSize(innerWidth, innerHeight);
@@ -37,10 +39,10 @@ const sun = new THREE.DirectionalLight(0xffffff, 2.4);
 sun.position.set(4, 6, 2);
 scene.add(sun);
 scene.add(sun.target);
-const fill = new THREE.DirectionalLight(0xa0caff, 1);
+// Diffuse sky fill must not create a second, unrelated moonlike reflection.
+const fill = new THREE.HemisphereLight(0xa0caff, 0x243246, 1);
 fill.position.set(-2, 2, -4);
 scene.add(fill);
-scene.add(fill.target);
 const environment = setupEnvironment(scene, renderer, sun),
   road = setupRoad(scene);
 const rain = setupRain(scene);
@@ -56,6 +58,7 @@ let rig,
   exhaust,
   bodyWater,
   wipers,
+  brakes,
   nightMode = false,
   rainMode = false,
   driving = false,
@@ -65,6 +68,20 @@ function resetView() {
   const x = sim?.x ?? 0,
     z = sim?.z ?? 0,
     heading = sim?.heading ?? 0;
+  if (rig && new URLSearchParams(location.search).get('detail') === 'brakes') {
+    const wheel = rig.wheels.find((w) => w.front && w.z > 0);
+    const target = new THREE.Vector3(wheel.x, wheel.y, wheel.z).applyAxisAngle(up, heading);
+    target.add(new THREE.Vector3(x, 0, z));
+    const distance = 1.25 / Math.min(1, camera.aspect);
+    const offset = new THREE.Vector3(distance * 0.18, distance * 0.07, distance).applyAxisAngle(
+      up,
+      heading
+    );
+    camera.position.copy(target).add(offset);
+    controls.target.copy(target);
+    controls.update();
+    return;
+  }
   const offset = new THREE.Vector3(4.8, 1.9, 5.6).applyAxisAngle(up, heading);
   camera.position.set(x, 0, z).add(offset);
   controls.target.set(x, 0.75, z);
@@ -115,6 +132,7 @@ function restart(x = 0) {
   if (!sim) return;
   sim.reset();
   exhaust.reset();
+  brakes.reset();
   sim.x = x;
   rig.wheels.forEach((w) => {
     w.spin.rotation.z = 0;
@@ -185,6 +203,7 @@ new GLTFLoader().load(
       exhaust = setupExhaust(scene, rig);
       bodyWater = setupBodyWater(rig);
       wipers = setupWipers(rig, bodyWater);
+      brakes = setupBrakes(rig);
       document.body.dataset.waterGlassMeshes = String(bodyWater.glassMeshes.length);
       document.body.dataset.lowBeams = String(nightMode);
       document.body.dataset.paint = 'Black Sapphire Metallic (475)';
@@ -207,6 +226,7 @@ new GLTFLoader().load(
         layout: JSON.stringify(sim.layout.map(({ name, x, y, z, r }) => ({ name, x, y, z, r }))),
       });
       $('#status').hidden = true;
+      resetView();
       document.querySelectorAll('button').forEach((b) => (b.disabled = false));
       setDriving(new URLSearchParams(location.search).get('paused') !== '1');
     } catch (e) {
@@ -230,6 +250,7 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 1 / 15);
   if (sim) {
     const oldHeading = sim.heading,
+      previousBrakeEnergy = sim.brakeEnergy,
       oldPosition = rig.root.position.clone();
     sim.step(dt, input, driving);
     rig.root.position.set(sim.x, 0, sim.z);
@@ -260,11 +281,15 @@ renderer.setAnimationLoop(() => {
     peaks.roll = Math.max(peaks.roll, Math.abs(sim.roll));
     peaks.pitch = Math.max(peaks.pitch, Math.abs(sim.pitch));
     road.update(sim.x, sim.z);
-    sun.position.set(sim.x + (nightMode ? -4 : 4), 6, sim.z + (nightMode ? -4 : 2));
-    sun.target.position.set(sim.x, 0, sim.z);
-    fill.position.set(sim.x - 2, 2, sim.z - 4);
-    fill.target.position.set(sim.x, 0.7, sim.z);
     const lights = brakeLights.update(dt, Boolean(input.brake), nightMode);
+    brakes.update(dt, {
+      energy: sim.brakeEnergy - previousBrakeEnergy,
+      speed: driving ? sim.speed : 0,
+      raining: rainMode,
+    });
+    document.body.dataset.brakeTemperatures = brakes.heat.discs
+      .map((d) => d.surface.toFixed(1))
+      .join(',');
     wipers.update(dt, { raining: rainMode, speed: driving ? sim.speed : 0 });
     document.body.dataset.wiperSweep = wipers.motion.sweep.toFixed(4);
     document.body.dataset.wipersActive = String(wipers.motion.active);
@@ -287,11 +312,15 @@ renderer.setAnimationLoop(() => {
     if (telemetryTime > 0.1) {
       telemetryTime = 0;
       $('#speed').textContent = Math.round(sim.speed * 3.6) + ' km/h';
+      $('#gear').textContent = 'D' + sim.powertrain.gear;
       $('#travel').textContent =
         sim.wheels.map((w) => Math.round(w.compression * 1000)).join(' / ') + ' mm';
       Object.assign(document.body.dataset, {
         driving: String(driving),
         speed: sim.speed.toFixed(4),
+        gear: String(sim.powertrain.gear),
+        engineRpm: sim.powertrain.rpm.toFixed(0),
+        transmission: '7-speed M DCT',
         steering: sim.steer.toFixed(5),
         roll: sim.roll.toFixed(5),
         pitch: sim.pitch.toFixed(5),
@@ -311,6 +340,6 @@ renderer.setAnimationLoop(() => {
   rain.update(dt, camera, sim, nightMode);
   document.body.dataset.orbit = String(controls.autoRotate);
   document.body.dataset.cameraAzimuth = controls.getAzimuthalAngle().toFixed(4);
-  environment.update(dt, camera);
+  environment.update(dt, camera, rig?.root.position);
   renderer.render(scene, camera);
 });

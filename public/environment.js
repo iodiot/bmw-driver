@@ -2,13 +2,29 @@ import * as THREE from 'three';
 
 // Shared by the visible clouds and their environment reflection.
 export const cloudDrift = { value: 0 };
-export function setupEnvironment(scene, renderer, sun) {
-  const night = { value: 0 };
-  const rain = { value: 0 };
+export const celestialDirections = {
+  sun: new THREE.Vector3(0.45, 0.72, 0.3).normalize(),
+  moon: new THREE.Vector3(-0.75, 0.17, -0.64).normalize(),
+};
+
+export function positionCelestialLight(light, anchor, isNight) {
+  const direction = isNight ? celestialDirections.moon : celestialDirections.sun;
+  light.target.position.copy(anchor);
+  light.position.copy(anchor).addScaledVector(direction, 10);
+  light.target.updateMatrixWorld();
+}
+
+export function createSky(night = { value: 0 }, rain = { value: 0 }) {
   const sky = new THREE.Mesh(
     new THREE.SphereGeometry(300, 48, 24),
     new THREE.ShaderMaterial({
-      uniforms: { cloudDrift, night, rain },
+      uniforms: {
+        cloudDrift,
+        night,
+        rain,
+        sunDirection: { value: celestialDirections.sun },
+        moonDirection: { value: celestialDirections.moon },
+      },
       side: THREE.BackSide,
       depthWrite: false,
       vertexShader: `
@@ -23,6 +39,8 @@ export function setupEnvironment(scene, renderer, sun) {
         uniform float cloudDrift;
         uniform float night;
         uniform float rain;
+        uniform vec3 sunDirection;
+        uniform vec3 moonDirection;
         varying vec3 dir;
 
         float hash(vec3 p) {
@@ -76,10 +94,9 @@ export function setupEnvironment(scene, renderer, sun) {
           white = mix(white, white * vec3(.28, .32, .42), night);
           white = mix(white, mix(vec3(.48, .52, .57), vec3(.13, .16, .21), night), rain * .85);
           color = mix(color, white, cloud * .93);
-          float glow = pow(max(dot(d, normalize(vec3(.45, .72, .3))), 0.), 280.);
+          float glow = pow(max(dot(d, sunDirection), 0.), 280.);
           color += vec3(1., .88, .63) * glow * .8 * (1. - night) * (1. - rain * .95);
 
-          vec3 moonDirection = normalize(vec3(-.75, .17, -.64));
           float moonDot = max(dot(d, moonDirection), 0.);
           float moonDisc = smoothstep(cos(.017), cos(.015), moonDot);
           color += vec3(.22, .29, .45) * pow(moonDot, 950.) * .22 * night;
@@ -95,6 +112,13 @@ export function setupEnvironment(scene, renderer, sun) {
   );
   sky.name = 'Cloud sky sphere';
   sky.frustumCulled = false;
+  return sky;
+}
+
+export function setupEnvironment(scene, renderer, sun) {
+  const night = { value: 0 };
+  const rain = { value: 0 };
+  const sky = createSky(night, rain);
   scene.add(sky);
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = 512;
@@ -148,6 +172,10 @@ export function setupEnvironment(scene, renderer, sun) {
   const pmrem = new THREE.PMREMGenerator(renderer);
   const reflections = new Map([['0-0', pmrem.fromScene(env, 0.03, 0.1, 600)]]);
   scene.environment = reflections.get('0-0').texture;
+  const origin = new THREE.Vector3();
+  let reflectionAge = 0;
+  let currentReflection = '0-0';
+  positionCelestialLight(sun, origin, false);
   return {
     setWeather(isNight, isRain) {
       night.value = isNight ? 1 : 0;
@@ -156,6 +184,8 @@ export function setupEnvironment(scene, renderer, sun) {
       // Each independent day/night and dry/rain combination has one cached reflection.
       if (!reflections.has(key)) reflections.set(key, pmrem.fromScene(env, 0.03, 0.1, 600));
       scene.environment = reflections.get(key).texture;
+      currentReflection = key;
+      reflectionAge = 0;
       scene.environmentIntensity = isNight ? 0.8 : 1;
       if (scene.fog) {
         const horizon = isNight
@@ -170,9 +200,21 @@ export function setupEnvironment(scene, renderer, sun) {
         scene.fog.far = isRain ? 145 : 260;
       }
     },
-    update(dt, camera) {
+    update(dt, camera, anchor = origin) {
       cloudDrift.value += dt * 0.012;
-      scene.environmentRotation.y = cloudDrift.value;
+      // Rotate only the cloud coordinates in the sky shader. Rotating the entire
+      // reflection map would also move the moon away from its visible position.
+      scene.environmentRotation.set(0, 0, 0);
+      reflectionAge += dt;
+      if (reflectionAge >= 8) {
+        const previous = reflections.get(currentReflection);
+        const refreshed = pmrem.fromScene(env, 0.03, 0.1, 600);
+        reflections.set(currentReflection, refreshed);
+        scene.environment = refreshed.texture;
+        previous.dispose();
+        reflectionAge = 0;
+      }
+      positionCelestialLight(sun, anchor, night.value > 0.5);
       sky.position.copy(camera.position);
     },
   };
