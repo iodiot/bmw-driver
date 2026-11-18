@@ -32,11 +32,17 @@
           <label for="rain">Rain <input type="checkbox" id="rain" /></label>
           <label for="wireframe">Wireframe <input type="checkbox" id="wireframe" /></label>
         </div>
-        <div class="suspension">
-          Suspension compression<span id="travel">0 / 0 / 0 / 0 mm</span>
+        <div class="sound-options">
+          <label for="sound">Sound <input type="checkbox" id="sound" checked /></label>
+          <label class="volume-label" for="volume"
+            >Volume <input type="range" id="volume" min="0" max="100" value="55"
+          /></label>
+          <p id="audio-status">Click the scene to enable sound.</p>
+          <a href="./assets/audio/ATTRIBUTION.md" target="_blank" rel="noopener">Sound credits</a>
         </div>
       </div>
     </details>
+    <div class="suspension-display" id="suspension-display" aria-label="Suspension telemetry"></div>
     <div class="instrument-cluster" id="instruments" aria-label="Vehicle instruments"></div>
     <script type="importmap">
       {

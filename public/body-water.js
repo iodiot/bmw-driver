@@ -270,7 +270,7 @@ export function setupBodyWater(rig) {
       uniforms.windshieldBounds.value.copy(bounds);
     },
     update(dt, { raining, speed }) {
-      rig.root.updateMatrixWorld(true);
+      rig.body.updateWorldMatrix(true, false);
       inverseRotation.extractRotation(rig.body.matrixWorld).invert();
       gravity.set(0, -1, 0).transformDirection(inverseRotation);
       state.step(dt, { raining, speed, gravity });

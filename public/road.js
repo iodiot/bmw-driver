@@ -1,6 +1,50 @@
 import * as THREE from 'three';
 import { roadProfileGLSL } from './road-profile.js';
 
+// A small, tileable surface mask is sampled in world space. It stays fixed on
+// the asphalt as the road mesh is recentered and is uploaded only once.
+export function createRoadWetnessTexture(size = 64) {
+  let seed = 4193;
+  const grids = [8, 16, 32].map((width) => ({
+    width,
+    values: Float32Array.from({ length: width * width }, () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 4294967296;
+    }),
+  }));
+  function noise(u, v, { width, values }) {
+    const x = u * width,
+      y = v * width,
+      ix = Math.floor(x),
+      iy = Math.floor(y);
+    const sx = (x - ix) ** 2 * (3 - 2 * (x - ix));
+    const sy = (y - iy) ** 2 * (3 - 2 * (y - iy));
+    const at = (a, b) => values[(b % width) * width + (a % width)];
+    const a = THREE.MathUtils.lerp(at(ix, iy), at(ix + 1, iy), sx);
+    const b = THREE.MathUtils.lerp(at(ix, iy + 1), at(ix + 1, iy + 1), sx);
+    return THREE.MathUtils.lerp(a, b, sy);
+  }
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const u = (x + 0.5) / size,
+        v = (y + 0.5) / size;
+      const value =
+        noise(u, v, grids[0]) * 0.66 + noise(u, v, grids[1]) * 0.24 + noise(u, v, grids[2]) * 0.1;
+      const i = (y * size + x) * 4;
+      data[i] = data[i + 1] = data[i + 2] = Math.round(value * 255);
+      data[i + 3] = 255;
+    }
+  const texture = new THREE.DataTexture(data, size, size);
+  texture.name = 'Asphalt water film variation';
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 // Dense tyre-contact area, with progressively larger cells toward the horizon.
 // A single connected surface keeps the distant asphalt present in every direction.
 export function createRoadGeometry() {
@@ -72,8 +116,10 @@ export function createRoadGeometry() {
 export function setupRoad(scene) {
   const ground = scene.getObjectByName('Asphalt ground');
   const roadCenter = { value: new THREE.Vector2() };
+  const roadWetness = { value: 0 };
   scene.fog = new THREE.Fog(new THREE.Color().setRGB(0.78, 0.88, 0.98), 100, 260);
   if (ground) {
+    const wetnessTexture = createRoadWetnessTexture();
     ground.geometry.dispose();
     ground.geometry = createRoadGeometry();
     ground.material.map.repeat.set(2800, 2800);
@@ -86,6 +132,8 @@ export function setupRoad(scene) {
     // antialiasing and a distance fade instead of coplanar strip geometry.
     ground.material.onBeforeCompile = (shader) => {
       shader.uniforms.roadCenter = roadCenter;
+      shader.uniforms.roadWetness = roadWetness;
+      shader.uniforms.roadWetnessMap = { value: wetnessTexture };
       const visibleProfile =
         'uniform vec2 roadCenter;\n' +
         roadProfileGLSL +
@@ -117,7 +165,10 @@ export function setupRoad(scene) {
         '#include <worldpos_vertex>',
         '#include <worldpos_vertex>\nvRoadXZ = (modelMatrix * vec4(transformed, 1.0)).xz;'
       );
-      shader.fragmentShader = 'varying vec2 vRoadXZ;\n' + visibleProfile + shader.fragmentShader;
+      shader.fragmentShader =
+        'varying vec2 vRoadXZ;\nuniform float roadWetness;\nuniform sampler2D roadWetnessMap;\n' +
+        visibleProfile +
+        shader.fragmentShader;
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <map_fragment>',
         `#include <map_fragment>
@@ -140,20 +191,46 @@ export function setupRoad(scene) {
         diffuseColor.rgb *= 1. - .5 * smoothstep(.003, .045, -height);
       `
       );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+        float roadFilm = 0.;
+        if (roadWetness > .001) {
+          float waterMask = texture2D(roadWetnessMap, vRoadXZ / 32.).r;
+          roadFilm = smoothstep(.32, .75, waterMask);
+          float unresolvedFilm = smoothstep(25., 75., length(cameraPosition.xz - vRoadXZ));
+          roadFilm = mix(roadFilm, .48, unresolvedFilm);
+          roughnessFactor = mix(.90, .60, roadFilm);
+          diffuseColor.rgb *= mix(1., .9, roadFilm);
+        }
+      `
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <lights_physical_fragment>',
+        `#include <lights_physical_fragment>
+        #ifdef USE_CLEARCOAT
+          material.clearcoat *= mix(1., mix(.4, 1.35, roadFilm), roadWetness);
+          material.clearcoatRoughness = min(1., mix(material.clearcoatRoughness,
+            mix(.52, .28, roadFilm) + geometryRoughness, roadWetness));
+        #endif
+      `
+      );
     };
-    ground.material.customProgramCacheKey = () => 'continuous-asphalt-horizon';
+    ground.material.customProgramCacheKey = () => 'continuous-asphalt-water-film';
     ground.material.needsUpdate = true;
   }
 
   return {
     setRain(enabled) {
+      roadWetness.value = enabled ? 1 : 0;
       if (!ground) return;
       const material = ground.material;
-      material.color.set(enabled ? 0x7d8792 : 0xc8c8c8);
-      material.roughness = enabled ? 0.38 : 1;
-      material.clearcoat = enabled ? 1 : 0;
-      material.envMapIntensity = enabled ? 1.3 : 1;
-      material.bumpScale = enabled ? 0.001 : 0.003;
+      material.color.set(enabled ? 0xa3a9af : 0xc8c8c8);
+      material.roughness = enabled ? 0.75 : 1;
+      material.clearcoat = enabled ? 0.55 : 0;
+      material.clearcoatRoughness = enabled ? 0.4 : 0.12;
+      material.envMapIntensity = enabled ? 1.05 : 1;
+      material.bumpScale = enabled ? 0.0018 : 0.003;
       material.needsUpdate = true;
     },
     update(x, z) {

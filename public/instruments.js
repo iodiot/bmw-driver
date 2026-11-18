@@ -27,6 +27,25 @@ export class InstrumentMotion {
   }
 }
 
+export class DscIndicatorMotion {
+  constructor() {
+    this.reset();
+  }
+  reset() {
+    this.elapsed = 0;
+    this.active = this.visible = false;
+  }
+  update(dt, active) {
+    if (!active) this.reset();
+    else {
+      if (this.active) this.elapsed += clamp(dt, 0, 1 / 15);
+      this.active = true;
+      this.visible = this.elapsed % (1 / 3) < 1 / 6;
+    }
+    return this;
+  }
+}
+
 function point(cx, cy, radius, angle) {
   const radians = (angle * Math.PI) / 180;
   return [cx + Math.sin(radians) * radius, cy - Math.cos(radians) * radius];
@@ -57,7 +76,7 @@ function dial(cx, maximum, major, minor, name) {
     <path d="${arc(cx, cy, 111, gaugeAngle(7.2, 8), gaugeAngle(8, 8))}" class="rpm-redline"/>`
       : '';
   return `
-    <circle cx="${cx}" cy="${cy}" r="117" fill="url(#dial-face)"/>
+    <circle cx="${cx}" cy="${cy}" r="117" class="dial-face"/>
     <circle cx="${cx}" cy="${cy}" r="118" class="dial-bezel-shadow"/>
     <circle cx="${cx}" cy="${cy}" r="115" class="dial-bezel"/>
     <path d="${arc(cx, cy, 112, -120, 120)}" class="dial-inner-ring"/>
@@ -114,6 +133,11 @@ export function setupInstruments(container) {
       <g id="low-beam-indicator" transform="translate(318 120) scale(-1 1)" class="low-beam-indicator" visibility="hidden">
         <path d="M6,0 Q-2,0 -2,7 Q-2,14 6,14Z M9,2 l8,-3 M9,6 l8,-3 M9,10 l8,-3 M9,14 l8,-3"/>
       </g>
+      <g id="dsc-indicator" transform="translate(310 86) scale(.62)" class="dsc-indicator" visibility="hidden" aria-label="DSC stabilizing vehicle">
+        <title>Dynamic Stability Control intervention</title>
+        <path d="M-10,1 L-7,-8 Q0,-11 7,-8 L10,1 V12 H-10Z M-7,-6 H7 L8,0 H-8Z M-12,2 H-10 M10,2 H12 M-7,6 H-4 M4,6 H7"/>
+        <path d="M-7,16 C-14,20 0,22 -7,26 S-12,31 -8,34 M7,16 C0,20 14,22 7,26 S2,31 6,34"/>
+      </g>
     </svg>`;
   const svg = container.querySelector('svg');
   const speedNeedle = container.querySelector('#speed-needle');
@@ -122,15 +146,23 @@ export function setupInstruments(container) {
   const gearText = container.querySelector('#gear');
   const tripText = container.querySelector('#trip');
   const lowBeams = container.querySelector('#low-beam-indicator');
+  const dsc = container.querySelector('#dsc-indicator');
+  const warning = new DscIndicatorMotion();
   const motion = new InstrumentMotion();
   let textTime = 0;
   return {
     reset() {
       motion.initialized = false;
+      warning.reset();
+      dsc.setAttribute('visibility', 'hidden');
     },
-    update(dt, simulation, night) {
+    update(dt, simulation, night, driving = true) {
       if (!simulation) return;
       motion.update(dt, simulation.speed, simulation.powertrain.rpm);
+      warning.update(dt, driving && simulation.dscActive);
+      dsc.setAttribute('visibility', warning.visible ? 'visible' : 'hidden');
+      container.dataset.dscActive = String(warning.active);
+      container.dataset.dscVisible = String(warning.visible);
       speedNeedle.setAttribute(
         'transform',
         `rotate(${gaugeAngle(motion.speed, 330).toFixed(3)} 155 137)`
@@ -150,7 +182,7 @@ export function setupInstruments(container) {
         lowBeams.setAttribute('visibility', night ? 'visible' : 'hidden');
         svg.setAttribute(
           'aria-label',
-          `BMW M5 instrument cluster: ${speed} km/h, ${Math.round(simulation.powertrain.rpm)} rpm, gear ${gear}`
+          `BMW M5 instrument cluster: ${speed} km/h, ${Math.round(simulation.powertrain.rpm)} rpm, gear ${gear}${warning.active ? ', DSC intervening' : ''}`
         );
       }
     },

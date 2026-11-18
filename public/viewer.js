@@ -14,9 +14,21 @@ import { setupWipers } from './wipers.js';
 import { setupBrakes } from './brakes.js';
 import { RenderQuality } from './render-quality.js';
 import { setupInstruments } from './instruments.js';
+import { setupSuspensionDisplay } from './suspension-display.js';
+import { GearShiftShake } from './shift-shake.js';
+import { setupVehicleAudio } from './vehicle-audio.js';
+import { setupSkidMarks } from './skid-marks.js';
 
 const $ = (s) => document.querySelector(s);
 const instruments = setupInstruments($('#instruments'));
+const suspensionDisplay = setupSuspensionDisplay($('#suspension-display'));
+const shiftShake = new GearShiftShake();
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const vehicleAudio = setupVehicleAudio({
+  sound: $('#sound'),
+  volume: $('#volume'),
+  status: $('#audio-status'),
+});
 const settings = $('#settings');
 settings.addEventListener('toggle', () => {
   if (settings.open) clearInput();
@@ -76,6 +88,7 @@ let rig,
   bodyWater,
   wipers,
   brakes,
+  skidMarks,
   nightMode = false,
   rainMode = false,
   driving = false,
@@ -124,6 +137,13 @@ function applyWeather() {
   sun.color.set(nightMode ? 0xb6c9ff : 0xffffff);
   fill.intensity = nightMode ? 0.35 : rainMode ? 0.7 : 1;
   headlights?.setNight(nightMode);
+  // Compile hidden tyre trails when lighting changes, before the first slide
+  // makes them visible. The first on-road compilation otherwise caused a hitch.
+  if (skidMarks)
+    renderer
+      .compileAsync(skidMarks.mesh, camera, scene)
+      .then(() => skidMarks.warmup(renderer, camera, scene))
+      .catch(console.error);
   document.body.dataset.night = String(nightMode);
   document.body.dataset.rain = String(rainMode);
   document.body.dataset.lowBeams = String(Boolean(nightMode && headlights));
@@ -151,9 +171,12 @@ $('#pause').onclick = () => setDriving(!driving);
 function restart(x = 0) {
   if (!sim) return;
   sim.reset();
+  cameraFollowHeading = 0;
+  shiftShake.reset(sim.powertrain.gear);
   instruments.reset();
   exhaust.reset();
   brakes.reset();
+  skidMarks.reset();
   sim.x = x;
   rig.wheels.forEach((w) => {
     w.spin.rotation.z = 0;
@@ -205,7 +228,7 @@ document.addEventListener('visibilitychange', () => {
 });
 new GLTFLoader().load(
   './assets/bmw-m5-f10.glb',
-  (g) => {
+  async (g) => {
     try {
       g.scene.traverse((o) => {
         if (o.isMesh && o.material.name === 'M5_F10_Paint') {
@@ -219,8 +242,10 @@ new GLTFLoader().load(
       rig = rigDownloadedCar(g.scene);
       scene.add(rig.root);
       sim = new DrivingSimulation(rig.wheels);
+      skidMarks = setupSkidMarks(scene, sim.layout);
       brakeLights = setupBrakeLights(rig);
       headlights = setupHeadlights(rig);
+      rain.setHeadlights(headlights);
       headlights.setNight(nightMode);
       exhaust = setupExhaust(scene, rig);
       bodyWater = setupBodyWater(rig);
@@ -236,6 +261,8 @@ new GLTFLoader().load(
           for (const m of Array.isArray(o.material) ? o.material : [o.material]) materials.add(m);
         }
       });
+      await renderer.compileAsync(scene, camera);
+      skidMarks.warmup(renderer, camera, scene);
       Object.assign(document.body.dataset, {
         loaded: 'true',
         triangles: String(triangles),
@@ -269,6 +296,9 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 const clock = new THREE.Clock();
+const frameMovement = new THREE.Vector3();
+const frameCameraOffset = new THREE.Vector3();
+let cameraFollowHeading = 0;
 renderer.setAnimationLoop(() => {
   const frameDt = clock.getDelta();
   const dt = Math.min(frameDt, 1 / 15);
@@ -277,19 +307,33 @@ renderer.setAnimationLoop(() => {
     if (Math.abs(renderer.getPixelRatio() - ratio) > 0.001) renderer.setPixelRatio(ratio);
   }
   if (sim) {
-    const oldHeading = sim.heading,
-      previousBrakeEnergy = sim.brakeEnergy,
-      oldPosition = rig.root.position.clone();
-    sim.step(dt, input, driving);
+    const previousBrakeEnergy = sim.brakeEnergy,
+      oldX = rig.root.position.x,
+      oldZ = rig.root.position.z;
+    sim.step(dt, input, driving, { raining: rainMode });
+    shiftShake.update(dt, sim.powertrain.gear, {
+      enabled: driving && !reducedMotion.matches,
+      accelerate: Boolean(input.accelerate),
+      brake: Boolean(input.brake),
+      speed: sim.speed,
+    });
     rig.root.position.set(sim.x, 0, sim.z);
     rig.root.rotation.y = sim.heading;
-    const movement = rig.root.position.clone().sub(oldPosition),
-      offset = camera.position.clone().sub(controls.target);
-    offset.applyAxisAngle(up, sim.heading - oldHeading);
+    const movement = frameMovement.set(sim.x - oldX, 0, sim.z - oldZ),
+      offset = frameCameraOffset.subVectors(camera.position, controls.target);
+    const courseHeading = sim.heading + sim.slipAngle * 0.75;
+    const headingError = Math.atan2(
+      Math.sin(courseHeading - cameraFollowHeading),
+      Math.cos(courseHeading - cameraFollowHeading)
+    );
+    const cameraTurn = headingError * (1 - Math.exp(-dt / 0.3));
+    cameraFollowHeading += cameraTurn;
+    offset.applyAxisAngle(up, cameraTurn);
     controls.target.add(movement);
     camera.position.copy(controls.target).add(offset);
     rig.body.position.y = 0.55 + sim.heave;
     rig.body.rotation.set(sim.roll, 0, sim.pitch);
+    headlights.update(dt);
     for (let i = 0; i < rig.wheels.length; i++) {
       const w = rig.wheels[i],
         state = sim.wheels[i];
@@ -299,7 +343,9 @@ renderer.setAnimationLoop(() => {
         : 0;
       if (driving) {
         const a = w.mount.rotation.y,
-          speed = (sim.speed + sim.yawRate * w.z) * Math.cos(a) + sim.yawRate * w.x * Math.sin(a);
+          speed =
+            (sim.speed + sim.yawRate * w.z) * Math.cos(a) +
+            (sim.lateralVelocity + sim.yawRate * w.x) * Math.sin(a);
         w.spin.rotation.z = (w.spin.rotation.z - (speed / w.r) * dt) % (2 * Math.PI);
       }
       peaks.compression = Math.max(peaks.compression, state.compression);
@@ -309,6 +355,11 @@ renderer.setAnimationLoop(() => {
     peaks.roll = Math.max(peaks.roll, Math.abs(sim.roll));
     peaks.pitch = Math.max(peaks.pitch, Math.abs(sim.pitch));
     road.update(sim.x, sim.z);
+    skidMarks.update(dt, sim, {
+      enabled: driving,
+      braking: Boolean(input.brake),
+      raining: rainMode,
+    });
     const lights = brakeLights.update(dt, Boolean(input.brake), nightMode);
     brakes.update(dt, {
       energy: sim.brakeEnergy - previousBrakeEnergy,
@@ -339,14 +390,21 @@ renderer.setAnimationLoop(() => {
     telemetryTime += dt;
     if (telemetryTime > 0.1) {
       telemetryTime = 0;
-      $('#travel').textContent =
-        sim.wheels.map((w) => Math.round(w.compression * 1000)).join(' / ') + ' mm';
       Object.assign(document.body.dataset, {
         driving: String(driving),
         speed: sim.speed.toFixed(4),
         gear: String(sim.powertrain.gear),
         engineRpm: sim.powertrain.rpm.toFixed(0),
         transmission: '7-speed M DCT',
+        shiftShakeCount: String(shiftShake.events),
+        shiftShakeKind: shiftShake.lastKind,
+        shiftShakeStrength: shiftShake.lastStrength.toFixed(3),
+        skidMarkSegments: String(skidMarks.mesh.visible ? skidMarks.count : 0),
+        slipAngle: sim.slipAngle.toFixed(5),
+        lateralVelocity: sim.lateralVelocity.toFixed(4),
+        tractionLoss: sim.tractionLoss.toFixed(4),
+        dscActive: String(sim.dscActive && driving),
+        brakePressure: sim.brakePressure.toFixed(3),
         steering: sim.steer.toFixed(5),
         roll: sim.roll.toFixed(5),
         pitch: sim.pitch.toFixed(5),
@@ -362,8 +420,17 @@ renderer.setAnimationLoop(() => {
       });
     }
   }
-  instruments.update(dt, sim, nightMode);
+  instruments.update(dt, sim, nightMode, driving);
+  suspensionDisplay.update(dt, sim);
+  vehicleAudio.update(dt, sim, {
+    driving,
+    raining: rainMode,
+    accelerate: Boolean(input.accelerate),
+    brake: Boolean(input.brake),
+    distance: rig ? camera.position.distanceTo(rig.root.position) : 8,
+  });
   controls.update(dt);
+  shiftShake.apply(camera, innerWidth, innerHeight);
   rain.update(dt, camera, sim, nightMode);
   document.body.dataset.orbit = String(controls.autoRotate);
   document.body.dataset.cameraAzimuth = controls.getAzimuthalAngle().toFixed(4);

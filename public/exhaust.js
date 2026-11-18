@@ -184,7 +184,7 @@ export function setupExhaust(scene, rig) {
       opacities.needsUpdate = true;
     },
     update(dt, state, { enabled, accelerate, brake, night }) {
-      rig.root.updateMatrixWorld(true);
+      rig.body.updateWorldMatrix(true, false);
       localOutlets.forEach((p, i) => outlets[i].copy(p).applyMatrix4(rig.body.matrixWorld));
       direction.set(-1, 0, 0).transformDirection(rig.body.matrixWorld);
       vehicleVelocity.set(

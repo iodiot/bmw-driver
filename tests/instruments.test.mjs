@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { gaugeAngle, InstrumentMotion } from '../public/instruments.js';
+import { gaugeAngle, InstrumentMotion, DscIndicatorMotion } from '../public/instruments.js';
 
 test('F10 dial scales convert speed and RPM to the correct needle angles', () => {
   assert.equal(gaugeAngle(0, 330), -120);
@@ -32,4 +32,28 @@ test('Needle damping follows acceleration and gear-change RPM drops at every fra
     assert.equal(motion.rpm, before.rpm, 'A zero-time frame must not move the needles');
   }
   assert.ok(Math.max(...readings) - Math.min(...readings) < 0.002);
+});
+
+test('The amber DSC warning flashes only during intervention and clears on pause or reset', () => {
+  for (const fps of [30, 60, 144]) {
+    const warning = new DscIndicatorMotion();
+    assert.equal(warning.update(1 / fps, false).visible, false);
+    assert.equal(warning.update(1 / fps, true).visible, true);
+    let lit = 0,
+      transitions = 0,
+      previous = warning.visible;
+    for (let i = 0; i < fps; i++) {
+      warning.update(1 / fps, true);
+      lit += warning.visible;
+      transitions += Number(warning.visible !== previous);
+      previous = warning.visible;
+    }
+    assert.ok(transitions >= 5 && transitions <= 6, 'About three flashes per second');
+    assert.ok(lit / fps > 0.43 && lit / fps < 0.57);
+    assert.equal(warning.update(0, false).visible, false);
+    assert.equal(warning.active, false);
+    warning.update(1 / fps, true);
+    warning.reset();
+    assert.equal(warning.visible, false);
+  }
 });

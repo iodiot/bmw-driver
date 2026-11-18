@@ -48,6 +48,14 @@ const ground = new THREE.Mesh(
 ground.name = 'Asphalt ground';
 scene.add(ground);
 const road = setupRoad(scene);
+const roadShader = {
+  uniforms: {},
+  vertexShader: THREE.ShaderLib.physical.vertexShader,
+  fragmentShader: THREE.ShaderLib.physical.fragmentShader,
+};
+ground.material.onBeforeCompile(roadShader);
+const waterFilm = roadShader.uniforms.roadWetnessMap.value;
+const waterFilmVersion = waterFilm.version;
 const rain = setupRain(scene);
 const camera = new THREE.PerspectiveCamera();
 camera.position.set(4, 2, 6);
@@ -58,14 +66,21 @@ for (const night of [false, true]) {
   for (const enabled of [false, true, false]) {
     rain.setEnabled(enabled);
     road.setRain(enabled);
+    assert.equal(roadShader.uniforms.roadWetness.value, Number(enabled));
+    assert.equal(
+      waterFilm.version,
+      waterFilmVersion,
+      'Weather changes must not rebuild the surface texture'
+    );
     rain.update(1 / 60, camera, state, night);
     assert.equal(rain.group.visible, enabled);
     for (const mesh of rain.group.children) {
       assert.equal(mesh.material.uniforms.night.value, Number(night));
       assert.ok(mesh.material.uniforms.cameraVelocity.value.toArray().every(Number.isFinite));
     }
-    assert.equal(ground.material.clearcoat, enabled ? 1 : 0);
-    assert.equal(ground.material.roughness, enabled ? 0.38 : 1);
+    assert.equal(ground.material.clearcoat, enabled ? 0.55 : 0);
+    assert.equal(ground.material.roughness, enabled ? 0.75 : 1);
+    assert.equal(ground.material.clearcoatRoughness, enabled ? 0.4 : 0.12);
     assert.deepEqual(
       [12, 36, 49, 90].map((x) => roadHeight(x, 0.81)),
       heights
@@ -74,6 +89,14 @@ for (const night of [false, true]) {
 }
 assert.equal(ground.material.color.getHex(), 0xc8c8c8);
 assert.equal(ground.material.bumpScale, 0.003);
+assert.equal(ground.material.envMapIntensity, 1);
+road.update(1234, -40);
+assert.equal(roadShader.uniforms.roadWetnessMap.value, waterFilm);
+assert.equal(
+  waterFilm.version,
+  waterFilmVersion,
+  'Recentering the road must not upload a moving water pattern'
+);
 rain.setEnabled(true);
 for (let i = 0; i < 1800; i++) {
   camera.position.x += 0.5;

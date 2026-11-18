@@ -22,6 +22,7 @@ const types = {
   '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml',
   '.wasm': 'application/wasm',
+  '.wav': 'audio/wav',
 };
 
 const server = createServer(async (req, res) => {

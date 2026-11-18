@@ -87,8 +87,9 @@ export function createSky(night = { value: 0 }, rain = { value: 0 }) {
           float c = cos(cloudDrift), s = sin(cloudDrift);
           vec3 p = vec3(c * d.x - s * d.z, d.y, s * d.x + c * d.z) * 6.5;
           p.y *= 2.;
-          float cloud = smoothstep(.49, .68, fbm(p)) * smoothstep(.03, .20, h);
-          cloud = mix(cloud, (.25 + .7 * smoothstep(.2, .65, fbm(p))) *
+          float density = fbm(p);
+          float cloud = smoothstep(.49, .68, density) * smoothstep(.03, .20, h);
+          cloud = mix(cloud, (.25 + .7 * smoothstep(.2, .65, density)) *
                       smoothstep(.02, .15, h), rain);
           vec3 white = mix(vec3(.69, .74, .80), vec3(1.), fbm(p + 5.));
           white = mix(white, white * vec3(.28, .32, .42), night);
@@ -111,6 +112,8 @@ export function createSky(night = { value: 0 }, rain = { value: 0 }) {
     })
   );
   sky.name = 'Cloud sky sphere';
+  // Opaque surfaces fill depth first, so sky noise is shaded only in visible sky pixels.
+  sky.renderOrder = 1000;
   sky.frustumCulled = false;
   return sky;
 }
@@ -170,7 +173,17 @@ export function setupEnvironment(scene, renderer, sun) {
   const env = new THREE.Scene();
   env.add(sky.clone());
   const pmrem = new THREE.PMREMGenerator(renderer);
-  const reflections = new Map([['0-0', pmrem.fromScene(env, 0.03, 0.1, 600)]]);
+  const capture = new THREE.WebGLCubeRenderTarget(256, {
+    type: THREE.HalfFloatType,
+    generateMipmaps: false,
+    minFilter: THREE.LinearFilter,
+  });
+  const captureCamera = new THREE.CubeCamera(0.1, 600, capture);
+  const refreshReflection = (target) => {
+    captureCamera.update(renderer, env);
+    return pmrem.fromCubemap(capture.texture, target);
+  };
+  const reflections = new Map([['0-0', refreshReflection()]]);
   scene.environment = reflections.get('0-0').texture;
   const origin = new THREE.Vector3();
   let reflectionAge = 0;
@@ -182,7 +195,7 @@ export function setupEnvironment(scene, renderer, sun) {
       rain.value = isRain ? 1 : 0;
       const key = `${Number(isNight)}-${Number(isRain)}`;
       // Each independent day/night and dry/rain combination has one cached reflection.
-      if (!reflections.has(key)) reflections.set(key, pmrem.fromScene(env, 0.03, 0.1, 600));
+      if (!reflections.has(key)) reflections.set(key, refreshReflection());
       scene.environment = reflections.get(key).texture;
       currentReflection = key;
       reflectionAge = 0;
@@ -207,11 +220,9 @@ export function setupEnvironment(scene, renderer, sun) {
       scene.environmentRotation.set(0, 0, 0);
       reflectionAge += dt;
       if (reflectionAge >= 8) {
-        const previous = reflections.get(currentReflection);
-        const refreshed = pmrem.fromScene(env, 0.03, 0.1, 600);
-        reflections.set(currentReflection, refreshed);
-        scene.environment = refreshed.texture;
-        previous.dispose();
+        // Reuse both the capture cube and the filtered target. Reallocating and
+        // disposing GPU textures here caused periodic driver stalls.
+        refreshReflection(reflections.get(currentReflection));
         reflectionAge = 0;
       }
       positionCelestialLight(sun, anchor, night.value > 0.5);

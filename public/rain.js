@@ -19,6 +19,8 @@ function rainGeometry(count) {
 }
 
 export function setupRain(scene) {
+  const unlitPattern = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
+  unlitPattern.needsUpdate = true;
   const uniforms = {
     rainTime: { value: 0 },
     night: { value: 0 },
@@ -27,6 +29,9 @@ export function setupRain(scene) {
     vehicleForward: { value: new THREE.Vector2(1, 0) },
     bodyLean: { value: new THREE.Vector3() },
     rainColor: { value: new THREE.Color(0xe1edf5) },
+    lowBeamPattern: { value: unlitPattern },
+    lowBeamLeft: { value: new THREE.Matrix4() },
+    lowBeamRight: { value: new THREE.Matrix4() },
   };
   const common = `
     attribute vec3 rainSeed;
@@ -35,6 +40,9 @@ export function setupRain(scene) {
     uniform vec3 vehiclePosition;
     uniform vec2 vehicleForward;
     uniform vec3 bodyLean;
+    uniform sampler2D lowBeamPattern;
+    uniform mat4 lowBeamLeft;
+    uniform mat4 lowBeamRight;
     ${roadProfileGLSL}
 
     vec2 localToCar(vec2 worldPosition) {
@@ -43,12 +51,19 @@ export function setupRain(scene) {
                   dot(delta, vec2(-vehicleForward.y, vehicleForward.x)));
     }
 
+    float projectedBeam(vec3 worldPosition, mat4 projector) {
+      vec4 p = projector * vec4(worldPosition, 1.);
+      if (p.w <= 0.) return 0.;
+      vec3 uv = p.xyz / p.w;
+      if (any(lessThan(uv, vec3(0.))) || any(greaterThan(uv, vec3(1.)))) return 0.;
+      return texture2D(lowBeamPattern, uv.xy).r;
+    }
+
     float headlightVisibility(vec3 worldPosition) {
-      vec2 local = localToCar(worldPosition.xz);
-      float width = .7 + max(local.x - 2., 0.) * .3;
-      return smoothstep(2., 4., local.x) * (1. - smoothstep(25., 45., local.x)) *
-             (1. - smoothstep(width * .5, width, abs(local.y))) *
-             (1. - smoothstep(.8, 3., worldPosition.y));
+      float beam = max(projectedBeam(worldPosition, lowBeamLeft),
+                       projectedBeam(worldPosition, lowBeamRight));
+      float reach = 1. - smoothstep(25., 70., distance(worldPosition, vehiclePosition));
+      return clamp(beam * reach * 2., 0., 1.);
     }
   `;
 
@@ -176,6 +191,12 @@ export function setupRain(scene) {
 
   return {
     group,
+    setHeadlights({ pattern, projectors }) {
+      unlitPattern.dispose();
+      uniforms.lowBeamPattern.value = pattern;
+      uniforms.lowBeamLeft.value = projectors[0].shadow.matrix;
+      uniforms.lowBeamRight.value = projectors[1].shadow.matrix;
+    },
     setEnabled(enabled) {
       group.visible = enabled;
     },

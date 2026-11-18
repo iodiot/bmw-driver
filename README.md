@@ -4,9 +4,25 @@
 
 The current driving scene uses the imported BMW M5 F10 model in Black Sapphire Metallic (475). It includes rotating and steering wheels, independent suspension, road bumps and potholes, brake lights, drifting clouds, Orbit and Wireframe controls. Night mode adds a moonlit dusk sky and automatically switches on the low beams and rear running lights.
 
-A compact F10-style instrument cluster sits at the bottom right, with white-lit 0–330 km/h and 0–8000 rpm dials, red needles, the current DCT gear and trip distance. Its smoothly damped needles follow the live driving simulation. The visual layout is adapted from the [original BMW M5 black-panel instruments](https://www.press.bmwgroup.com/usa/article/detail/T0114798EN_US/introducing-the-all-new-5th-generation-bmw-m5?language=en_US). The collapsible Settings menu at the top right holds driving, weather, camera and wireframe controls, plus suspension telemetry; Escape or clicking the scene closes it.
+Low beams use a shared projected angular light profile with a soft near field, an upper cutoff and a raised right-hand roadside edge. The lamps remain attached to the suspended body while their aim gradually levels after pitching and rolling. Rain and road ripples sample the same projection. This is a visual approximation for right-hand traffic, guided by [HELLA's low-beam distribution reference](https://www.hella.com/techworld/en/technical/automotive-lighting/light-distribution/), rather than measured BMW photometric data.
 
-The standard 560 hp / 680 Nm F10 powertrain uses a seven-speed M DCT with automatic upshifts, downshifts and kickdown. The top-right display shows the transmission and current gear (D1–D7). Full-throttle acceleration is calibrated to approximately 0–100 km/h in 4.4 seconds and 0–200 km/h in 13.0 seconds, with the standard electronic limit of 250 km/h, using the [original BMW launch figures](https://www.press.bmwgroup.com/global/article/detail/T0113556EN/the-new-bmw-m5?language=en). The optional 305 km/h M Driver’s Package is not enabled.
+A compact F10-style instrument cluster sits at the bottom right, with white-lit 0–330 km/h and 0–8000 rpm dials, red needles, the current DCT gear and trip distance. Its smoothly damped needles follow the live driving simulation. The visual layout is adapted from the [original BMW M5 black-panel instruments](https://www.press.bmwgroup.com/usa/article/detail/T0114798EN_US/introducing-the-all-new-5th-generation-bmw-m5?language=en_US). The collapsible Settings menu at the top right holds driving, weather, camera, wireframe and sound controls; Escape or clicking the scene closes it.
+
+The small suspension diagram at the bottom left shows all four tyre loads in kN and relative suspension travel in mm. Animated springs, damper rods and compression/rebound arrows follow the current physics state. Loads include static support and dynamic tyre force, and fall to zero when a wheel loses contact. These are readings from the simplified suspension model, not measured BMW telemetry.
+
+Cornering uses a dynamic two-axle tyre model with lateral velocity, yaw inertia, combined braking/drive grip and suspension contact. Dry asphalt permits small slides; rain reduces grip and makes power oversteer and braking slides more pronounced. A simplified DSC controller trims drive force and applies a corrective yaw moment, allowing a slide before recovering it. The camera follows the direction of travel with a short delay so the body's sideslip remains visible. Tyre and stability-control parameters are tuned for this demo, not factory BMW calibration.
+
+An amber skidding-car symbol flashes in the instrument cluster while DSC intervenes and extinguishes after grip returns, or when driving is paused. This follows [BMW's explanation of the flashing DSC warning](https://faq.bmwusa.com/s/article/FAQ-Dynamic-Stability-Control-BMW-FAQ-2TYkX). Normal straight cruising does not trigger it.
+
+The standard 560 hp / 680 Nm F10 powertrain uses a seven-speed M DCT with automatic upshifts, downshifts and kickdown. The instrument cluster shows the transmission and current gear (D1–D7). Full-throttle acceleration is calibrated to approximately 0–100 km/h in 4.4 seconds and 0–200 km/h in 13.0 seconds, with the standard electronic limit of 250 km/h, using the [original BMW launch figures](https://www.press.bmwgroup.com/global/article/detail/T0113556EN/the-new-bmw-m5?language=en). The optional 305 km/h M Driver’s Package is not enabled.
+
+Completed gear changes produce a short, subtle camera vibration under acceleration, with a weaker impulse on braking downshifts. The effect settles in under half a second and preserves the orbit camera position and target. Pause and Restart clear it; reduced-motion preferences disable it.
+
+Sound uses recorded V8 idle and acceleration layers, recorded rain and a tyre friction loop under hard braking. Engine pitch, layer balance and volume follow RPM, load, gear changes and camera distance. The engine idles at a stop or when driving is paused; Rain audio follows its checkbox independently of Night. Sound begins after the first click or keypress, with Sound and Volume controls in Settings, and mutes while the page is hidden. The recordings are an adaptation, not stock BMW F10 audio. See [sound credits](public/assets/audio/ATTRIBUTION.md).
+
+Hard braking and strong lateral tyre scrub leave soft-edged deposits on dry asphalt, with much lighter traces in rain. Each trail follows wheel position, contact and load, with gaps over road obstacles and holes. Marks stay in world space and fade after 35–65 seconds; Restart clears them. One GPU-instanced draw uses a fixed buffer of 8,192 segments. Deposits are a visual effect driven by deceleration and axle slip angles; individual wheel spin and ABS cycling are not simulated.
+
+Brake pressure builds to full effort over 0.4 seconds while S / Down is held and releases immediately on key-up. Short taps and low-speed stops leave clean asphalt. Braking deposits require at least 88% pedal effort, speed above 45 km/h and deceleration above 8.8 m/s² on dry asphalt (4.8 m/s² in rain, where grip and deposits are weaker); light braking while turning cannot bypass those thresholds.
 
 Engine ratings, gear ratios, mass, drag and tyre dimensions follow [BMW technical data](https://www.ausmotive.com/downloads/BMW/M5-press-kit-Feb2012.pdf). Drivetrain losses, launch grip, clutch transitions and automatic shift strategy are simplified model assumptions calibrated to the launch figures for ideal dry conditions. The demo initially cruises at 30 km/h; after using the accelerator or brake, releasing the pedals lets it coast.
 
@@ -14,7 +30,11 @@ Light exhaust vapor exits all four tailpipes, rises and disperses in the car's w
 
 Rain is independent of Night. It adds falling drops, road ripples, overcast lighting, shorter visibility and a wet reflective asphalt surface in either lighting mode.
 
+The wet asphalt retains diffuse headlight illumination, with a varied water film and rougher aggregate between smoother patches. Its reflections remain directional without a uniform mirror-like coating. The small surface mask is fixed in world space and uploaded once; changing weather or recentering the road does not animate or rebuild it.
+
 Falling rain and ripples use two GPU-instanced draws, with no per-drop CPU animation or per-frame particle-buffer uploads. Wiper shapes are fitted to the windshield once and interpolated during playback. Rendering starts within a four-million-pixel Retina budget and adjusts canvas resolution under sustained load, while keeping the interface sharp and retaining all particles and suspension updates.
+
+Sky reflections refresh every eight seconds through a persistent capture cube and reusable filtered targets for the four weather combinations. The sky renders after opaque surfaces so its cloud shader avoids pixels covered by the car or road. Water and exhaust update only the body transforms they need. Tyre trails discard distant segments before evaluating the road profile and upload only changed slots in their fixed buffer.
 
 Water beads accumulate on painted panels and remain after the rain stops. Gravity drains them slowly; airflow stretches and moves them rearward as speed increases. The paint gradually returns to its dry finish.
 
@@ -42,6 +62,7 @@ For another available port, use `npm start -- --port 0` and open the printed add
 ## Controls
 
 - Settings: open or collapse the controls at the top right.
+- Sound / Volume: enable or mute audio and adjust its level.
 - Drive / Pause or Space: start and pause driving.
 - W / Up: accelerate; S / Down: brake.
 - A / Left and D / Right: steer.
@@ -57,7 +78,13 @@ For another available port, use `npm start -- --port 0` and open the printed add
 
 - `public/index.html` and `public/viewer.js`: the current interface and scene.
 - `public/instruments.js` and `interface.css`: animated F10-style instruments and the collapsible settings menu.
+- `public/suspension-display.js`: live four-corner tyre load, spring and damper diagram.
+- `public/shift-shake.js`: bounded camera impulses on completed gear changes.
+- `public/vehicle-audio.js` and `public/assets/audio/`: RPM-driven recording playback and sound attribution.
+- `public/skid-marks.js`: contact-aware, bounded instanced tyre trails under hard braking.
 - `public/vehicle-rig.js`, `driving-physics.js`, `brake-lights.js` and `headlights.js`: wheel rig, driving and lights.
+- `public/tyre-dynamics.js`: dry/wet axle grip, lateral motion and simplified DSC intervention.
+- `public/headlight-profile.js`: the shared projected low-beam distribution.
 - `public/powertrain.js`: standard F10 engine, seven-speed M DCT and speed limiter.
 - `public/brakes.js` and `brake-heat.js`: modeled M Compound brakes and energy-driven rotor heat.
 - `public/environment.js`, `road.js`, `road-profile.js` and `rain.js`: sky, weather, asphalt and tyre contact surface.
