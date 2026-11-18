@@ -1,5 +1,7 @@
 # BMW M5 F10
 
+![BMW M5 F10 driving at night in the rain](docs/media/driving-demo.gif)
+
 The current driving scene uses the imported BMW M5 F10 model in Black Sapphire Metallic (475). It includes rotating and steering wheels, independent suspension, road bumps and potholes, brake lights, drifting clouds, Orbit and Wireframe controls. Night mode adds a moonlit dusk sky and automatically switches on the low beams and rear running lights.
 
 The standard 560 hp / 680 Nm F10 powertrain uses a seven-speed M DCT with automatic upshifts, downshifts and kickdown. The top-right display shows the transmission and current gear (D1–D7). Full-throttle acceleration is calibrated to approximately 0–100 km/h in 4.4 seconds and 0–200 km/h in 13.0 seconds, with the standard electronic limit of 250 km/h, using the [original BMW launch figures](https://www.press.bmwgroup.com/global/article/detail/T0113556EN/the-new-bmw-m5?language=en). The optional 305 km/h M Driver’s Package is not enabled.
