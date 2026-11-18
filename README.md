@@ -1,19 +1,55 @@
-# BMW M5 F10 driving prototype
+# BMW M5 F10
 
-Interactive Three.js viewer for the current v26 model, with driving controls, independently moving wheels, opening panels, drifting clouds and reflections. The road includes potholes and speed bumps; a spring-and-damper suspension model drives body roll, pitch and wheel travel.
+The current driving scene uses the imported BMW M5 F10 model in Black Sapphire Metallic (475). It includes rotating and steering wheels, independent suspension, road bumps and potholes, brake lights, drifting clouds, Orbit and Wireframe controls. Night mode adds a moonlit dusk sky and automatically switches on the low beams and rear running lights.
 
-The current model includes body-junction repairs, reshaped mirrors, corrected trim materials, wheelhouse clearances and open exhaust tips.
+Light exhaust vapor exits all four tailpipes, rises and disperses in the car's wake, and increases under acceleration. Pause freezes the plume; Restart clears it.
+
+Rain is independent of Night. It adds falling drops, road ripples, overcast lighting, shorter visibility and a wet reflective asphalt surface in either lighting mode.
+
+Water beads accumulate on painted panels and remain after the rain stops. Gravity drains them slowly; airflow stretches and moves them rearward as speed increases. The paint gradually returns to its dry finish.
+
+The windshield, rear window and side glass also collect beads and longer running drops. Their flow follows the slope of each pane and changes with vehicle speed, while retaining glass transparency.
+
+Rain automatically runs two modeled front wipers. The flexible 650/450 mm blades follow the imported windshield and clear only the areas they sweep; drops gradually collect there again. Switching Rain off lets them finish the cycle and park. The layout follows the [M5 F10 parts diagram](https://www.bmwpartsdeal.com/parts-list/2013-bmw-m5-sedan_f10/vehicle_electrical_system/single_wiper_parts.html), with blade lengths from the [Bosch application catalogue](https://images-na.ssl-images-amazon.com/images/I/91S3otAdGGS.pdf). Pivot positions and stroke are fitted to this visual model, rather than factory CAD coordinates.
 
 ## Run
 
-Python 3 is required. Double-click `Start BMW.command`, or run `bash "Start BMW.command"` from this folder. The launcher starts a local server and opens the viewer. Keep the launcher window open while using it.
+Install Node.js 20 or later. From this folder, run:
 
-If the Three.js files are missing, the launcher installs them with npm; Node.js is needed only for that setup.
+```sh
+npm ci --ignore-scripts
+npm start
+```
 
-## Project files
+Open http://127.0.0.1:52259/ in the Codex browser panel. Keep the server running while using the viewer.
 
-- `outputs/bmw-viewer/` contains the current viewer, v26 model, support scripts, and Three.js files.
-- `work/` contains modeling scripts and source reference material. Historical scripts can require earlier model assets available in Git history.
-- `tools/repack_glb.py` removes unused export data while verifying that all retained binary buffers are unchanged.
+For another available port, use `npm start -- --port 0` and open the printed address.
 
-This is a visual prototype, not an official BMW product or production-ready game model. BMW names and third-party reference material belong to their respective owners; no license for third-party material is granted here.
+## Controls
+
+- Drive / Pause or Space: start and pause driving.
+- W / Up: accelerate; S / Down: brake.
+- A / Left and D / Right: steer.
+- Restart: reset the car and route.
+- Orbit: move the camera around the car.
+- Night: switch between daylight and moonlit dusk with automatic low beams.
+- Rain: toggle rain independently of Night.
+- Wireframe: show the mesh.
+- Drag and scroll on the scene: orbit manually and zoom.
+
+## Files
+
+- `public/index.html` and `public/viewer.js`: the current interface and scene.
+- `public/vehicle-rig.js`, `driving-physics.js`, `brake-lights.js` and `headlights.js`: wheel rig, driving and lights.
+- `public/environment.js`, `road.js`, `road-profile.js` and `rain.js`: sky, weather, asphalt and tyre contact surface.
+- `public/body-water.js` and `wipers.js`: surface drops, automatic front wipers and their synchronized clearing mask.
+- `public/assets/bmw-m5-f10.glb`: the only car asset.
+- `public/assets/ATTRIBUTION.md`: model author, source, license and adaptations.
+- `tools/serve.mjs`: local server.
+- `tests/`: geometry, suspension, steering, lights, exhaust and weather checks (`npm test`).
+
+The GLB remains unmodified; scale, paint and moving parts are adapted at runtime. This is an unofficial visual prototype.
+
+## Code formatting
+
+Run `npm run format` to format the source, or `npm run format:check` to check it. The pinned formatter uses `.prettierrc.json` and is cached outside the project.

@@ -1,2 +1,0 @@
-from pathlib import Path
-p=Path('outputs/bmw-viewer/viewer-v18.js');s=p.read_text(encoding='utf-8');s=s.replace('renderer.setSize(innerWidth,innerHeight);',"renderer.debug.onShaderError=(gl,p,v,f)=>{document.body.dataset.shaderError=(gl.getProgramInfoLog(p)||'')+' '+(gl.getShaderInfoLog(v)||'')+' '+(gl.getShaderInfoLog(f)||'');};\nrenderer.setSize(innerWidth,innerHeight);",1);p.write_text(s,encoding='utf-8')

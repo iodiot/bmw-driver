@@ -1,0 +1,199 @@
+import * as THREE from 'three';
+import { roadProfileGLSL } from './road-profile.js';
+
+function rainGeometry(count) {
+  const quad = new THREE.PlaneGeometry(1, 1);
+  const geometry = new THREE.InstancedBufferGeometry();
+  geometry.index = quad.index;
+  geometry.attributes.position = quad.attributes.position;
+  geometry.attributes.uv = quad.attributes.uv;
+  const seeds = new Float32Array(count * 3);
+  let seed = 5317;
+  for (let i = 0; i < seeds.length; i++) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    seeds[i] = seed / 4294967296;
+  }
+  geometry.setAttribute('rainSeed', new THREE.InstancedBufferAttribute(seeds, 3));
+  geometry.instanceCount = count;
+  return geometry;
+}
+
+export function setupRain(scene) {
+  const uniforms = {
+    rainTime: { value: 0 },
+    night: { value: 0 },
+    cameraVelocity: { value: new THREE.Vector3() },
+    vehiclePosition: { value: new THREE.Vector3() },
+    vehicleForward: { value: new THREE.Vector2(1, 0) },
+    bodyLean: { value: new THREE.Vector3() },
+    rainColor: { value: new THREE.Color(0xb5c5d2) },
+  };
+  const common = `
+    attribute vec3 rainSeed;
+    uniform float rainTime;
+    uniform vec3 cameraVelocity;
+    uniform vec3 vehiclePosition;
+    uniform vec2 vehicleForward;
+    uniform vec3 bodyLean;
+    ${roadProfileGLSL}
+
+    vec2 localToCar(vec2 worldPosition) {
+      vec2 delta = worldPosition - vehiclePosition.xz;
+      return vec2(dot(delta, vehicleForward),
+                  dot(delta, vec2(-vehicleForward.y, vehicleForward.x)));
+    }
+
+    float headlightVisibility(vec3 worldPosition) {
+      vec2 local = localToCar(worldPosition.xz);
+      float width = .7 + max(local.x - 2., 0.) * .3;
+      return smoothstep(2., 4., local.x) * (1. - smoothstep(25., 45., local.x)) *
+             (1. - smoothstep(width * .5, width, abs(local.y))) *
+             (1. - smoothstep(.8, 3., worldPosition.y));
+    }
+  `;
+
+  const streakMaterial = new THREE.ShaderMaterial({
+    uniforms,
+    transparent: true,
+    depthWrite: false,
+    toneMapped: false,
+    vertexShader:
+      common +
+      `
+      varying vec2 vUv;
+      varying float vVisibility;
+      varying float vBeam;
+
+      void main() {
+        float fallSpeed = 10. + rainSeed.z * 5.;
+        vec2 drift = vec2(.7, .22) * rainTime;
+        vec2 offset = mod(rainSeed.xz * 64. + drift - cameraPosition.xz + 32., 64.) - 32.;
+        vec3 drop = vec3(cameraPosition.x + offset.x,
+                         fract(rainSeed.y - rainTime * fallSpeed / 18.) * 18.,
+                         cameraPosition.z + offset.y);
+        vec3 velocity = vec3(.7, -fallSpeed, .22) - cameraVelocity;
+        vec4 head = viewMatrix * vec4(drop, 1.);
+        vec4 tail = viewMatrix * vec4(drop - velocity * .012, 1.);
+        vec2 axis = normalize(tail.xy - head.xy + vec2(.00001));
+        vec2 sideways = vec2(axis.y, -axis.x);
+        vec4 viewPosition = mix(head, tail, uv.y);
+        viewPosition.xy += sideways * position.x * max(.004, -head.z * .001);
+        gl_Position = projectionMatrix * viewPosition;
+
+        vec2 local = localToCar(drop.xz);
+        float roof = local.x > -1.3 && local.x < .75 ? 1.43 : .96;
+        roof += bodyLean.x + bodyLean.y * local.x - bodyLean.z * local.y;
+        float sheltered = abs(local.x) < 2.45 && abs(local.y) < .9 && drop.y < roof ? 1. : 0.;
+        vVisibility = (1. - smoothstep(24., 32., length(offset))) *
+                      smoothstep(.4, 1.2, distance(drop, cameraPosition)) *
+                      smoothstep(0., .15, drop.y - roadHeight(drop.xz)) *
+                      (1. - smoothstep(16., 18., drop.y)) * (1. - sheltered);
+        vBeam = headlightVisibility(drop);
+        vUv = uv;
+      }
+    `,
+    fragmentShader: `
+      uniform float night;
+      uniform vec3 rainColor;
+      varying vec2 vUv;
+      varying float vVisibility;
+      varying float vBeam;
+
+      void main() {
+        float crossSection = 1. - smoothstep(.10, .5, abs(vUv.x - .5));
+        float ends = smoothstep(0., .15, vUv.y) * (1. - smoothstep(.6, 1., vUv.y));
+        float alpha = crossSection * ends * vVisibility * mix(.33, .20 + vBeam * .35, night);
+        if (alpha < .001) discard;
+        vec3 color = mix(rainColor, vec3(1., .93, .82), vBeam * night * .85);
+        gl_FragColor = vec4(color, alpha);
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+
+  const splashMaterial = new THREE.ShaderMaterial({
+    uniforms,
+    transparent: true,
+    depthWrite: false,
+    toneMapped: false,
+    vertexShader:
+      common +
+      `
+      varying vec2 vUv;
+      varying float vVisibility;
+      varying float vBeam;
+
+      void main() {
+        float cycle = rainTime * (1.5 + rainSeed.z) + rainSeed.y;
+        float age = fract(cycle);
+        vec2 hit = fract(rainSeed.xz + floor(cycle) * vec2(.371, .613)) * 36.;
+        vec2 offset = mod(hit - cameraPosition.xz + 18., 36.) - 18.;
+        vec2 centre = cameraPosition.xz + offset;
+        vec2 horizontal = centre + vec2(position.x, -position.y) * (.045 + age * .28);
+        vec3 worldPosition = vec3(horizontal.x, roadHeight(horizontal) + .008, horizontal.y);
+        gl_Position = projectionMatrix * viewMatrix * vec4(worldPosition, 1.);
+        vec2 local = localToCar(centre);
+        float sheltered = abs(local.x) < 2.5 && abs(local.y) < 1. ? 1. : 0.;
+        vVisibility = (1. - age) * (1. - age) * smoothstep(0., .08, age) *
+                      (1. - smoothstep(14., 18., length(offset))) * (1. - sheltered);
+        vBeam = headlightVisibility(worldPosition);
+        vUv = uv;
+      }
+    `,
+    fragmentShader: `
+      uniform float night;
+      uniform vec3 rainColor;
+      varying vec2 vUv;
+      varying float vVisibility;
+      varying float vBeam;
+
+      void main() {
+        float radius = length((vUv - .5) * 2.);
+        float ring = 1. - smoothstep(.04, .15, abs(radius - .72));
+        float alpha = ring * vVisibility * mix(.19, .10 + vBeam * .25, night);
+        if (alpha < .001) discard;
+        gl_FragColor = vec4(mix(rainColor, vec3(1., .93, .82), night * vBeam), alpha);
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+
+  const group = new THREE.Group();
+  group.name = 'Rain and road splashes';
+  group.visible = false;
+  const drops = new THREE.Mesh(rainGeometry(4800), streakMaterial);
+  const splashes = new THREE.Mesh(rainGeometry(512), splashMaterial);
+  drops.name = 'Falling rain';
+  splashes.name = 'Rain ripples';
+  drops.frustumCulled = splashes.frustumCulled = false;
+  group.add(drops, splashes);
+  scene.add(group);
+  const previousCamera = new THREE.Vector3();
+  let cameraReady = false;
+  const dayColor = new THREE.Color(0xb5c5d2);
+  const nightColor = new THREE.Color(0x798da6);
+
+  return {
+    group,
+    setEnabled(enabled) {
+      group.visible = enabled;
+    },
+    update(dt, camera, state, isNight) {
+      if (group.visible) uniforms.rainTime.value += Math.min(dt, 1 / 15);
+      uniforms.night.value = isNight ? 1 : 0;
+      uniforms.rainColor.value.copy(isNight ? nightColor : dayColor);
+      const velocity = uniforms.cameraVelocity.value;
+      if (cameraReady && dt > 0 && previousCamera.distanceTo(camera.position) < 8) {
+        velocity.subVectors(camera.position, previousCamera).divideScalar(dt).clampLength(0, 60);
+      } else velocity.set(0, 0, 0);
+      previousCamera.copy(camera.position);
+      cameraReady = true;
+      uniforms.vehiclePosition.value.set(state?.x ?? 0, 0, state?.z ?? 0);
+      uniforms.vehicleForward.value.set(
+        Math.cos(state?.heading ?? 0),
+        -Math.sin(state?.heading ?? 0)
+      );
+      uniforms.bodyLean.value.set(state?.heave ?? 0, state?.pitch ?? 0, state?.roll ?? 0);
+    },
+  };
+}
