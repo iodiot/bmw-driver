@@ -4,7 +4,8 @@ import { dayCycle, dayPhase, formatClock, sunElevation, wrapHours } from './time
 // 24 hours with the sun or moon at the current time (click or drag to set
 // the time), the clock with a glowing sun or moon, the phase of day and the
 // next sunrise or sunset, a Day / Sunset / Night switch with the current
-// phase lit, rain, and pause with a ring showing how far the day has run.
+// phase lit, rain, pause with a ring showing how far the day has run, sound
+// and restart.
 const width = 132,
   height = 46,
   horizonY = 25;
@@ -86,11 +87,18 @@ const icons = {
   pause: '<path d="M6.5 4.5v9M11.5 4.5v9"/>',
   play: '<path d="M6.5 4.2v9.6L14 9z"/>',
   restart: '<path d="M3.8 9a5.2 5.2 0 1 0 1.6-3.8M3.6 2.8v2.6h2.6"/>',
+  sound:
+    '<path d="M2.5 7h2.8l3.7-3.2v10.4L5.3 11H2.5z"/><path d="M11.6 6.4a3.6 3.6 0 0 1 0 5.2M13.9 4.2a6.7 6.7 0 0 1 0 9.6"/>',
+  muted:
+    '<path d="M2.5 7h2.8l3.7-3.2v10.4L5.3 11H2.5z"/><path d="M11.8 6.8l4.4 4.4M16.2 6.8l-4.4 4.4"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 18 18" aria-hidden="true">${icons[name]}</svg>`;
 const presetLabels = { day: 'Day (13:00)', sunset: 'Sunset (18:54)', night: 'Night (23:00)' };
 
-export function setupDayBar(container, { setTime, toggleRain, toggleRunning, restart }) {
+export function setupDayBar(
+  container,
+  { setTime, toggleRain, toggleRunning, restart, toggleSound }
+) {
   container.innerHTML = `
     <div class="day-graph" title="Time of day: click or drag to change">
       <svg viewBox="0 0 ${width} ${height}" aria-hidden="true">
@@ -120,6 +128,7 @@ export function setupDayBar(container, { setTime, toggleRain, toggleRunning, res
       </div>
       <button type="button" class="day-rain" aria-label="Rain" title="Rain" aria-pressed="false">${icon('rain')}</button>
       <button type="button" class="day-run" aria-label="Pause time" title="Pause time" aria-pressed="false">${icon('pause')}</button>
+      <button type="button" class="day-sound" aria-label="Sound (M)" title="Sound (M)" aria-pressed="true">${icon('sound')}</button>
       <button type="button" class="day-restart" aria-label="Restart (R)" title="Restart (R)">${icon('restart')}</button>
     </div>`;
   const graph = container.querySelector('.day-graph'),
@@ -132,12 +141,14 @@ export function setupDayBar(container, { setTime, toggleRain, toggleRunning, res
     moon = container.querySelector('.day-celestial .moon'),
     presets = [...container.querySelectorAll('[data-preset]')],
     rain = container.querySelector('.day-rain'),
-    run = container.querySelector('.day-run');
+    run = container.querySelector('.day-run'),
+    soundButton = container.querySelector('.day-sound');
   for (const button of presets)
     button.onclick = () => setTime(dayCycle.presets[button.dataset.preset]);
   rain.onclick = toggleRain;
   run.onclick = toggleRunning;
   container.querySelector('.day-restart').onclick = () => restart?.();
+  soundButton.onclick = () => toggleSound?.();
   // A clicked button lets go of focus, so the keyboard drives the car again.
   for (const button of container.querySelectorAll('button'))
     button.addEventListener('pointerup', () => button.blur());
@@ -159,8 +170,21 @@ export function setupDayBar(container, { setTime, toggleRain, toggleRunning, res
   graph.onpointerup = graph.onpointercancel = () => {
     dragging = false;
   };
-  let shown = '';
+  let shown = '',
+    soundShown = '';
   return {
+    // On and playing, on but waiting for a click (browsers start sound only
+    // after one), or muted.
+    setSound(audible, enabled) {
+      const state = enabled ? (audible ? 'on' : 'waiting') : 'off';
+      if (state === soundShown) return;
+      soundShown = state;
+      soundButton.dataset.state = state;
+      soundButton.setAttribute('aria-pressed', String(enabled));
+      soundButton.innerHTML = icon(enabled ? 'sound' : 'muted');
+      soundButton.title = soundButton.ariaLabel =
+        state === 'on' ? 'Mute (M)' : state === 'off' ? 'Sound on (M)' : 'Click to start sound';
+    },
     update(light, { running, raining }) {
       const text = formatClock(light.hours);
       // The DOM changes once a game minute (a few times a second at most).

@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { vehicleAudioMix } from '../public/vehicle-audio.js';
+import {
+  contactSurfaces,
+  crunchSamples,
+  knockStrength,
+  noiseSamples,
+  obstacleAt,
+  roadAudioMix,
+  vehicleAudioMix,
+} from '../public/vehicle-audio.js';
 
 test('Recorded sound loops are valid non-silent PCM with bounded peaks and smooth loop seams', () => {
   let bytes = 0;
@@ -47,4 +55,81 @@ test('Engine follows RPM and load, braking stops tyre sound at rest, rain is ind
   });
   assert.equal(paused.rpm, 800);
   assert.ok(paused.rain > 0 && paused.tyres === 0);
+});
+
+test('Cruise control loads the engine when it accelerates, as the pedal does', () => {
+  const coasting = vehicleAudioMix({ rpm: 3000, speed: 25 });
+  const cruising = vehicleAudioMix({ rpm: 3000, speed: 25, throttle: 1 });
+  const pedal = vehicleAudioMix({ rpm: 3000, speed: 25, accelerate: true });
+  assert.ok(cruising.low > coasting.low);
+  assert.equal(cruising.low, pedal.low);
+});
+
+test('The road sounds by its surface: stones crunch on gravel, grass swishes, asphalt only rolls', () => {
+  const asphalt = roadAudioMix({ speed: 20, surfaces: { asphalt: 1 } });
+  const gravel = roadAudioMix({ speed: 20, surfaces: { gravel: 1 } });
+  const grass = roadAudioMix({ speed: 20, surfaces: { grass: 1 } });
+  assert.equal(asphalt.crunch, 0);
+  assert.ok(gravel.crunch > 0.2 && gravel.crunch > grass.crunch);
+  assert.ok(grass.swish > gravel.swish && asphalt.swish === 0);
+  assert.ok(asphalt.roll > 0);
+  // Airborne: no road at all; stopped: silence apart from the engine.
+  const air = roadAudioMix({ speed: 20, surfaces: {} });
+  assert.equal(air.roll + air.crunch + air.swish + air.spray, 0);
+  const still = roadAudioMix({ speed: 0, surfaces: { gravel: 1 } });
+  assert.equal(still.roll + still.crunch + still.swish, 0);
+  // Two wheels on each surface blend the two.
+  const edge = roadAudioMix({ speed: 20, surfaces: { asphalt: 0.5, gravel: 0.5 } });
+  assert.ok(Math.abs(edge.crunch - gravel.crunch / 2) < 1e-9);
+  assert.deepEqual(
+    contactSurfaces([
+      { contact: true, surface: 'asphalt' },
+      { contact: true, surface: 'asphalt' },
+      { contact: true, surface: 'grass' },
+      { contact: false, surface: 'grass' },
+    ]),
+    { asphalt: 0.5, grass: 0.25 }
+  );
+});
+
+test('Tyres squeal when sliding on asphalt, a wet road sprays, rails scrape', () => {
+  assert.equal(roadAudioMix({ speed: 25, slipAngle: 0.01 }).squeal, 0);
+  const slide = roadAudioMix({ speed: 25, slipAngle: 0.2 });
+  assert.ok(slide.squeal > 0.15);
+  assert.ok(roadAudioMix({ speed: 25, slipAngle: 0.2, wet: true }).squeal < slide.squeal / 2);
+  assert.equal(roadAudioMix({ speed: 25, slipAngle: 0.2, surfaces: { dirt: 1 } }).squeal, 0);
+  assert.ok(roadAudioMix({ speed: 25, wet: true }).spray > 0);
+  assert.equal(roadAudioMix({ speed: 25 }).scrape, 0);
+  assert.ok(roadAudioMix({ speed: 25, scrape: 8 }).scrape > 0.3);
+  assert.equal(roadAudioMix({ speed: 40, driving: false, slipAngle: 0.2 }).squeal, 0);
+});
+
+test('Wheels knock on speed bumps and potholes, harder when faster, and on rail strikes', () => {
+  // A full-width speed bump at x = 36 and a pothole in a centre-lane wheel track at x = 49.
+  assert.ok(obstacleAt(36, 0).w > 5);
+  assert.ok(obstacleAt(36 + 120 * 3, -2.5).w > 5, 'Obstacles repeat along the road');
+  assert.ok(obstacleAt(49, 0.81).h < 0);
+  assert.equal(obstacleAt(42, 0), null);
+  assert.equal(obstacleAt(36, 42), null, 'The country road has none');
+  assert.equal(knockStrength('bump', 0.085, 1), 0, 'Rolling over at walking pace is silent');
+  assert.ok(knockStrength('bump', 0.085, 20) > knockStrength('bump', 0.085, 6));
+  assert.ok(knockStrength('bump', -0.075, 25) <= 1);
+  assert.equal(knockStrength('rail', 0.1), 0);
+  assert.ok(knockStrength('rail', 6) > 0.999 && knockStrength('rail', 2) > 0);
+});
+
+test('Synthesised loops are deterministic, bounded, and crunch clicks never cross the loop seam', () => {
+  const noise = noiseSamples(48000, 3);
+  assert.deepEqual(noise, noiseSamples(48000, 3));
+  assert.ok(noise.every((v) => v >= -1 && v <= 1));
+  const crunch = crunchSamples(96000, 48000);
+  let peak = 0,
+    clicks = 0;
+  for (let i = 0; i < crunch.length; i++) {
+    peak = Math.max(peak, Math.abs(crunch[i]));
+    if (Math.abs(crunch[i]) > 0.05 && Math.abs(crunch[i - 1] ?? 0) <= 0.05) clicks++;
+  }
+  assert.ok(Math.abs(peak - 0.9) < 1e-6);
+  assert.ok(clicks > 200, 'Hundreds of stones per second');
+  assert.ok(Math.abs(crunch[0]) < 0.05 && Math.abs(crunch.at(-1)) < 0.05);
 });

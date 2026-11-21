@@ -230,6 +230,7 @@ const dayBar = setupDayBar($('#day-bar'), {
     applyDaylight();
   },
   restart: () => restart(),
+  toggleSound: () => vehicleAudio.toggle(),
 });
 $('#night').onchange = (e) => {
   setTimeOfDay(e.target.checked ? dayCycle.presets.night : dayCycle.presets.day);
@@ -302,6 +303,11 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyR' && !e.repeat && !e.metaKey && !e.ctrlKey) {
     e.preventDefault();
     restart();
+    return;
+  }
+  if (e.code === 'KeyM' && !e.repeat && !e.metaKey && !e.ctrlKey) {
+    e.preventDefault();
+    vehicleAudio.toggle();
     return;
   }
   const action = actions[e.code];
@@ -607,6 +613,7 @@ renderer.setAnimationLoop(() => {
     brake: Boolean(input.brake),
     distance: rig ? camera.position.distanceTo(rig.root.position) : 8,
   });
+  dayBar.setSound(vehicleAudio.audible, $('#sound').checked);
   controls.update(dt);
   shiftShake.apply(camera, innerWidth, innerHeight);
   rain.update(dt, camera, sim, nightMode);
