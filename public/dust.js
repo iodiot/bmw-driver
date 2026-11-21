@@ -26,19 +26,10 @@ export function dustRate(surface, speed, wetness = 0) {
   return base * Math.min(1, Math.max(0, (speed - 2) / 23)) * Math.max(0, 1 - wetness * 1.5);
 }
 
-export function setupDust(scene) {
-  const { capacity, colour } = dustSettings;
-  const position = new Float32Array(capacity * 3),
-    colours = new Float32Array(capacity * 3),
-    size = new Float32Array(capacity),
-    alpha = new Float32Array(capacity);
-  const geometry = new THREE.BufferGeometry();
-  const attribute = (array, n) =>
-    new THREE.BufferAttribute(array, n).setUsage(THREE.DynamicDrawUsage);
-  geometry.setAttribute('position', attribute(position, 3));
-  geometry.setAttribute('color', attribute(colours, 3));
-  geometry.setAttribute('size', attribute(size, 1));
-  geometry.setAttribute('alpha', attribute(alpha, 1));
+// Soft round puffs that grow with distance like real billows: size and
+// alpha per particle, a colour each, dimmed by `light` at night. Shared by
+// wheel dust and tyre smoke.
+export function puffMaterial() {
   const uniforms = { pixelScale: { value: 800 }, light: { value: 1 } };
   const material = new THREE.ShaderMaterial({
     uniforms,
@@ -72,6 +63,23 @@ export function setupDust(scene) {
       }
     `,
   });
+  return { material, uniforms };
+}
+
+export function setupDust(scene) {
+  const { capacity, colour } = dustSettings;
+  const position = new Float32Array(capacity * 3),
+    colours = new Float32Array(capacity * 3),
+    size = new Float32Array(capacity),
+    alpha = new Float32Array(capacity);
+  const geometry = new THREE.BufferGeometry();
+  const attribute = (array, n) =>
+    new THREE.BufferAttribute(array, n).setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute('position', attribute(position, 3));
+  geometry.setAttribute('color', attribute(colours, 3));
+  geometry.setAttribute('size', attribute(size, 1));
+  geometry.setAttribute('alpha', attribute(alpha, 1));
+  const { material, uniforms } = puffMaterial();
   const points = new THREE.Points(geometry, material);
   points.name = 'Wheel dust';
   points.frustumCulled = false;

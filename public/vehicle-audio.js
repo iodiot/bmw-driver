@@ -65,6 +65,8 @@ export const surfaceAudio = Object.freeze({
 // Synthesised layers from the motion: the road under the tyres (by the
 // share of wheels on each surface; wheels in the air add nothing), spray off
 // a wet road, cornering squeal on asphalt, and metal scraping along a rail.
+// In the driver's seat (`inside` 0–1) the outside world is muffled and
+// quieter, and the engine is heard through the bulkhead.
 export function roadAudioMix({
   speed = 0,
   lateralVelocity = 0,
@@ -75,6 +77,7 @@ export function roadAudioMix({
   scrape = 0,
   driving = true,
   distance = 8,
+  inside = 0,
 } = {}) {
   const v = driving ? Math.hypot(speed, lateralVelocity) : 0;
   const perspective = clamp(Math.sqrt(8 / Math.max(4, distance)), 0.35, 1.25);
@@ -114,6 +117,18 @@ export function roadAudioMix({
     squealRate: 0.85 + 0.25 * slide - (wet ? 0.1 : 0),
     scrape: driving ? 0.42 * smooth(0.2, 10, scrape) * perspective : 0,
     scrapeFreq: 1300 + clamp(scrape / 25, 0, 1) * 1600,
+    ...cabinMix(inside),
+  };
+}
+
+// The cabin: a low-pass on everything outside and a quieter, duller engine.
+export function cabinMix(inside) {
+  const muffle = clamp(inside, 0, 1);
+  return {
+    cabinCutoff: 16000 * Math.pow(1400 / 16000, muffle),
+    outside: 1 - 0.35 * muffle,
+    engine: 1 - 0.25 * muffle,
+    engineCutoff: 1 - 0.4 * muffle,
   };
 }
 
@@ -197,7 +212,7 @@ export function obstacleAt(x, lateral, list = obstacles) {
 }
 
 export function setupVehicleAudio({ sound, volume, status }) {
-  let context, master, engineFilter, outside, noiseBuffer, loading;
+  let context, master, engineBus, engineFilter, cabin, outside, noiseBuffer, loading;
   let ready = false,
     elapsed = 0;
   const sources = new Map(),
@@ -242,10 +257,17 @@ export function setupVehicleAudio({ sound, volume, status }) {
     engineFilter.type = 'lowpass';
     engineFilter.frequency.value = 1800;
     engineFilter.Q.value = 0.4;
-    engineFilter.connect(master);
-    // Everything but the engine: rain, tyres, the road and knocks.
+    engineBus = context.createGain();
+    engineBus.connect(master);
+    engineFilter.connect(engineBus);
+    // Everything but the engine: rain, tyres, the road and knocks, through
+    // the cabin's filter.
     outside = context.createGain();
-    outside.connect(master);
+    cabin = context.createBiquadFilter();
+    cabin.type = 'lowpass';
+    cabin.frequency.value = 16000;
+    cabin.Q.value = 0.5;
+    outside.connect(cabin).connect(master);
   }
   // A looping synthesised layer: buffer → filters → gain → outside.
   function layer(name, buffer, chain, rate = 1) {
@@ -398,6 +420,24 @@ export function setupVehicleAudio({ sound, volume, status }) {
     get audible() {
       return sound.checked && running();
     },
+    // The turn-signal relay: a tick as the lamps light, a softer tock as
+    // they go out. Heard in the cabin, so it bypasses the cabin filter.
+    tick(on) {
+      if (!ready || !sound.checked || !running()) return;
+      const now = context.currentTime;
+      const click = context.createBufferSource(),
+        band = context.createBiquadFilter(),
+        gain = context.createGain();
+      click.buffer = noiseBuffer;
+      band.type = 'bandpass';
+      band.frequency.value = on ? 3200 : 2300;
+      band.Q.value = 3;
+      gain.gain.setValueAtTime(on ? 0.5 : 0.32, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.025);
+      click.connect(band).connect(gain).connect(master);
+      click.start(now, Math.random());
+      click.stop(now + 0.04);
+    },
     // The sound button: mutes or unmutes. Sound that is on but still waiting
     // for the browser's permission starts instead of muting.
     toggle() {
@@ -408,7 +448,7 @@ export function setupVehicleAudio({ sound, volume, status }) {
       sound.checked = !sound.checked;
       sound.dispatchEvent(new Event('change'));
     },
-    update(dt, simulation, { driving, raining, accelerate, brake, distance }) {
+    update(dt, simulation, { driving, raining, accelerate, brake, distance, inside = 0 }) {
       // Knocks are caught every frame; the mix itself updates 30 times a second.
       if (simulation && driving) {
         const c = Math.cos(simulation.heading),
@@ -456,6 +496,7 @@ export function setupVehicleAudio({ sound, volume, status }) {
         scrape: simulation.railContact?.scrape ?? 0,
         driving,
         distance,
+        inside,
       });
       const audible = sound.checked && !document.hidden;
       const tyres = Math.max(mix.tyres, road.squeal);
@@ -482,6 +523,9 @@ export function setupVehicleAudio({ sound, volume, status }) {
       }
       data.audioKnocks = String(knocks);
       const level = (name, value) => gains.get(name).gain.setTargetAtTime(value, now, 0.07);
+      engineBus.gain.setTargetAtTime(road.engine, now, 0.08);
+      outside.gain.setTargetAtTime(road.outside, now, 0.08);
+      cabin.frequency.setTargetAtTime(road.cabinCutoff, now, 0.08);
       const pitch = (name, value, lag = 0.04) =>
         sources.get(name).playbackRate.setTargetAtTime(value, now, lag);
       const tune = (name, value, i = 0) =>
@@ -504,7 +548,7 @@ export function setupVehicleAudio({ sound, volume, status }) {
       pitch('crunch', road.crunchRate, 0.1);
       tune('roll', road.rollFreq);
       tune('scrape', road.scrapeFreq);
-      engineFilter.frequency.setTargetAtTime(mix.cutoff, now, 0.08);
+      engineFilter.frequency.setTargetAtTime(mix.cutoff * road.engineCutoff, now, 0.08);
     },
   };
 }

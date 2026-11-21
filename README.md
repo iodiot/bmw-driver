@@ -20,6 +20,12 @@ The standard 560 hp / 680 Nm F10 powertrain uses a seven-speed M DCT with automa
 
 Completed gear changes produce a short, subtle camera vibration under acceleration, with a weaker impulse on braking downshifts. The effect settles in under half a second and preserves the orbit camera position and target. Pause and Restart clear it; reduced-motion preferences disable it.
 
+Three camera views (C or the camera button in the top panel, remembered between visits): the orbiting chase camera, the driver's seat and the bonnet. From the driver's seat, drag to look around (double-click looks ahead again); the head leads into bends and sways a little under acceleration and braking, and the overlay cluster and suspension panel give way to the car's own instruments. The model's flat door panels are replaced by F10-style door cards: black leather under the sill, an Aluminium Trace strip, the chrome opener in a dark recess, an armrest with the window and mirror switches, a pull handle, a speaker grille and a door pocket. The headliner and pillars are anthracite, and the rear-view mirror shows the road behind (its camera sits at the rear window, as the model's low cabin would otherwise fill it with the rear headrests). In the seat, sound from outside is muffled and the engine is heard through the bulkhead.
+
+Tyres smoke when they slide on dry asphalt, in a drift or with wheelspin; a fast but gripping bend makes none, wet asphalt little and loose ground dust instead. At night the high-beam assistant switches to main beam on an open road above 50 km/h (not in rain); H turns it off and on, and a blue lamp shows it on the cluster. Q and E work the turn signals: amber lamps in the headlights, door mirrors and tail lamps, green arrows on the cluster and the relay's tick; they cancel once the steering, having turned that way, comes back.
+
+On a touch screen a steering track (bottom left) and accelerator and brake pedals (bottom right) appear. A standard gamepad also drives: left stick steers, triggers accelerate and brake, shoulder buttons signal, Y changes the camera, Start restarts and Back pauses.
+
 Sound uses recorded V8 idle and acceleration layers, recorded rain and a tyre friction loop. Engine pitch, layer balance and volume follow RPM, load (also when cruise control accelerates), gear changes and camera distance. The engine idles at a stop or when driving is paused. Synthesised layers follow the motion: the road under each wheel (a low roll on asphalt, stones crackling on gravel, a deeper rumble on dirt, a swish through grass, nothing when the wheels leave the ground); tyre spray on a wet road; tyre squeal when the car slides on asphalt (softer in rain, none on loose ground); metal scraping along a guardrail and a clang when the car strikes one; and a thump when a wheel hits a speed bump, hump or pothole, harder the faster it is. Sound begins after the first click or keypress (the sound button in the top panel pulses until then). The sound button or M mutes it, and the choice is remembered; it also mutes while the page is hidden. The recordings are an adaptation, not stock BMW F10 audio. See [sound credits](public/assets/audio/ATTRIBUTION.md).
 
 Hard braking and strong lateral tyre scrub leave soft-edged deposits on dry asphalt, with much lighter traces in rain. Each trail follows wheel position, contact and load, with gaps over road obstacles and holes. Marks stay in world space and fade after 35–65 seconds; Restart clears them. One GPU-instanced draw uses a fixed buffer of 8,192 segments. Deposits are a visual effect driven by deceleration and axle slip angles; individual wheel spin and ABS cycling are not simulated.
@@ -84,6 +90,8 @@ For another available port, use `npm start -- --port 0` and open the printed add
 - Settings: open or collapse the controls at the top right.
 - Sound / Volume: enable or mute audio and adjust its level.
 - Drive / Pause or Space: start and pause driving.
+- C or the camera button (top panel): chase, driver's seat or bonnet view.
+- Q / E: left / right turn signal. H: high-beam assistant off or on.
 - M or the sound button (top panel): mute or unmute.
 - R or the restart button (top panel): restart. The Settings panel is hidden for now (remove `hidden` from it in `public/index.html`).
 - W / Up: accelerate; S / Down: brake.
@@ -104,6 +112,7 @@ For another available port, use `npm start -- --port 0` and open the printed add
 - `public/instruments.js` and `interface.css`: animated F10-style instruments and the collapsible settings menu.
 - `public/suspension-display.js`: live four-corner tyre load, spring and damper diagram.
 - `public/shift-shake.js`: bounded camera impulses on completed gear changes.
+- `public/camera-views.js`, `door-trim.js`, `signals.js`, `tyre-smoke.js` and `touch-controls.js`: camera views and the driver's head, door cards, turn signals and high beam, tyre smoke, touch and gamepad driving.
 - `public/vehicle-audio.js` and `public/assets/audio/`: RPM-driven recording playback, synthesised road, squeal, scrape and knock sounds, and sound attribution.
 - `public/skid-marks.js`: contact-aware, bounded instanced tyre trails under hard braking.
 - `public/vehicle-rig.js`, `driving-physics.js`, `brake-lights.js` and `headlights.js`: wheel rig, driving and lights.

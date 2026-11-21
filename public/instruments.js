@@ -179,6 +179,11 @@ export function setupInstruments(container) {
       <g id="low-beam-indicator" transform="translate(318 120) scale(-1 1)" class="low-beam-indicator" visibility="hidden">
         <path d="M6,0 Q-2,0 -2,7 Q-2,14 6,14Z M9,2 l8,-3 M9,6 l8,-3 M9,10 l8,-3 M9,14 l8,-3"/>
       </g>
+      <g id="high-beam-indicator" transform="translate(318 144) scale(-1 1)" class="high-beam-indicator" visibility="hidden" aria-label="High beam">
+        <path d="M6,0 Q-2,0 -2,7 Q-2,14 6,14Z M9,1.5 h8 M9,5.2 h8 M9,8.8 h8 M9,12.5 h8"/>
+      </g>
+      <path id="signal-left" class="turn-signal" visibility="hidden" d="M268,44 l12,-9 v5 h14 v8 h-14 v5z"/>
+      <path id="signal-right" class="turn-signal" visibility="hidden" d="M352,44 l-12,-9 v5 h-14 v8 h14 v5z"/>
       <g id="dsc-indicator" transform="translate(296 71) scale(1.18)" class="dsc-indicator" visibility="hidden" aria-label="DSC stabilizing vehicle">
         <title>Dynamic Stability Control intervention</title>
         <!-- The standard skidding-car symbol: the car with two S-shaped tracks
@@ -194,11 +199,21 @@ export function setupInstruments(container) {
     rangeText = $('#range'),
     gearText = $('#gear'),
     lowBeams = $('#low-beam-indicator'),
+    highBeams = $('#high-beam-indicator'),
+    signalLeft = $('#signal-left'),
+    signalRight = $('#signal-right'),
     dsc = $('#dsc-indicator');
   const warning = new DscIndicatorMotion();
   const motion = new InstrumentMotion();
   let textTime = 0;
   return {
+    // Green arrows for the turn signals (lit with the lamps) and the blue
+    // high-beam lamp.
+    setLamps({ left = false, right = false, high = false }) {
+      signalLeft.setAttribute('visibility', left ? 'visible' : 'hidden');
+      signalRight.setAttribute('visibility', right ? 'visible' : 'hidden');
+      highBeams.setAttribute('visibility', high ? 'visible' : 'hidden');
+    },
     reset() {
       motion.initialized = false;
       warning.reset();

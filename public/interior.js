@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { buildDoorCard, doorMaterials, isOldDoorTriangle } from './door-trim.js';
 
 // New front seats and M steering wheel. The downloaded model's front seats
 // are a few dozen flat triangles and its wheel a coarse ring; both are
@@ -63,6 +64,20 @@ export function isOldBenchTriangle(a, b, c, meshName) {
   );
 }
 
+// Triangles of the model's headliner and trim (roof lining, pillars and
+// door panels): its texture paints them a murky
+// mustard, which fills the view from the driver's seat. They get an
+// anthracite headliner instead.
+export function isHeadlinerTriangle(a, b, c, meshName) {
+  if (meshName !== 'Object_53') return false;
+  const x = (a.x + b.x + c.x) / 3,
+    y = (a.y + b.y + c.y) / 3,
+    z = Math.abs((a.z + b.z + c.z) / 3),
+    low = Math.min(a.y, b.y, c.y);
+  if (x < -1.7 || x > 1.25) return false;
+  return low > 0.5 || (low > 0.3 && y > 0.38 && z > 0.55) || (low > 0.1 && z > 0.62);
+}
+
 // Triangles of the model's front seats in a shared interior mesh: small
 // triangles inside the seat region, excluding the pillar trim above it.
 export function isOldSeatTriangle(a, b, c) {
@@ -81,6 +96,48 @@ export function isOldSeatTriangle(a, b, c) {
     z < maxZ &&
     !(z > 0.58 && y > 0.5)
   );
+}
+
+// Smooth normals for an indexed mesh whose vertices are split at every
+// face (the model's low-poly trim): faces meeting at a point share one
+// normal there, oriented like the face, unless the faces fold back sharply
+// (an edge kept crisp).
+export function smoothNormals(geometry) {
+  const position = geometry.attributes.position,
+    index = geometry.index,
+    key = (i) =>
+      `${Math.round(position.getX(i) * 2000)},${Math.round(position.getY(i) * 2000)},${Math.round(position.getZ(i) * 2000)}`;
+  const faces = [],
+    byPoint = new Map(),
+    a = new THREE.Vector3(),
+    b = new THREE.Vector3(),
+    c = new THREE.Vector3();
+  for (let i = 0; i < index.count; i += 3) {
+    const ids = [index.getX(i), index.getX(i + 1), index.getX(i + 2)];
+    a.fromBufferAttribute(position, ids[0]);
+    b.fromBufferAttribute(position, ids[1]);
+    c.fromBufferAttribute(position, ids[2]);
+    const n = b.clone().sub(a).cross(c.clone().sub(a));
+    const face = { ids, n, unit: n.clone().normalize() };
+    faces.push(face);
+    for (const id of ids) {
+      const k = key(id);
+      if (!byPoint.has(k)) byPoint.set(k, []);
+      byPoint.get(k).push(face);
+    }
+  }
+  const normals = new Float32Array(position.count * 3);
+  if (geometry.attributes.normal) normals.set(geometry.attributes.normal.array);
+  const sum = new THREE.Vector3();
+  for (const face of faces)
+    for (const id of face.ids) {
+      sum.set(0, 0, 0);
+      for (const other of byPoint.get(key(id)))
+        if (other.unit.dot(face.unit) > 0.5) sum.add(other.n);
+      sum.normalize();
+      normals.set([sum.x, sum.y, sum.z], id * 3);
+    }
+  return new THREE.BufferAttribute(normals, 3);
 }
 
 // A smooth closed tube through cross-sections (rings of equal point count),
@@ -244,6 +301,7 @@ const leather = () =>
     sheen: 0.45,
     sheenRoughness: 0.55,
     sheenColor: new THREE.Color(0x4a4a52),
+    envMapIntensity: 0.3,
   });
 
 const Z = new THREE.Vector3(0, 0, 1),
@@ -616,6 +674,7 @@ export function setupInterior(rig) {
   const oldWheel = body.getObjectByName('Object_25');
   if (oldWheel) oldWheel.visible = false;
   let removed = 0;
+  const headliners = [];
   const a = new THREE.Vector3(),
     b = new THREE.Vector3(),
     c = new THREE.Vector3(),
@@ -626,16 +685,26 @@ export function setupInterior(rig) {
     matrix.multiplyMatrices(toBody, mesh.matrixWorld);
     const position = mesh.geometry.attributes.position,
       index = mesh.geometry.index,
-      kept = [];
+      kept = [],
+      lining = [];
     for (let i = 0; i < index.count; i += 3) {
       const ids = [index.getX(i), index.getX(i + 1), index.getX(i + 2)];
       a.fromBufferAttribute(position, ids[0]).applyMatrix4(matrix);
       b.fromBufferAttribute(position, ids[1]).applyMatrix4(matrix);
       c.fromBufferAttribute(position, ids[2]).applyMatrix4(matrix);
-      if (isOldSeatTriangle(a, b, c) || isOldBenchTriangle(a, b, c, mesh.name)) removed++;
+      if (
+        isOldSeatTriangle(a, b, c) ||
+        isOldBenchTriangle(a, b, c, mesh.name) ||
+        isOldDoorTriangle(a, b, c, mesh.name)
+      )
+        removed++;
+      else if (isHeadlinerTriangle(a, b, c, mesh.name)) lining.push(...ids);
       else kept.push(...ids);
     }
     mesh.geometry.setIndex(kept);
+    if (lining.length) headliners.push([mesh, lining]);
+    // Inside the cabin the sky and grass reflect only faintly.
+    mesh.material.envMapIntensity = 0.35;
   });
   const materials = {
     leather: leather(),
@@ -646,11 +715,13 @@ export function setupInterior(rig) {
       sheen: 0.4,
       sheenRoughness: 0.6,
       sheenColor: new THREE.Color(0x3c3c44),
+      envMapIntensity: 0.3,
     }),
     plastic: new THREE.MeshStandardMaterial({
       name: 'Interior black',
       color: 0x101114,
       roughness: 0.45,
+      envMapIntensity: 0.3,
     }),
     buttons: new THREE.MeshStandardMaterial({
       name: 'Wheel buttons',
@@ -672,7 +743,25 @@ export function setupInterior(rig) {
   };
   const interior = new THREE.Group();
   interior.name = 'Interior';
+  // The headliner: the same triangles in their own mesh, in anthracite cloth.
+  const lining = new THREE.MeshStandardMaterial({
+    name: 'Anthracite headliner',
+    color: 0x2a2b2f,
+    roughness: 0.95,
+  });
+  for (const [mesh, ids] of headliners) {
+    const geometry = new THREE.BufferGeometry();
+    for (const [name, attribute] of Object.entries(mesh.geometry.attributes))
+      geometry.setAttribute(name, attribute);
+    geometry.setIndex(ids);
+    geometry.setAttribute('normal', smoothNormals(geometry));
+    const headliner = new THREE.Mesh(geometry, lining);
+    headliner.name = 'Headliner';
+    mesh.add(headliner);
+  }
   for (const z of interiorLayout.seatCentres) interior.add(buildSeat(z, materials));
+  const doors = doorMaterials();
+  interior.add(buildDoorCard(-1, doors), buildDoorCard(1, doors));
   interior.add(buildBench(materials));
   // Dark carpet over the model's floor sheet, whose light-grey texture shone
   // through the windows.

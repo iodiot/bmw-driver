@@ -1,19 +1,24 @@
 import * as THREE from 'three';
-import { lowBeamProfile, lowBeamSettings } from './headlight-profile.js';
+import {
+  highBeamProfile,
+  highBeamSettings,
+  lowBeamProfile,
+  lowBeamSettings,
+} from './headlight-profile.js';
 
 // The beam meets the road at a grazing angle, so a small step in vertical
 // angle spans metres of road: with 256 rows each texel covered about 2 m at
 // 15 m, and the linear steps between texels showed as bands across the lit
 // road. Rows are therefore dense (about 0.2 m at 15 m); the light varies
 // gently sideways, so fewer columns suffice.
-export function createLowBeamPattern(width = 128, height = 4096) {
+export function createLowBeamPattern(width = 128, height = 4096, profile = lowBeamProfile) {
   const data = new Uint16Array(width * height * 4);
   const tangent = Math.tan(lowBeamSettings.angle);
   for (let y = 0; y < height; y++) {
     const vertical = Math.atan((((y + 0.5) / height) * 2 - 1) * tangent);
     for (let x = 0; x < width; x++) {
       const horizontal = Math.atan((((x + 0.5) / width) * 2 - 1) * tangent);
-      const value = THREE.DataUtils.toHalfFloat(lowBeamProfile(horizontal, vertical));
+      const value = THREE.DataUtils.toHalfFloat(profile(horizontal, vertical));
       const offset = (y * width + x) * 4;
       data[offset] = data[offset + 1] = data[offset + 2] = value;
       data[offset + 3] = THREE.DataUtils.toHalfFloat(1);
@@ -39,6 +44,10 @@ export function setupHeadlights(rig) {
   beams.name = 'Low beams';
   rig.body.add(beams);
   const pattern = createLowBeamPattern();
+  // The high beam's pattern, made on first use.
+  let highPattern = null,
+    night = false,
+    high = false;
   const projectors = [];
   for (const side of [-1, 1]) {
     // Measured projector centres, expressed relative to the suspended body pivot.
@@ -67,11 +76,21 @@ export function setupHeadlights(rig) {
     // nominal dip, instead of pitching the beam above the road over each bump.
     inverseBody.copy(rig.body.quaternion).invert();
     correction.slerp(inverseBody, dt > 0 ? 1 - Math.exp(-Math.min(dt, 1 / 15) / 0.18) : 1);
-    direction.set(1, -lowBeamSettings.downwardSlope, 0).applyQuaternion(correction);
+    const slope = high ? highBeamSettings.downwardSlope : lowBeamSettings.downwardSlope;
+    direction.set(1, -slope, 0).applyQuaternion(correction);
     for (const light of projectors)
       light.target.position.copy(light.position).addScaledVector(direction, 40);
   }
   update(0);
+  function apply() {
+    const settings = night && high ? highBeamSettings : lowBeamSettings;
+    for (const light of projectors) {
+      light.intensity = night ? settings.intensity : 0;
+      light.distance = settings.range;
+      light.map = night && high ? highPattern : pattern;
+    }
+    lens.material.emissiveIntensity = night ? (high ? 6 : 4) : 0.8;
+  }
 
   return {
     beams,
@@ -85,9 +104,27 @@ export function setupHeadlights(rig) {
     get lit() {
       return projectors[0].intensity > 0;
     },
+    get high() {
+      return night && high;
+    },
+    // The pattern the lamps project now (the rain lights its drops by it).
+    get currentPattern() {
+      return projectors[0].map;
+    },
     setNight(enabled) {
-      for (const light of projectors) light.intensity = enabled ? lowBeamSettings.intensity : 0;
-      lens.material.emissiveIntensity = enabled ? 4 : 0.8;
+      night = enabled;
+      apply();
+    },
+    // High beam: a different pattern on the same lamps, brighter and
+    // reaching further; swapping textures needs no shader recompile.
+    setHighBeam(enabled) {
+      if (enabled === high) return;
+      high = enabled;
+      if (high && !highPattern) {
+        highPattern = createLowBeamPattern(128, 4096, highBeamProfile);
+        highPattern.name = 'High beam angular distribution';
+      }
+      apply();
     },
   };
 }

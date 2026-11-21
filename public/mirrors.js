@@ -237,3 +237,76 @@ export function setupMirrors(rig, { resolution = 512 } = {}) {
   }
   return { mirrors };
 }
+
+// The rear-view mirror inside, in the model's mirror housing (whose glass
+// side is open). The glass sits on the housing's rear face and shows the view
+// straight back through the rear window, as a mirror aimed by the driver
+// does. The model's cabin is low, so from the mirror itself the rear
+// headrests and bench would fill the view: its camera sits behind them, at
+// the rear window. It draws only while in view (from the driver's seat),
+// every third frame.
+export const rearViewMirror = Object.freeze({
+  centre: Object.freeze([0.372, 0.63, 0]),
+  camera: Object.freeze([-1, 0.66, 0]),
+  width: 0.236,
+  height: 0.054,
+  fov: 15,
+  down: 3,
+});
+
+export function setupRearViewMirror(rig, { resolution = 384 } = {}) {
+  const { width, height, centre, fov, down } = rearViewMirror;
+  const aspect = width / height;
+  const target = new THREE.WebGLRenderTarget(resolution, Math.round(resolution / aspect), {
+    type: THREE.HalfFloatType,
+  });
+  const geometry = new THREE.PlaneGeometry(width, height);
+  // A mirror shows the view reversed left to right.
+  const uv = geometry.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i));
+  const mirror = new THREE.Mesh(
+    geometry,
+    new THREE.MeshBasicMaterial({ map: target.texture, color: 0xcfd2d5, fog: false })
+  );
+  mirror.name = 'Rear-view mirror';
+  const position = new THREE.Vector3(...centre);
+  mirror.position.copy(position);
+  // Facing the driver (backward, -x).
+  mirror.rotation.y = -Math.PI / 2;
+  // A black frame round the glass.
+  const frame = new THREE.Mesh(
+    new THREE.PlaneGeometry(width + 0.01, height + 0.01),
+    new THREE.MeshStandardMaterial({ name: 'Mirror frame', color: 0x0b0c0e, roughness: 0.4 })
+  );
+  frame.position.z = -0.002;
+  frame.name = 'Rear-view mirror frame';
+  mirror.add(frame);
+  rig.body.add(mirror);
+  const camera = new THREE.PerspectiveCamera(fov, aspect, 0.05, 300);
+  camera.name = 'Rear-view mirror camera';
+  camera.position.fromArray(rearViewMirror.camera);
+  const pitch = (down * Math.PI) / 180;
+  camera.lookAt(
+    camera.position.clone().add(new THREE.Vector3(-Math.cos(pitch), -Math.sin(pitch), 0))
+  );
+  rig.body.add(camera);
+  let draws = 0;
+  mirror.onBeforeRender = (renderer, scene) => {
+    if (renderingMirror || draws++ % 3) return;
+    renderingMirror = true;
+    const previousTarget = renderer.getRenderTarget(),
+      shadowUpdate = renderer.shadowMap.autoUpdate;
+    renderer.shadowMap.autoUpdate = false;
+    mirror.visible = false;
+    camera.updateMatrixWorld();
+    renderer.setRenderTarget(target);
+    renderer.state.buffers.depth.setMask(true);
+    if (renderer.autoClear === false) renderer.clear();
+    renderer.render(scene, camera);
+    mirror.visible = true;
+    renderer.shadowMap.autoUpdate = shadowUpdate;
+    renderer.setRenderTarget(previousTarget);
+    renderingMirror = false;
+  };
+  return { mirror, camera };
+}

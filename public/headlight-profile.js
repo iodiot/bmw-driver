@@ -29,3 +29,19 @@ export function lowBeamProfile(horizontal, vertical) {
   const edge = 1 - smooth(0.66, 0.76, Math.hypot(horizontal, vertical));
   return clamp((hotspot + spread + foreground) * belowCutoff * edge, 0, 1);
 }
+
+// High beam: the low beam plus a long-reaching hotspot on the axis (no
+// cut-off) and a wide fill, lighting the road far ahead and the verges.
+// Intensities are relative to the low beam's peak; the lamp itself is
+// brighter (see highBeamSettings).
+export function highBeamProfile(horizontal, vertical) {
+  const hotspot = Math.exp(-((horizontal / 0.16) ** 2) - ((vertical - 0.004) / 0.035) ** 2);
+  const fill = 0.18 * Math.exp(-((horizontal / 0.5) ** 2) - ((vertical + 0.01) / 0.09) ** 2);
+  const edge = 1 - smooth(0.66, 0.76, Math.hypot(horizontal, vertical));
+  return clamp(Math.max(lowBeamProfile(horizontal, vertical), (hotspot + fill) * edge), 0, 1);
+}
+export const highBeamSettings = Object.freeze({
+  intensity: 60000,
+  range: 180,
+  downwardSlope: 0.002,
+});

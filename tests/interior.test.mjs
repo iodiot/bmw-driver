@@ -81,3 +81,28 @@ test('The iDrive map turns with the car: straight ahead is up', async () => {
     assert.ok(Math.abs(ahead[0]) < 1e-9 && Math.abs(ahead[1] + 50) < 1e-9);
   }
 });
+
+test('Door cards replace the flat door panels and keep clear of the seats', async () => {
+  const THREE = await import('three');
+  const { doorTrim, isOldDoorTriangle } = await import('../public/door-trim.js');
+  const { interiorLayout } = await import('../public/interior.js');
+  const v = (x, y, z) => new THREE.Vector3(x, y, z);
+  // A panel facing across the car, on the driver's door below the sill.
+  assert.ok(
+    isOldDoorTriangle(v(-0.3, 0.15, -0.72), v(0.3, 0.15, -0.72), v(0, 0.33, -0.72), 'Object_53')
+  );
+  assert.ok(
+    isOldDoorTriangle(v(-0.3, 0.15, 0.72), v(0.3, 0.15, 0.72), v(0, 0.33, 0.72), 'Object_53')
+  );
+  // The sill (facing up), the windscreen pillar and other meshes stay.
+  assert.ok(
+    !isOldDoorTriangle(v(-0.3, 0.39, -0.7), v(0.3, 0.39, -0.7), v(0, 0.39, -0.78), 'Object_53')
+  );
+  assert.ok(
+    !isOldDoorTriangle(v(-0.3, 0.15, -0.72), v(0.3, 0.15, -0.72), v(0, 0.33, -0.72), 'Object_37')
+  );
+  // The armrest stops short of the seat's side.
+  const seatEdge = Math.abs(interiorLayout.seatCentres[0]) + 0.225 + 0.02;
+  assert.ok(doorTrim.face - doorTrim.armrest.depth > seatEdge);
+  assert.ok(doorTrim.armrest.top < doorTrim.strip && doorTrim.strip < doorTrim.sill);
+});

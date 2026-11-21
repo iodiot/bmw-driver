@@ -89,6 +89,7 @@ const icons = {
   restart: '<path d="M3.8 9a5.2 5.2 0 1 0 1.6-3.8M3.6 2.8v2.6h2.6"/>',
   sound:
     '<path d="M2.5 7h2.8l3.7-3.2v10.4L5.3 11H2.5z"/><path d="M11.6 6.4a3.6 3.6 0 0 1 0 5.2M13.9 4.2a6.7 6.7 0 0 1 0 9.6"/>',
+  camera: '<path d="M2.5 6.2h3l1.4-2h4.2l1.4 2h3v8.3h-13z"/><circle cx="9" cy="10.2" r="2.6"/>',
   muted:
     '<path d="M2.5 7h2.8l3.7-3.2v10.4L5.3 11H2.5z"/><path d="M11.8 6.8l4.4 4.4M16.2 6.8l-4.4 4.4"/>',
 };
@@ -97,7 +98,7 @@ const presetLabels = { day: 'Day (13:00)', sunset: 'Sunset (18:54)', night: 'Nig
 
 export function setupDayBar(
   container,
-  { setTime, toggleRain, toggleRunning, restart, toggleSound }
+  { setTime, toggleRain, toggleRunning, restart, toggleSound, nextCamera }
 ) {
   container.innerHTML = `
     <div class="day-graph" title="Time of day: click or drag to change">
@@ -128,6 +129,7 @@ export function setupDayBar(
       </div>
       <button type="button" class="day-rain" aria-label="Rain" title="Rain" aria-pressed="false">${icon('rain')}</button>
       <button type="button" class="day-run" aria-label="Pause time" title="Pause time" aria-pressed="false">${icon('pause')}</button>
+      <button type="button" class="day-camera" aria-label="Camera: Chase (C)" title="Camera: Chase (C)">${icon('camera')}</button>
       <button type="button" class="day-sound" aria-label="Sound (M)" title="Sound (M)" aria-pressed="true">${icon('sound')}</button>
       <button type="button" class="day-restart" aria-label="Restart (R)" title="Restart (R)">${icon('restart')}</button>
     </div>`;
@@ -142,13 +144,15 @@ export function setupDayBar(
     presets = [...container.querySelectorAll('[data-preset]')],
     rain = container.querySelector('.day-rain'),
     run = container.querySelector('.day-run'),
-    soundButton = container.querySelector('.day-sound');
+    soundButton = container.querySelector('.day-sound'),
+    cameraButton = container.querySelector('.day-camera');
   for (const button of presets)
     button.onclick = () => setTime(dayCycle.presets[button.dataset.preset]);
   rain.onclick = toggleRain;
   run.onclick = toggleRunning;
   container.querySelector('.day-restart').onclick = () => restart?.();
   soundButton.onclick = () => toggleSound?.();
+  cameraButton.onclick = () => nextCamera?.();
   // A clicked button lets go of focus, so the keyboard drives the car again.
   for (const button of container.querySelectorAll('button'))
     button.addEventListener('pointerup', () => button.blur());
@@ -173,6 +177,11 @@ export function setupDayBar(
   let shown = '',
     soundShown = '';
   return {
+    // The current camera view, named on the button.
+    setCamera(view, label) {
+      cameraButton.dataset.view = view;
+      cameraButton.title = cameraButton.ariaLabel = `Camera: ${label} (C)`;
+    },
     // On and playing, on but waiting for a click (browsers start sound only
     // after one), or muted.
     setSound(audible, enabled) {

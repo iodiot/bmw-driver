@@ -219,9 +219,13 @@ export class DrivingSimulation {
       (25 * Math.PI) / 180,
       Math.atan((45 * this.wheelbase) / (this.speed * this.speed + 1))
     );
+    // A stick or the touch wheel gives `steerAxis` (-1 right … 1 left), a
+    // share of the same lock.
     const steerTarget = Number.isFinite(input.steerAngle)
       ? clamp(input.steerAngle, -assistLimit, assistLimit)
-      : ((input.left ? 1 : 0) - (input.right ? 1 : 0)) * limit;
+      : Number.isFinite(input.steerAxis) && input.steerAxis !== 0
+        ? clamp(input.steerAxis, -1, 1) * limit
+        : ((input.left ? 1 : 0) - (input.right ? 1 : 0)) * limit;
     this.steer += (steerTarget - this.steer) * (1 - Math.exp(-6.5 * dt));
     this.readSurface();
     const tyres = this.tyres.step(dt, this, input, raining, acceleration);

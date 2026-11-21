@@ -25,15 +25,19 @@ import { refineCarMaterials } from './car-materials.js';
 import { laneKeepingSteer, nearestLane, curveSpeed, bumpSpeed } from './lane-keeping.js';
 import { setupSparks } from './sparks.js';
 import { setupMinimap } from './minimap.js';
-import { setupMirrors } from './mirrors.js';
+import { setupMirrors, setupRearViewMirror } from './mirrors.js';
 import { createWeatherCycle, weatherCycle } from './weather-cycle.js';
 import { daylight, dayCycle, wrapHours } from './time-of-day.js';
 import { setupDayBar } from './day-bar.js';
 import { setupRearGlow } from './rear-glow.js';
 import { setupInterior } from './interior.js';
+import { SeatCamera, cameraViews, nextCameraView, viewFov } from './camera-views.js';
 import { setupCockpitCluster } from './cockpit-cluster.js';
 import { setupCentreDisplay } from './centre-display.js';
 import { setupDust } from './dust.js';
+import { setupTyreSmoke } from './tyre-smoke.js';
+import { TurnSignals, highBeamWanted, setupSignalLamps } from './signals.js';
+import { readPad, setupTouchControls } from './touch-controls.js';
 import { setupBodyDirt } from './body-dirt.js';
 import { roadLateral, guardrailsEnabled, surfaceRoughness } from './road-profile.js';
 
@@ -103,6 +107,11 @@ const rain = setupRain(scene);
 const roadside = guardrailsEnabled ? setupRoadside(scene) : null;
 const sparks = setupSparks(scene);
 const dust = setupDust(scene);
+const tyreSmoke = setupTyreSmoke(scene);
+// Turn signals (Q, E) and the high-beam assistant (H switches it off and on).
+const signals = new TurnSignals();
+let signalLamps,
+  highBeamAssistOn = true;
 road.update(0, 0);
 const input = {},
   held = new Set(),
@@ -155,6 +164,54 @@ function resetView() {
   controls.update();
 }
 resetView();
+// Camera view: the orbiting chase camera, the driver's seat or the bonnet.
+// Remembered between visits.
+const seatCamera = new SeatCamera();
+let cameraView = 'chase';
+try {
+  const saved = localStorage.getItem('bmw-driver:camera');
+  if (cameraViews[saved]) cameraView = saved;
+} catch {
+  // Starts with the chase camera.
+}
+function applyCameraFov() {
+  camera.fov = viewFov(cameraView, camera.aspect) ?? cameraFov;
+  camera.near = cameraView === 'chase' ? 0.05 : 0.02;
+  camera.updateProjectionMatrix();
+}
+function setCameraView(view) {
+  cameraView = view;
+  controls.enabled = view === 'chase';
+  seatCamera.reset();
+  applyCameraFov();
+  if (view === 'chase') resetView();
+  document.body.dataset.cameraView = view;
+  dayBar.setCamera(view, cameraViews[view].label);
+  try {
+    localStorage.setItem('bmw-driver:camera', view);
+  } catch {
+    // Not remembered.
+  }
+}
+// In the seat or on the bonnet, dragging turns the driver's head.
+let lookPointer = null;
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (cameraView === 'chase' || e.button !== 0) return;
+  lookPointer = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  renderer.domElement.setPointerCapture(e.pointerId);
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (lookPointer?.id !== e.pointerId) return;
+  seatCamera.drag(e.clientX - lookPointer.x, e.clientY - lookPointer.y, innerHeight, camera.fov);
+  lookPointer.x = e.clientX;
+  lookPointer.y = e.clientY;
+});
+const endLook = (e) => {
+  if (lookPointer?.id === e.pointerId) lookPointer = null;
+};
+renderer.domElement.addEventListener('pointerup', endLook);
+renderer.domElement.addEventListener('pointercancel', endLook);
+renderer.domElement.addEventListener('dblclick', () => seatCamera.reset());
 $('#orbit').onchange = (e) => {
   controls.autoRotate = e.target.checked;
 };
@@ -231,7 +288,9 @@ const dayBar = setupDayBar($('#day-bar'), {
   },
   restart: () => restart(),
   toggleSound: () => vehicleAudio.toggle(),
+  nextCamera: () => setCameraView(nextCameraView(cameraView)),
 });
+setCameraView(cameraView);
 $('#night').onchange = (e) => {
   setTimeOfDay(e.target.checked ? dayCycle.presets.night : dayCycle.presets.day);
 };
@@ -241,10 +300,23 @@ $('#rain').onchange = (e) => {
 };
 applyWeather();
 applyDaylight();
+// Keys held, kept apart from `input`, which also takes the touch pedals and
+// a gamepad each frame.
+const keyInput = {};
 function clearInput() {
   held.clear();
   for (const k of Object.keys(input)) input[k] = false;
+  for (const k of Object.keys(keyInput)) keyInput[k] = false;
 }
+const touchBox = document.createElement('div');
+touchBox.className = 'touch-controls';
+document.body.append(touchBox);
+const touch = setupTouchControls(touchBox, {
+  onDrive: () => {
+    autopilot = false;
+  },
+});
+let padPrevious = [];
 function setDriving(value) {
   driving = Boolean(value && sim);
   clearInput();
@@ -265,6 +337,8 @@ function restart(x = 0) {
   skidMarks.reset();
   sparks.reset();
   dust.reset();
+  tyreSmoke.reset();
+  signals.reset();
   bodyDirt?.reset();
   minimap.reset();
   sim.x = x;
@@ -275,7 +349,8 @@ function restart(x = 0) {
   for (const k of Object.keys(peaks)) peaks[k] = 0;
   rig.root.position.set(x, 0, 0);
   rig.root.rotation.set(0, 0, 0);
-  resetView();
+  seatCamera.reset();
+  if (cameraView === 'chase') resetView();
   setDriving(true);
 }
 $('#restart').onclick = () => restart();
@@ -292,8 +367,8 @@ const actions = {
 addEventListener('keydown', (e) => {
   // Driving keys work wherever focus is, except while typing; Space still
   // presses a focused button.
-  if (e.target.closest('input,textarea,select')) return;
-  const onControl = e.target.closest('button,summary,a');
+  if (e.target.closest?.('input,textarea,select')) return;
+  const onControl = e.target.closest?.('button,summary,a');
   if (e.code === 'Space') {
     if (onControl) return;
     e.preventDefault();
@@ -305,6 +380,17 @@ addEventListener('keydown', (e) => {
     restart();
     return;
   }
+  if (['KeyQ', 'KeyE', 'KeyH'].includes(e.code) && !e.repeat && !e.metaKey && !e.ctrlKey) {
+    e.preventDefault();
+    if (e.code === 'KeyH') highBeamAssistOn = !highBeamAssistOn;
+    else signals.toggle(e.code === 'KeyQ' ? 'left' : 'right');
+    return;
+  }
+  if (e.code === 'KeyC' && !e.repeat && !e.metaKey && !e.ctrlKey) {
+    e.preventDefault();
+    setCameraView(nextCameraView(cameraView));
+    return;
+  }
   if (e.code === 'KeyM' && !e.repeat && !e.metaKey && !e.ctrlKey) {
     e.preventDefault();
     vehicleAudio.toggle();
@@ -314,7 +400,7 @@ addEventListener('keydown', (e) => {
   if (action) {
     e.preventDefault();
     held.add(e.code);
-    input[action] = true;
+    keyInput[action] = true;
     // Any driving key hands full control to the driver until Restart.
     autopilot = false;
   }
@@ -324,7 +410,7 @@ addEventListener('keyup', (e) => {
   if (action) {
     e.preventDefault();
     held.delete(e.code);
-    input[action] = Object.keys(actions).some((k) => actions[k] === action && held.has(k));
+    keyInput[action] = Object.keys(actions).some((k) => actions[k] === action && held.has(k));
   }
 });
 addEventListener('blur', clearInput);
@@ -353,6 +439,7 @@ new GLTFLoader().load(
       skidMarks = setupSkidMarks(scene, sim.layout);
       brakeLights = setupBrakeLights(rig);
       headlights = setupHeadlights(rig);
+      signalLamps = setupSignalLamps(rig);
       rain.setHeadlights(headlights);
       headlights.setNight(lowBeamsOn);
       exhaust = setupExhaust(scene, rig);
@@ -366,6 +453,7 @@ new GLTFLoader().load(
       brakes = setupBrakes(rig);
       licensePlates = setupLicensePlates(rig);
       setupMirrors(rig);
+      setupRearViewMirror(rig);
       interior = setupInterior(rig);
       cockpitCluster = setupCockpitCluster(rig);
       centreDisplay = setupCentreDisplay(rig);
@@ -413,7 +501,7 @@ new GLTFLoader().load(
 );
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
+  applyCameraFov();
   renderer.setPixelRatio(renderQuality.resize(innerWidth, innerHeight));
   renderer.setSize(innerWidth, innerHeight);
 });
@@ -442,6 +530,24 @@ renderer.setAnimationLoop(() => {
     const previousBrakeEnergy = sim.brakeEnergy,
       oldX = rig.root.position.x,
       oldZ = rig.root.position.z;
+    // Keys, touch pedals and a gamepad together. Any of them hands control
+    // to the driver.
+    const pad = readPad(navigator.getGamepads?.().find(Boolean), padPrevious);
+    if (pad) {
+      padPrevious = pad.buttons;
+      if (pad.camera) setCameraView(nextCameraView(cameraView));
+      if (pad.signalLeft) signals.toggle('left');
+      if (pad.signalRight) signals.toggle('right');
+      if (pad.restart) restart();
+      if (pad.pause) setDriving(!driving);
+    }
+    input.accelerate = Boolean(keyInput.accelerate || touch.accelerate || pad?.accelerate);
+    input.brake = Boolean(keyInput.brake || touch.brake || pad?.brake);
+    input.left = Boolean(keyInput.left);
+    input.right = Boolean(keyInput.right);
+    input.steerAxis = touch.steer || pad?.steer || 0;
+    if (touch.accelerate || touch.brake || pad?.accelerate || pad?.brake || input.steerAxis)
+      autopilot = false;
     // Self-driving after page load and Restart: the car keeps its lane through
     // the curves. Once the driver presses any driving key, steering is fully
     // manual with no assistance.
@@ -483,7 +589,27 @@ renderer.setAnimationLoop(() => {
     camera.position.copy(controls.target).add(offset);
     rig.body.position.y = 0.55 + sim.heave;
     rig.body.rotation.set(sim.roll, 0, sim.pitch);
+    headlights.setHighBeam(
+      highBeamWanted({
+        night: lowBeamsOn,
+        speed: sim.speed,
+        raining: rainMode,
+        enabled: highBeamAssistOn,
+      })
+    );
     headlights.update(dt);
+    // The stalk cancels by itself when the driver steers back; the
+    // self-driving car switches its signals itself.
+    const relay = signals.step(dt, sim.steer, { autoCancel: !autopilot });
+    if (relay) vehicleAudio.tick(relay === 'on');
+    signalLamps.update(signals);
+    instruments.setLamps({
+      left: signals.lit && signals.side === 'left',
+      right: signals.lit && signals.side === 'right',
+      high: headlights.high,
+    });
+    document.body.dataset.signal = signals.side ?? 'none';
+    document.body.dataset.highBeam = String(headlights.high);
     for (let i = 0; i < rig.wheels.length; i++) {
       const w = rig.wheels[i],
         state = sim.wheels[i];
@@ -520,6 +646,14 @@ renderer.setAnimationLoop(() => {
       camera,
       light: 1 - 0.85 * light.darkness,
     });
+    tyreSmoke.update(dt, sim, {
+      running: driving,
+      wet: sim.tyres.wetness > 0.3,
+      viewportHeight: renderer.domElement.height,
+      camera,
+      light: 1 - 0.8 * light.darkness,
+    });
+    document.body.dataset.tyreSmoke = String(tyreSmoke.active);
     document.body.dataset.railContact = String(Boolean(driving && sim.railContact));
     document.body.dataset.sparks = String(sparks.active);
     roadside?.update(sim.x);
@@ -611,10 +745,15 @@ renderer.setAnimationLoop(() => {
     raining: rainMode,
     accelerate: Boolean(input.accelerate),
     brake: Boolean(input.brake),
-    distance: rig ? camera.position.distanceTo(rig.root.position) : 8,
+    distance: cameraView !== 'chase' ? 4 : rig ? camera.position.distanceTo(rig.root.position) : 8,
+    inside: cameraViews[cameraView].inside ? 1 : 0,
   });
   dayBar.setSound(vehicleAudio.audible, $('#sound').checked);
-  controls.update(dt);
+  if (cameraView === 'chase' || !rig) controls.update(dt);
+  else {
+    seatCamera.step(dt, driving ? sim : null);
+    seatCamera.place(camera, cameraView, rig.root, rig.body);
+  }
   shiftShake.apply(camera, innerWidth, innerHeight);
   rain.update(dt, camera, sim, nightMode);
   document.body.dataset.orbit = String(controls.autoRotate);
