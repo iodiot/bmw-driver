@@ -165,15 +165,9 @@ function resetView() {
 }
 resetView();
 // Camera view: the orbiting chase camera, the driver's seat or the bonnet.
-// Remembered between visits.
+// Every visit starts with the chase camera, from behind the car.
 const seatCamera = new SeatCamera();
 let cameraView = 'chase';
-try {
-  const saved = localStorage.getItem('bmw-driver:camera');
-  if (cameraViews[saved]) cameraView = saved;
-} catch {
-  // Starts with the chase camera.
-}
 function applyCameraFov() {
   camera.fov = viewFov(cameraView, camera.aspect) ?? cameraFov;
   camera.near = cameraView === 'chase' ? 0.05 : 0.02;
@@ -187,11 +181,6 @@ function setCameraView(view) {
   if (view === 'chase') resetView();
   document.body.dataset.cameraView = view;
   dayBar.setCamera(view, cameraViews[view].label);
-  try {
-    localStorage.setItem('bmw-driver:camera', view);
-  } catch {
-    // Not remembered.
-  }
 }
 // In the seat or on the bonnet, dragging turns the driver's head.
 let lookPointer = null;
@@ -414,8 +403,16 @@ addEventListener('keyup', (e) => {
   }
 });
 addEventListener('blur', clearInput);
+// Away from the tab the car stops; back on it, it drives on.
+let pausedByHiding = false;
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) setDriving(false);
+  if (document.hidden && driving) {
+    setDriving(false);
+    pausedByHiding = true;
+  } else if (!document.hidden && pausedByHiding) {
+    pausedByHiding = false;
+    setDriving(true);
+  }
   renderQuality.reset();
 });
 new GLTFLoader().load(

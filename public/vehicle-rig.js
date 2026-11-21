@@ -107,7 +107,10 @@ export function addArchLiners(rig) {
     roughness: 0.9,
     side: THREE.DoubleSide,
   });
-  const reach = 0.35; // radians beyond the horizontal, front and back
+  // Radians below the horizontal at the front and back of the arc: the arch
+  // lip ends about there, so a longer arc showed as a black plate beside the
+  // tyre, below the bodywork.
+  const reach = 0.1;
   const liners = rig.wheels.map((w) => {
     const side = Math.sign(w.z) || 1,
       radius = w.r + 0.045,
