@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { roadCenterZ, branchOffset, roadEdge } from './road-profile.js';
 import { formatClock } from './time-of-day.js';
+import { roundedBlock } from './door-trim.js';
 
 // The centre of the dashboard. The model shows a blurred portrait picture
-// there; the F10 has a wide iDrive screen standing on the dashboard in a
-// black bezel, with the centre stack below it (air vents and the climate
-// panel). The screen shows a live navigation map of the road ahead, the
+// there; the F10 has a wide iDrive screen set into the dashboard top, above
+// the centre stack (built in dashboard.js). The screen shows a live navigation map of the road ahead, the
 // country roads branching off and the car, beside the time, outside
 // temperature and radio, redrawn a few times a second.
 export const centreLayout = Object.freeze({
@@ -22,6 +22,30 @@ export const centreLayout = Object.freeze({
   refresh: 1 / 4,
   // Map scale (pixels per metre) and how far ahead the car sits.
   mapScale: 1.3,
+  // The trim band on the dashboard's sloping face (body space): across z,
+  // its centre, height and the face's tilt.
+  band: Object.freeze({ from: 0.13, to: 0.69, x: 0.592, y: 0.302, height: 0.034, tilt: -0.52 }),
+});
+
+const inside = { envMapIntensity: 0.25 };
+const dashMaterial = new THREE.MeshStandardMaterial({
+  name: 'Dashboard leather',
+  color: 0x121316,
+  roughness: 0.7,
+  ...inside,
+});
+const trimMaterial = new THREE.MeshStandardMaterial({
+  name: 'Dashboard Aluminium Trace',
+  color: 0x5a5d63,
+  metalness: 0.55,
+  roughness: 0.5,
+  ...inside,
+});
+const chromeMaterial = new THREE.MeshStandardMaterial({
+  name: 'Dashboard chrome',
+  color: 0xc4c8cc,
+  metalness: 1,
+  roughness: 0.22,
 });
 
 // A quad from four corners (top left, bottom left, top right, bottom right).
@@ -48,89 +72,6 @@ function canvasTexture(width, height) {
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
   return { canvas, ctx: canvas.getContext('2d'), texture };
-}
-
-// Centre stack: two vents under the screen, hazard switch, the climate
-// panel with its temperature displays and a row of buttons.
-function drawStack(ctx, w, h) {
-  const panel = ctx.createLinearGradient(0, 0, 0, h);
-  panel.addColorStop(0, '#15171a');
-  panel.addColorStop(1, '#0b0c0e');
-  ctx.fillStyle = panel;
-  ctx.fillRect(0, 0, w, h);
-  const vent = (x, y, vw, vh) => {
-    ctx.fillStyle = '#050506';
-    ctx.beginPath();
-    ctx.roundRect(x, y, vw, vh, vw * 0.12);
-    ctx.fill();
-    ctx.strokeStyle = '#6d737a';
-    ctx.lineWidth = w * 0.008;
-    ctx.stroke();
-    ctx.strokeStyle = '#2a2d31';
-    ctx.lineWidth = w * 0.012;
-    for (let i = 1; i < 6; i++) {
-      ctx.beginPath();
-      ctx.moveTo(x + vw * 0.08, y + (vh * i) / 6);
-      ctx.lineTo(x + vw * 0.92, y + (vh * i) / 6);
-      ctx.stroke();
-    }
-  };
-  vent(w * 0.06, h * 0.05, w * 0.38, h * 0.22);
-  vent(w * 0.56, h * 0.05, w * 0.38, h * 0.22);
-  // Hazard switch between the vents.
-  ctx.fillStyle = '#1f2226';
-  ctx.beginPath();
-  ctx.roundRect(w * 0.455, h * 0.11, w * 0.09, h * 0.08, w * 0.015);
-  ctx.fill();
-  ctx.strokeStyle = '#d63a2c';
-  ctx.lineWidth = w * 0.01;
-  ctx.beginPath();
-  ctx.moveTo(w * 0.5, h * 0.125);
-  ctx.lineTo(w * 0.525, h * 0.175);
-  ctx.lineTo(w * 0.475, h * 0.175);
-  ctx.closePath();
-  ctx.stroke();
-  // Climate panel: chrome-edged strip with two temperature displays.
-  const top = h * 0.36;
-  ctx.fillStyle = '#1a1c20';
-  ctx.beginPath();
-  ctx.roundRect(w * 0.04, top, w * 0.92, h * 0.26, w * 0.03);
-  ctx.fill();
-  ctx.strokeStyle = '#8b9198';
-  ctx.lineWidth = w * 0.007;
-  ctx.stroke();
-  ctx.font = `600 ${Math.round(h * 0.055)}px "Helvetica Neue", Arial, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  for (const [x, t] of [
-    [0.2, '21.5'],
-    [0.8, '21.0'],
-  ]) {
-    ctx.fillStyle = '#05070a';
-    ctx.fillRect(w * (x - 0.11), top + h * 0.03, w * 0.22, h * 0.08);
-    ctx.fillStyle = '#ff9a3c';
-    ctx.fillText(t, w * x, top + h * 0.07);
-  }
-  ctx.fillStyle = '#c8ccd1';
-  ctx.font = `600 ${Math.round(h * 0.035)}px "Helvetica Neue", Arial, sans-serif`;
-  ['AUTO', 'A/C', 'MAX', 'REST', 'OFF'].forEach((label, i) => {
-    const x = w * (0.14 + i * 0.18);
-    ctx.fillStyle = '#26292e';
-    ctx.beginPath();
-    ctx.roundRect(x - w * 0.075, top + h * 0.15, w * 0.15, h * 0.075, w * 0.012);
-    ctx.fill();
-    ctx.fillStyle = '#c8ccd1';
-    ctx.fillText(label, x, top + h * 0.188);
-  });
-  // Radio buttons and a CD slot below.
-  ctx.fillStyle = '#050506';
-  ctx.fillRect(w * 0.2, h * 0.7, w * 0.6, h * 0.012);
-  for (let i = 0; i < 8; i++) {
-    ctx.fillStyle = '#23262a';
-    ctx.beginPath();
-    ctx.roundRect(w * (0.08 + i * 0.107), h * 0.76, w * 0.085, h * 0.05, w * 0.01);
-    ctx.fill();
-  }
 }
 
 // Map position of a world point relative to the car, heading up.
@@ -251,20 +192,6 @@ export function setupCentreDisplay(rig) {
     right = p[2].clone().sub(p[0]).normalize(),
     normal = new THREE.Vector3().crossVectors(right, up).normalize();
   if (normal.x > 0) normal.negate();
-  // Centre stack on the old picture's place.
-  const stack = canvasTexture(320, 450);
-  drawStack(stack.ctx, 320, 450);
-  stack.texture.needsUpdate = true;
-  const stackMesh = quad(
-    p.map((q) => q.clone().addScaledVector(normal, 0.0015)),
-    new THREE.MeshStandardMaterial({
-      name: 'Centre stack',
-      map: stack.texture,
-      roughness: 0.45,
-      metalness: 0.2,
-    })
-  );
-  stackMesh.name = 'Centre stack';
   // The iDrive screen standing on the dashboard above it, in a bezel.
   const topCentre = p[0].clone().add(p[2]).multiplyScalar(0.5);
   const screenCentre = topCentre
@@ -290,9 +217,44 @@ export function setupCentreDisplay(rig) {
   );
   bezel.position.copy(screenCentre).addScaledVector(normal, -0.0065);
   bezel.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, normal));
+  // As in the F10, the screen sits in the dashboard rather than on it: a
+  // housing behind it reaches forward into the dash top, under a brow that
+  // shades the glass.
+  const basis = new THREE.Matrix4().makeBasis(right, up, normal);
+  const housing = new THREE.Mesh(
+    roundedBlock(screen.width + 0.03, screen.height + 0.022, 0.11, 0.008),
+    dashMaterial
+  );
+  housing.position.copy(screenCentre).addScaledVector(normal, -0.062);
+  housing.quaternion.setFromRotationMatrix(basis);
+  housing.name = 'iDrive screen housing';
+  const brow = new THREE.Mesh(roundedBlock(screen.width + 0.04, 0.012, 0.05, 0.005), dashMaterial);
+  brow.position
+    .copy(screenCentre)
+    .addScaledVector(up, screen.height / 2 + 0.012)
+    .addScaledVector(normal, -0.012);
+  brow.quaternion.setFromRotationMatrix(basis);
+  brow.name = 'iDrive screen brow';
+  // The trim band across the dashboard, from the centre stack to the
+  // passenger door at vent height, Aluminium Trace over a thin chrome line,
+  // on the dash's sloping face.
+  const { band } = centreLayout;
+  const length = band.to - band.from;
+  const trim = new THREE.Mesh(roundedBlock(0.012, band.height, length, 0.004), trimMaterial);
+  trim.position.set(band.x, band.y, (band.from + band.to) / 2);
+  trim.rotation.z = band.tilt;
+  trim.name = 'Dashboard trim band';
+  const chromeLine = new THREE.Mesh(roundedBlock(0.006, 0.004, length, 0.0015), chromeMaterial);
+  chromeLine.position.set(
+    band.x + Math.sin(-band.tilt) * 0.004 - 0.002,
+    band.y - band.height / 2 - 0.004,
+    (band.from + band.to) / 2
+  );
+  chromeLine.rotation.z = band.tilt;
+  chromeLine.name = 'Dashboard chrome line';
   const group = new THREE.Group();
   group.name = 'Centre display';
-  group.add(stackMesh, bezel, screenMesh);
+  group.add(bezel, screenMesh, housing, brow, trim, chromeLine);
   body.add(group);
   let elapsed = Infinity;
   return {

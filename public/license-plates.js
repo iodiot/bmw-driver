@@ -189,6 +189,61 @@ export function drawUkrainianPlate(ctx, text = ukrainianPlate.text, scale = 4) {
   ctx.restore();
 }
 
+// Relief of a stamped plate (white raised, black flat) at `scale` pixels per
+// millimetre: the pressed rim round the field and the characters stand
+// proud of the sheet.
+export function drawPlateRelief(ctx, text = ukrainianPlate.text, scale = 4) {
+  const W = 520,
+    H = 112;
+  ctx.save();
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W * scale, H * scale);
+  ctx.scale(scale, scale);
+  ctx.strokeStyle = ctx.fillStyle = '#fff';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.roundRect(1.8, 1.8, W - 3.6, H - 3.6, 5);
+  ctx.stroke();
+  const { glyphs, width } = plateLayout(text);
+  const fieldLeft = 2.4 + 47,
+    left = fieldLeft + (W - 2.4 - fieldLeft - width) / 2,
+    top = (H - glyphHeight) / 2;
+  for (const g of glyphs) glyph(ctx, g.ch, left + g.x, top, g.w, glyphHeight, stroke);
+  ctx.restore();
+}
+
+// Normal map (tangent space) from a relief canvas: slopes by central
+// differences, softened by drawing the relief blurred first. Canvas rows run
+// down; the texture's v runs up.
+export function reliefNormals(relief, strength = 2.2) {
+  const { width, height } = relief;
+  const soft = document.createElement('canvas');
+  soft.width = width;
+  soft.height = height;
+  const sctx = soft.getContext('2d');
+  sctx.filter = 'blur(3px)';
+  sctx.drawImage(relief, 0, 0);
+  const h = sctx.getImageData(0, 0, width, height).data;
+  const out = sctx.createImageData(width, height);
+  const at = (x, y) =>
+    h[(Math.min(height - 1, Math.max(0, y)) * width + Math.min(width - 1, Math.max(0, x))) * 4] /
+    255;
+  for (let y = 0; y < height; y++)
+    for (let x = 0; x < width; x++) {
+      const dx = (at(x + 1, y) - at(x - 1, y)) * strength,
+        dy = (at(x, y - 1) - at(x, y + 1)) * strength;
+      const len = Math.hypot(dx, dy, 1);
+      const i = (y * width + x) * 4;
+      out.data[i] = (-dx / len) * 127.5 + 127.5;
+      out.data[i + 1] = (-dy / len) * 127.5 + 127.5;
+      out.data[i + 2] = (1 / len) * 127.5 + 127.5;
+      out.data[i + 3] = 255;
+    }
+  sctx.filter = 'none';
+  sctx.putImageData(out, 0, 0);
+  return soft;
+}
+
 // Finds a flat, upright plane that sits just outside the body over the plate
 // area, following the body's mean tilt there.
 function fitPlate(meshes, { end, centreY }) {
@@ -221,6 +276,46 @@ function fitPlate(meshes, { end, centreY }) {
   return { x: x - direction * 0.004, y: centreY, slope };
 }
 
+// A black plastic holder round the plate: its lip covers the plate's edge
+// and stands a few millimetres proud, so the plate sits in a frame rather
+// than lying flat on the bumper.
+const holderMaterial = new THREE.MeshStandardMaterial({
+  name: 'Plate holder',
+  color: 0x0b0c0e,
+  roughness: 0.5,
+});
+function plateHolder(width, height, thickness) {
+  const rect = (path, w, h, r) => {
+    path.moveTo(-w / 2 + r, -h / 2);
+    path.lineTo(w / 2 - r, -h / 2);
+    path.quadraticCurveTo(w / 2, -h / 2, w / 2, -h / 2 + r);
+    path.lineTo(w / 2, h / 2 - r);
+    path.quadraticCurveTo(w / 2, h / 2, w / 2 - r, h / 2);
+    path.lineTo(-w / 2 + r, h / 2);
+    path.quadraticCurveTo(-w / 2, h / 2, -w / 2, h / 2 - r);
+    path.lineTo(-w / 2, -h / 2 + r);
+    path.quadraticCurveTo(-w / 2, -h / 2, -w / 2 + r, -h / 2);
+    return path;
+  };
+  const shape = rect(new THREE.Shape(), width + 0.016, height + 0.016, 0.008);
+  shape.holes.push(rect(new THREE.Path(), width - 0.004, height - 0.004, 0.005));
+  const depth = 0.006;
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth,
+    bevelEnabled: true,
+    bevelThickness: 0.0012,
+    bevelSize: 0.0012,
+    bevelSegments: 2,
+    curveSegments: 6,
+  });
+  // From behind the plate to a few millimetres in front of its face.
+  geometry.translate(0, 0, thickness / 2 + 0.0025 - depth);
+  const holder = new THREE.Mesh(geometry, holderMaterial);
+  holder.name = 'Plate holder';
+  holder.castShadow = true;
+  return holder;
+}
+
 export function setupLicensePlates(rig, { text = ukrainianPlate.text } = {}) {
   rig.root.updateMatrixWorld(true);
   // The model carries a taller, blank US-size rear plate. Hide it so it does
@@ -239,9 +334,18 @@ export function setupLicensePlates(rig, { text = ukrainianPlate.text } = {}) {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
+  // Stamped relief: raised characters and rim as a normal map.
+  const relief = document.createElement('canvas');
+  relief.width = 520 * 2;
+  relief.height = 112 * 2;
+  drawPlateRelief(relief.getContext('2d'), text, 2);
+  const normalMap = new THREE.CanvasTexture(reliefNormals(relief));
+  normalMap.anisotropy = 8;
   const face = new THREE.MeshStandardMaterial({
     name: 'Ukrainian_plate',
     map: texture,
+    normalMap,
+    normalScale: new THREE.Vector2(1, 1),
     roughness: 0.42,
     metalness: 0,
   });
@@ -278,6 +382,7 @@ export function setupLicensePlates(rig, { text = ukrainianPlate.text } = {}) {
     );
     mesh.position.copy(local);
     mesh.castShadow = true;
+    mesh.add(plateHolder(width, height, thickness));
     rig.body.add(mesh);
     return mesh;
   });

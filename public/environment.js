@@ -108,11 +108,19 @@ export function createSky(night = { value: 0 }, rain = { value: 0 }, sunset = { 
 
         // Equirectangular lookup of the photograph, which spans from the zenith
         // to a few degrees below the horizon; lower rows hold its last row.
+        // Its clouds drift with the procedural ones: above the horizon the
+        // panorama is read turned by the drift angle, and a few degrees up it
+        // cross-fades from the still photograph, so the fields and tree lines
+        // stay put and the clouds move as one layer (a second lookup only in
+        // that band).
         vec3 photoColor(vec3 d) {
           float u = atan(d.z, d.x) * .15915494 + .5;
           float below = 0.104311;
           float v = clamp((asin(clamp(d.y, -1., 1.)) + below) / (1.57079633 + below), .001, .999);
-          return texture2D(photoSky, vec2(u, v)).rgb;
+          float moving = smoothstep(.035, .14, d.y);
+          vec3 drifting = texture2D(photoSky, vec2(u + cloudDrift * .15915494, v)).rgb;
+          if (moving >= 1.) return drifting;
+          return mix(texture2D(photoSky, vec2(u, v)).rgb, drifting, moving);
         }
 
         void main() {

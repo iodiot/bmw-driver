@@ -106,3 +106,57 @@ test('Door cards replace the flat door panels and keep clear of the seats', asyn
   assert.ok(doorTrim.face - doorTrim.armrest.depth > seatEdge);
   assert.ok(doorTrim.armrest.top < doorTrim.strip && doorTrim.strip < doorTrim.sill);
 });
+
+test('The footwells drop below the steering wheel rim and the old floor sheet is cut', async () => {
+  const THREE = await import('three');
+  const { footwell, consoleLayout, isOldFootwellTriangle } = await import(
+    '../public/cabin-floor.js'
+  );
+  const { interiorLayout, cabinFloor } = await import('../public/interior.js');
+  const { centre, axis, radius, grip } = interiorLayout.wheel;
+  // Lowest point of the rim, in the wheel's plane.
+  const up = new THREE.Vector3(-axis[1], axis[0], 0).normalize();
+  if (up.y < 0) up.negate();
+  const bottom = new THREE.Vector3(...centre).addScaledVector(up, -(radius + grip));
+  assert.ok(bottom.y < cabinFloor(bottom.x), 'The rim reaches below the seat floor');
+  assert.ok(bottom.y > footwell.floor + 0.05, 'but clears the dropped footwell');
+  assert.ok(bottom.x > footwell.rear && bottom.x < footwell.front);
+  const v = (x, y, z) => new THREE.Vector3(x, y, z);
+  // One of the model's four floor triangles (facing up), from the rear seat
+  // to the dash.
+  assert.ok(
+    isOldFootwellTriangle(v(-0.98, 0.21, 0), v(0.6, 0.11, 0.73), v(0.6, 0.11, 0), 'Object_53')
+  );
+  // The dashboard's face, the sill and other meshes stay.
+  assert.ok(
+    !isOldFootwellTriangle(v(0.58, 0.12, -0.3), v(0.58, 0.22, -0.3), v(0.58, 0.12, 0), 'Object_53')
+  );
+  assert.ok(
+    !isOldFootwellTriangle(v(-0.98, 0.21, 0), v(0.6, 0.11, 0), v(0.6, 0.11, 0.73), 'Object_37')
+  );
+  // The console fits between the seats.
+  const seatInner = Math.abs(interiorLayout.seatCentres[0]) - 0.225;
+  assert.ok(consoleLayout.halfWidth <= seatInner);
+});
+
+test('The rebuilt dashboard replaces the model dash, recessed behind the instruments', async () => {
+  const THREE = await import('three');
+  const { dashLayout, isOldDashTriangle } = await import('../public/dashboard.js');
+  const { clusterLayout } = await import('../public/cockpit-cluster.js');
+  const v = (x, y, z) => new THREE.Vector3(x, y, z);
+  // The model's dash face and top go; the windscreen pillars above it and
+  // the floor and other meshes stay.
+  assert.ok(isOldDashTriangle(v(0.6, 0.2, 0.3), v(0.62, 0.3, 0.3), v(0.6, 0.2, 0.4), 'Object_53'));
+  assert.ok(isOldDashTriangle(v(0.75, 0.41, 0), v(0.85, 0.41, 0), v(0.8, 0.41, 0.1), 'Object_53'));
+  assert.ok(
+    !isOldDashTriangle(v(0.7, 0.5, 0.7), v(0.75, 0.55, 0.7), v(0.7, 0.55, 0.72), 'Object_53')
+  );
+  assert.ok(!isOldDashTriangle(v(0.6, 0.2, 0.3), v(0.62, 0.3, 0.3), v(0.6, 0.2, 0.4), 'Object_49'));
+  // The instruments' face lies inside the recess's z range.
+  const zs = clusterLayout.corners.map((c) => c[2]);
+  assert.ok(Math.min(...zs) >= dashLayout.cluster.from - 1e-9);
+  assert.ok(Math.max(...zs) <= dashLayout.cluster.to + 1e-9);
+  // The centre stack runs from its foot up to the screen and fits between the seats.
+  const { bottom, top, width } = dashLayout.stack;
+  assert.ok(top[1] > bottom[1] + 0.2 && width < 0.25);
+});

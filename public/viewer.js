@@ -5,7 +5,7 @@ import { setupEnvironment } from './environment.js';
 import { setupRoad } from './road.js';
 import { setupRoadside } from './roadside.js';
 import { DrivingSimulation } from './driving-physics.js';
-import { rigDownloadedCar, addArchLiners } from './vehicle-rig.js';
+import { rigDownloadedCar, addArchLiners, addRearDefroster } from './vehicle-rig.js';
 import { setupBrakeLights } from './brake-lights.js';
 import { setupHeadlights } from './headlights.js';
 import { setupExhaust } from './exhaust.js';
@@ -438,6 +438,7 @@ new GLTFLoader().load(
       });
       rig = rigDownloadedCar(g.scene);
       addArchLiners(rig);
+      addRearDefroster(rig);
       refineCarMaterials(rig.root);
       scene.add(rig.root);
       sim = new DrivingSimulation(rig.wheels);
@@ -463,6 +464,13 @@ new GLTFLoader().load(
       interior = setupInterior(rig);
       cockpitCluster = setupCockpitCluster(rig);
       centreDisplay = setupCentreDisplay(rig);
+      for (const name of [
+        'iDrive screen housing',
+        'iDrive screen brow',
+        'Dashboard trim band',
+        'Dashboard chrome line',
+      ])
+        interior.occlude(centreDisplay.group.getObjectByName(name));
       licensePlates.setNight(nightMode);
       contactShadow = setupContactShadow(scene, sim.layout);
       contactShadow.setNight(nightMode);
@@ -531,6 +539,16 @@ addEventListener('resize', () => {
 const clock = new THREE.Clock();
 const frameMovement = new THREE.Vector3();
 const frameCameraOffset = new THREE.Vector3();
+// Taking the wheel swings the chase camera round behind the car, as in a
+// driving game, over a second or so; dragging the view stops the swing.
+const chaseBehind = new THREE.Vector3(),
+  swingFrom = new THREE.Spherical(),
+  swingTo = new THREE.Spherical();
+let chaseSwing = false,
+  wasAutopilot = true;
+controls.addEventListener('start', () => {
+  chaseSwing = false;
+});
 // The self-driving cruise speed: 90 km/h.
 const autopilotSpeed = 25;
 let cameraFollowHeading = 0,
@@ -609,6 +627,29 @@ renderer.setAnimationLoop(() => {
     cameraFollowHeading += cameraTurn;
     offset.applyAxisAngle(up, cameraTurn);
     controls.target.add(movement);
+    if (wasAutopilot && !autopilot && cameraView === 'chase') chaseSwing = true;
+    wasAutopilot = autopilot;
+    if (chaseSwing && cameraView === 'chase') {
+      const scale = Math.max(1, 0.9 / camera.aspect) * lensScale;
+      chaseBehind.set(-6.2 * scale, 1.75 * scale, 0).applyAxisAngle(up, courseHeading);
+      swingFrom.setFromVector3(offset);
+      swingTo.setFromVector3(chaseBehind);
+      const k = 1 - Math.exp(-dt / 0.45);
+      const turn = Math.atan2(
+        Math.sin(swingTo.theta - swingFrom.theta),
+        Math.cos(swingTo.theta - swingFrom.theta)
+      );
+      swingFrom.theta += turn * k;
+      swingFrom.phi += (swingTo.phi - swingFrom.phi) * k;
+      swingFrom.radius += (swingTo.radius - swingFrom.radius) * k;
+      offset.setFromSpherical(swingFrom);
+      if (
+        Math.abs(turn) < 0.004 &&
+        Math.abs(swingTo.phi - swingFrom.phi) < 0.004 &&
+        Math.abs(swingTo.radius - swingFrom.radius) < 0.02
+      )
+        chaseSwing = false;
+    }
     camera.position.copy(controls.target).add(offset);
     rig.body.position.y = 0.55 + sim.heave;
     rig.body.rotation.set(sim.roll, 0, sim.pitch);

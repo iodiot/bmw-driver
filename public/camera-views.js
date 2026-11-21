@@ -8,18 +8,23 @@ export const cameraViews = Object.freeze({
   driver: Object.freeze({
     label: "Driver's seat",
     // Eye point behind the wheel, at a seated driver's eye height.
-    eye: Object.freeze([-0.22, 0.585, -0.385]),
+    // Below the windscreen's top edge (0.58 m here) as a seated driver's eyes
+    // are; level with it, the roof lining filled the top of the view.
+    eye: Object.freeze([-0.24, 0.532, -0.385]),
     // Vertical field of view (degrees) on a wide screen; narrow screens
     // widen it so at least `minHorizontal` degrees are seen across.
     fov: 56,
     minHorizontal: 80,
     // Looks a little down at the road.
-    pitch: -0.035,
+    pitch: -0.015,
     inside: true,
   }),
   bonnet: Object.freeze({
     label: 'Bonnet',
-    eye: Object.freeze([0.72, 0.6, 0]),
+    // Over the middle of the bonnet, so the bottom of the view is bonnet:
+    // from its back edge the view reached down past the scuttle, through the
+    // gap at the wipers to the road under the car.
+    eye: Object.freeze([1.05, 0.56, 0]),
     fov: 48,
     minHorizontal: 70,
     pitch: -0.05,

@@ -43,9 +43,13 @@ export function isOldDoorTriangle(a, b, c, meshName) {
   );
 }
 
-// A block w × h (x, y) and d deep (z) with rounded edges, centred.
-function roundedBlock(w, h, d, r) {
-  r = Math.min(r, w / 2 - 1e-4, h / 2 - 1e-4, d / 2 - 1e-4);
+// A block w × h (x, y) and d deep (z) with rounded edges, centred. The
+// bevel grows the outline by r on every side, so the outline is drawn r
+// smaller to keep the block to its stated size.
+export function roundedBlock(w, h, d, r) {
+  r = Math.min(r, w / 4 - 1e-4, h / 4 - 1e-4, d / 2 - 1e-4);
+  w -= 2 * r;
+  h -= 2 * r;
   const shape = new THREE.Shape(),
     x = w / 2 - r,
     y = h / 2 - r;

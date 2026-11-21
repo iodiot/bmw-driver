@@ -1,5 +1,7 @@
 import * as THREE from 'three';
-import { buildDoorCard, doorMaterials, isOldDoorTriangle } from './door-trim.js';
+import { buildDoorCard, doorMaterials, isOldDoorTriangle, roundedBlock } from './door-trim.js';
+import { buildCabinFloor, footwell, isOldFootwellTriangle } from './cabin-floor.js';
+import { buildDashboard, buildRoofFittings, isOldDashTriangle } from './dashboard.js';
 
 // New front seats and M steering wheel. The downloaded model's front seats
 // are a few dozen flat triangles and its wheel a coarse ring; both are
@@ -9,6 +11,8 @@ import { buildDoorCard, doorMaterials, isOldDoorTriangle } from './door-trim.js'
 // M badge, the BMW roundel, button panels and shift paddles. The wheel turns
 // with the steering. Body space: x forward, y up, z to the right; the car is
 // left-hand drive, so the driver sits at negative z.
+// Share of the sky's indirect light that reaches the cabin's surfaces.
+export const cabinOcclusion = 0.45;
 export const interiorLayout = Object.freeze({
   // Fitted to the model's own wheel: rim centre, axis toward the driver.
   wheel: Object.freeze({
@@ -74,6 +78,9 @@ export function isHeadlinerTriangle(a, b, c, meshName) {
     y = (a.y + b.y + c.y) / 3,
     z = Math.abs((a.z + b.z + c.z) / 3),
     low = Math.min(a.y, b.y, c.y);
+  // The parcel shelf under the rear window, seen through it from outside,
+  // is anthracite too (its light grey showed as pale triangles).
+  if (x < -1.7 && x > -2.0 && low > 0.45) return true;
   if (x < -1.7 || x > 1.25) return false;
   return low > 0.5 || (low > 0.3 && y > 0.38 && z > 0.55) || (low > 0.1 && z > 0.62);
 }
@@ -96,6 +103,25 @@ export function isOldSeatTriangle(a, b, c) {
     z < maxZ &&
     !(z > 0.58 && y > 0.5)
   );
+}
+
+// Woven headliner cloth: fine grey noise, repeated.
+function fabricTexture() {
+  const size = 128,
+    canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const g = canvas.getContext('2d'),
+    image = g.createImageData(size, size);
+  for (let i = 0; i < size * size; i++) {
+    const v = 200 + Math.random() * 55;
+    image.data.set([v, v, v, 255], i * 4);
+  }
+  g.putImageData(image, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(4, 4);
+  return texture;
 }
 
 // Smooth normals for an indexed mesh whose vertices are split at every
@@ -203,7 +229,7 @@ export function loft(rings, shade = null) {
 
 // A smooth closed outline through 2D control points, as N points placed in
 // 3D by an origin and two axes; scaled toward its centre to round off ends.
-function ring(points2d, origin, axisA, axisB, scale = 1, count = 40) {
+export function ring(points2d, origin, axisA, axisB, scale = 1, count = 40) {
   const cx = points2d.reduce((s, p) => s + p[0], 0) / points2d.length,
     cy = points2d.reduce((s, p) => s + p[1], 0) / points2d.length;
   const curve = new THREE.CatmullRomCurve3(
@@ -695,7 +721,9 @@ export function setupInterior(rig) {
       if (
         isOldSeatTriangle(a, b, c) ||
         isOldBenchTriangle(a, b, c, mesh.name) ||
-        isOldDoorTriangle(a, b, c, mesh.name)
+        isOldDoorTriangle(a, b, c, mesh.name) ||
+        isOldFootwellTriangle(a, b, c, mesh.name) ||
+        isOldDashTriangle(a, b, c, mesh.name)
       )
         removed++;
       else if (isHeadlinerTriangle(a, b, c, mesh.name)) lining.push(...ids);
@@ -747,7 +775,8 @@ export function setupInterior(rig) {
   // The headliner: the same triangles in their own mesh, in anthracite cloth.
   const lining = new THREE.MeshStandardMaterial({
     name: 'Anthracite headliner',
-    color: 0x2a2b2f,
+    color: 0x3d3e43,
+    map: fabricTexture(),
     roughness: 0.95,
   });
   for (const [mesh, ids] of headliners) {
@@ -763,15 +792,19 @@ export function setupInterior(rig) {
   for (const z of interiorLayout.seatCentres) interior.add(buildSeat(z, materials));
   const doors = doorMaterials();
   interior.add(buildDoorCard(-1, doors), buildDoorCard(1, doors));
+  // Footwells dropped below the seat floor, pedals and the centre console.
+  interior.add(buildCabinFloor().group);
+  // The dashboard, instrument hood and centre stack, rebuilt.
+  interior.add(buildDashboard(), buildRoofFittings());
   interior.add(buildBench(materials));
   // Dark carpet over the model's floor sheet, whose light-grey texture shone
   // through the windows.
   const carpet = new THREE.BufferGeometry();
   const floorCorners = [
     [-0.975, -0.72],
-    [0.58, -0.72],
+    [footwell.rear, -0.72],
     [-0.975, 0.72],
-    [0.58, 0.72],
+    [footwell.rear, 0.72],
   ];
   carpet.setAttribute(
     'position',
@@ -807,7 +840,7 @@ export function setupInterior(rig) {
   );
   column.rotation.x = Math.PI / 2;
   column.position.z = -0.13;
-  const shroud = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.075, 0.14), materials.plastic);
+  const shroud = new THREE.Mesh(roundedBlock(0.1, 0.075, 0.14, 0.025), materials.plastic);
   shroud.position.set(0, -0.012, -0.12);
   mount.add(column, shroud);
   interior.add(mount);
@@ -821,10 +854,45 @@ export function setupInterior(rig) {
     }
   });
   body.add(interior);
+  // The roof hides most of the sky from the cabin, but the scene's sky light
+  // (hemisphere lights and the environment map) reaches every surface
+  // alike, so flat tops inside glowed as if outdoors and gloss reflected
+  // the open sky. An even ambient-occlusion map dims that indirect light on
+  // the cabin's lit materials; direct sun through the glass is unchanged.
+  const occlusion = new THREE.DataTexture(
+    new Uint8Array([cabinOcclusion * 255, cabinOcclusion * 255, cabinOcclusion * 255, 255]),
+    1,
+    1
+  );
+  occlusion.needsUpdate = true;
+  const occluded = new Map();
+  const occlude = (mesh) => {
+    mesh.material = [mesh.material].flat().map((m) => {
+      if (!m.isMeshStandardMaterial || !mesh.geometry.attributes.uv) return m;
+      if (!occluded.has(m)) {
+        // The model's interior material is shared with outside parts.
+        const own = m.clone();
+        own.aoMap = occlusion;
+        own.aoMapIntensity = 1;
+        occluded.set(m, own);
+      }
+      return occluded.get(m);
+    });
+    if (mesh.material.length === 1) mesh.material = mesh.material[0];
+  };
+  interior.traverse((o) => o.isMesh && occlude(o));
+  body.traverse((o) => {
+    if (o.isMesh && ['Object_53', 'Object_37', 'Headliner'].includes(o.name)) occlude(o);
+  });
   return {
     interior,
     wheel,
     removed,
+    // Other cabin parts built elsewhere (the dashboard's screen housing and
+    // trim) take the same dimmed sky light.
+    occlude(object) {
+      object.traverse((o) => o.isMesh && occlude(o));
+    },
     update(simulation) {
       wheel.rotation.z = (simulation?.steer ?? 0) * interiorLayout.wheel.ratio;
     },

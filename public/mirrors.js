@@ -151,6 +151,7 @@ export function mirrorDirection(side) {
 }
 
 let renderingMirror = false;
+const mirrorFar = 700;
 // Frames between updates of each door mirror. Seen close, from the driver's
 // seat, they update every other frame (the two in turn, one extra scene
 // render per frame); small in the chase view, every fourth.
@@ -198,8 +199,9 @@ export function setupMirrors(rig, { resolution = 512 } = {}) {
       (2 * Math.atan(Math.tan(horizontal / 2) / aspect) * 180) / Math.PI,
       aspect,
       0.05,
-      // Fog hides the road long before this; a nearer far plane culls more.
-      300
+      // As far as the main camera: the sky sphere (630 m) lies beyond a
+      // nearer plane, which left the sky black in the mirror.
+      mirrorFar
     );
     camera.name = `Door mirror ${name} camera`;
     // Just behind the glass, looking back along the car.
@@ -289,7 +291,7 @@ export function setupRearViewMirror(rig, { resolution = 384 } = {}) {
   frame.name = 'Rear-view mirror frame';
   mirror.add(frame);
   rig.body.add(mirror);
-  const camera = new THREE.PerspectiveCamera(fov, aspect, 0.05, 300);
+  const camera = new THREE.PerspectiveCamera(fov, aspect, 0.05, mirrorFar);
   camera.name = 'Rear-view mirror camera';
   camera.position.fromArray(rearViewMirror.camera);
   const pitch = (down * Math.PI) / 180;
