@@ -66,6 +66,7 @@ await cp(
   new URL('../node_modules/three/LICENSE', import.meta.url),
   new URL('THIRD-PARTY-LICENSES.txt', output)
 );
+const revision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
 let html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
 const imports = {
   three: './vendor/three.js',
@@ -76,7 +77,11 @@ html = html.replace(
   /<script type="importmap">[\s\S]*?<\/script>/,
   `<script type="importmap">${JSON.stringify({ imports })}</script>`
 );
-html = html.replace('src="./viewer.js"', 'src="./demo.js"');
+// The revision on the stylesheet and script, so a new page never pairs
+// with the previous build's files from the browser's cache.
+const version = revision.slice(0, 7);
+html = html.replace('src="./viewer.js"', `src="./demo.js?v=${version}"`);
+html = html.replace('href="./interface.css"', `href="./interface.css?v=${version}"`);
 html = html.replace(
   /[ \t]*<\/body>/,
   `
@@ -85,7 +90,6 @@ html = html.replace(
 </body>`
 );
 await writeFile(new URL('index.html', output), html);
-const revision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
 await writeFile(
   new URL('build.json', output),
   JSON.stringify({
