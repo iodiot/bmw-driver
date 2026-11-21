@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { straightTestTrack } from '../public/road-profile.js';
 import { test } from 'node:test';
 import * as THREE from 'three';
 import { BrakeHeatState, brakeGlow } from '../public/brake-heat.js';
@@ -7,7 +8,7 @@ import { DrivingSimulation } from '../public/driving-physics.js';
 import { m5Specifications } from '../public/powertrain.js';
 
 function stop(initialSpeed, fps = 60, heat = new BrakeHeatState()) {
-  const sim = new DrivingSimulation();
+  const sim = new DrivingSimulation(undefined, straightTestTrack);
   sim.reset(initialSpeed / 3.6);
   let peak = 20;
   while (sim.speed > 0) {
@@ -32,11 +33,11 @@ test('Brake heat follows actual lost kinetic energy; normal stops do not glow', 
     if (speed === 250)
       assert.ok(brakeGlow(peak) > 0, 'A very hard high-speed stop should show a hot friction ring');
   }
-  const parked = new DrivingSimulation();
+  const parked = new DrivingSimulation(undefined, straightTestTrack);
   parked.reset(0);
   for (let i = 0; i < 600; i++) parked.step(1 / 60, { brake: true });
   assert.equal(parked.brakeEnergy, 0, 'Holding the pedal at rest cannot create heat');
-  const coast = new DrivingSimulation();
+  const coast = new DrivingSimulation(undefined, straightTestTrack);
   coast.reset(40);
   for (let i = 0; i < 240; i++) coast.step(1 / 60, {});
   assert.equal(coast.brakeEnergy, 0, 'Coasting and engine braking must not heat the discs');

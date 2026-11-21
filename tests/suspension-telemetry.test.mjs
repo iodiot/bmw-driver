@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { straightTestTrack } from '../public/road-profile.js';
 import { test } from 'node:test';
 import { DrivingSimulation, suspensionSpecifications } from '../public/driving-physics.js';
 import { wheelCorner } from '../public/suspension-display.js';
 
 test('Wheel loads represent actual tyre support forces, including zero load in the air', () => {
-  const sim = new DrivingSimulation();
+  const sim = new DrivingSimulation(undefined, straightTestTrack);
   const totalWeight =
     (suspensionSpecifications.sprungMass + suspensionSpecifications.wheelMass * 4) * 9.81;
   assert.ok(Math.abs(sim.wheels.reduce((sum, w) => sum + w.load, 0) - totalWeight) < 1e-8);

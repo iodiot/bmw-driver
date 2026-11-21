@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { straightTestTrack } from '../public/road-profile.js';
 import fs from 'node:fs';
 import * as THREE from '../node_modules/three/build/three.module.js';
 import { GLTFLoader } from '../node_modules/three/examples/jsm/loaders/GLTFLoader.js';
@@ -147,10 +148,11 @@ console.log(
 );
 const headlights = setupHeadlights(rig);
 headlights.setNight(false);
-assert.equal(headlights.beams.visible, false);
+assert.equal(headlights.lit, false);
+assert.equal(headlights.beams.visible, true, 'Unlit beams stay in the scene: no recompiles');
 const dayIntensity = headlights.lens.material.emissiveIntensity;
 headlights.setNight(true);
-assert.equal(headlights.beams.visible, true);
+assert.equal(headlights.lit, true);
 assert.ok(headlights.lens.material.emissiveIntensity > dayIntensity);
 const projectors = headlights.beams.children.filter((o) => o.isSpotLight);
 assert.equal(projectors.length, 2);
@@ -164,7 +166,8 @@ assert.ok(lights.lamps[0].material.emissiveIntensity > lights.rest);
 for (let i = 0; i < 30; i++) lights.update(1 / 60, true, true);
 assert.ok(Math.abs(lights.lamps[0].material.emissiveIntensity - lights.brake) < 1e-5);
 headlights.setNight(false);
-assert.equal(headlights.beams.visible, false);
+assert.equal(headlights.lit, false);
+assert.equal(headlights.beams.visible, true, 'Unlit beams stay in the scene: no recompiles');
 assert.equal(headlights.lens.material.emissiveIntensity, dayIntensity);
 console.log(
   'Night: low beams aim down the road, switch off in daylight and preserve brake priority.'
@@ -388,7 +391,7 @@ console.log(
 for (const speed of [30, 60, 160]) {
   const results = [];
   for (const fps of [30, 60, 144]) {
-    const s = new DrivingSimulation(rig.wheels);
+    const s = new DrivingSimulation(rig.wheels, straightTestTrack);
     s.speed = speed / 3.6;
     let compression = 0,
       extension = 0,
@@ -417,7 +420,7 @@ for (const speed of [30, 60, 160]) {
   }
   console.log(speed + ' km/h', results);
 }
-const s = new DrivingSimulation(rig.wheels);
+const s = new DrivingSimulation(rig.wheels, straightTestTrack);
 for (let i = 0; i < 60; i++) s.step(1 / 60, { left: true });
 assert.ok(s.steer > 0.2 && s.roll > 0 && s.z < 0);
 const angles = rig.wheels.map((w) =>

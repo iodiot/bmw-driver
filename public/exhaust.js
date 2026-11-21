@@ -90,6 +90,10 @@ export class ExhaustSimulation {
   }
 }
 
+// Car-space x just ahead of the tailpipes: vapour forward of this, alongside
+// the body, fades out within 25 cm (the rear wheel arches start near -1.7).
+const exhaustRear = -2.3;
+
 export function setupExhaust(scene, rig) {
   const simulation = new ExhaustSimulation();
   const count = simulation.particles.length;
@@ -200,10 +204,20 @@ export function setupExhaust(scene, rig) {
         enabled,
       });
       let active = 0;
+      // Vapour that drifts forward alongside the body fades out: a
+      // camera-facing puff there would sit between the body panels and the
+      // wheel-arch liners and show through the arches as a pale crescent.
+      const c = Math.cos(state.heading),
+        s = Math.sin(state.heading);
       simulation.particles.forEach((p, i) => {
         positions.setXYZ(i, p.position.x, p.position.y, p.position.z);
         sizes.setX(i, p.size);
-        opacities.setX(i, p.opacity);
+        const dx = p.position.x - state.x,
+          dz = p.position.z - state.z;
+        const behind = exhaustRear - (dx * c - dz * s),
+          across = Math.abs(dx * s + dz * c);
+        const alongside = across < 1.05 ? Math.min(1, Math.max(0, (behind + 0.25) / 0.25)) : 1;
+        opacities.setX(i, p.opacity * alongside);
         seeds.setX(i, p.seed);
         if (p.opacity > 0) active++;
       });

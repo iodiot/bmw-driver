@@ -95,3 +95,48 @@ export function rigDownloadedCar(source) {
   });
   return { root, body, wheels, dimensions: box.getSize(new THREE.Vector3()) };
 }
+
+// Black wheel-arch liners. The model has none, so when a wheel dropped into
+// a hollow the gap above the tyre showed the grass behind the car. Each liner
+// is an open arc behind the tyre with a wall on its inner side, fixed to the
+// body like the arch itself.
+export function addArchLiners(rig) {
+  const material = new THREE.MeshStandardMaterial({
+    name: 'Wheel arch liner',
+    color: 0x0b0b0c,
+    roughness: 0.9,
+    side: THREE.DoubleSide,
+  });
+  const reach = 0.35; // radians beyond the horizontal, front and back
+  const liners = rig.wheels.map((w) => {
+    const side = Math.sign(w.z) || 1,
+      radius = w.r + 0.045,
+      width = 0.24;
+    const group = new THREE.Group();
+    group.name = `Arch liner ${w.name}`;
+    // Body space: the body sits 0.55 m up in the rig.
+    group.position.set(w.x, w.y - 0.55, w.z - side * 0.04);
+    const arc = new THREE.Mesh(
+      new THREE.CylinderGeometry(
+        radius,
+        radius,
+        width,
+        28,
+        1,
+        true,
+        Math.PI / 2 - reach,
+        Math.PI + 2 * reach
+      ).rotateX(Math.PI / 2),
+      material
+    );
+    const wall = new THREE.Mesh(
+      new THREE.CircleGeometry(radius, 28, -reach, Math.PI + 2 * reach),
+      material
+    );
+    wall.position.z = -side * (width / 2);
+    group.add(arc, wall);
+    rig.body.add(group);
+    return group;
+  });
+  return { liners };
+}

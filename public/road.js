@@ -64,6 +64,8 @@ export function createRoadGeometry() {
       ...positive,
     ];
   }
+  // Dense where bumps and holes are drawn: within 60 m of the car, and the
+  // mesh recentres in 30 m steps, so 80 m either side of its centre.
   const xs = axis(80, [
     [120, 2],
     [240, 8],
@@ -117,13 +119,51 @@ export function setupRoad(scene) {
   const ground = scene.getObjectByName('Asphalt ground');
   const roadCenter = { value: new THREE.Vector2() };
   const roadWetness = { value: 0 };
+  const asphaltHeight = { value: new THREE.Texture() };
   scene.fog = new THREE.Fog(new THREE.Color().setRGB(0.78, 0.88, 0.98), 100, 260);
   if (ground) {
     const wetnessTexture = createRoadWetnessTexture();
+    // Photographed CC0 ground textures (Poly Haven "Leafy Grass" and "Rocks
+    // Ground 02"), tiled in world space.
+    const loader = new THREE.TextureLoader();
+    const groundTexture = (file, srgb = true) => {
+      if (typeof document === 'undefined') return new THREE.Texture();
+      const texture = loader.load(new URL(`./assets/ground/${file}`, import.meta.url).href);
+      texture.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      texture.anisotropy = 8;
+      return texture;
+    };
+    const grassTexture = groundTexture('grass.jpg'),
+      gravelTexture = groundTexture('gravel.jpg');
     ground.geometry.dispose();
     ground.geometry = createRoadGeometry();
     ground.material.map.repeat.set(2800, 2800);
     ground.material.bumpScale = 0.003;
+    // Photographed CC0 asphalt (Poly Haven "Asphalt Track", 2 × 2 m): colour,
+    // a normal map for the stones and pores, roughness and occlusion, and a
+    // height map that shifts every map by parallax, so the aggregate keeps
+    // its depth as the view moves over it. The ground mesh snaps to whole
+    // tiles, so the texture stays fixed to the world.
+    const asphaltTile = 2,
+      asphaltRepeat = 2800 / asphaltTile;
+    if (typeof document !== 'undefined') {
+      const asphaltTexture = (file, srgb) => {
+        const texture = groundTexture(file, srgb);
+        texture.repeat.set(asphaltRepeat, asphaltRepeat);
+        return texture;
+      };
+      const material = ground.material,
+        arm = asphaltTexture('asphalt-arm.jpg', false);
+      material.map = asphaltTexture('asphalt.jpg', true);
+      material.bumpMap = null;
+      material.normalMap = asphaltTexture('asphalt-normal.jpg', false);
+      material.normalScale.set(1, 1);
+      material.roughnessMap = arm;
+      material.aoMap = arm;
+      material.aoMapIntensity = 0.7;
+      asphaltHeight.value = asphaltTexture('asphalt-height.jpg', false);
+    }
     ground.geometry.computeBoundingBox();
     ground.geometry.boundingBox.min.z = -0.15;
     ground.geometry.boundingBox.max.z = 0.15;
@@ -134,31 +174,38 @@ export function setupRoad(scene) {
       shader.uniforms.roadCenter = roadCenter;
       shader.uniforms.roadWetness = roadWetness;
       shader.uniforms.roadWetnessMap = { value: wetnessTexture };
+      shader.uniforms.grassMap = { value: grassTexture };
+      shader.uniforms.gravelMap = { value: gravelTexture };
+      shader.uniforms.asphaltHeight = asphaltHeight;
+      shader.uniforms.asphaltUvPerMetre = { value: 1 / asphaltTile };
       const visibleProfile =
         'uniform vec2 roadCenter;\n' +
         roadProfileGLSL +
         `
+        // Bumps and holes are drawn within 60 m of the car; beyond that the
+        // (costly) obstacle profile is not evaluated at all.
         float visibleRoadHeight(vec2 p) {
-          return roadHeight(p) * (1. - smoothstep(45., 60., length(p - roadCenter)));
+          float fade = 1. - smoothstep(35., 60., length(p - roadCenter));
+          return fade > 0. ? roadHeight(p) * fade : 0.;
         }
       `;
       shader.vertexShader = 'varying vec2 vRoadXZ;\n' + visibleProfile + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace(
         '#include <beginnormal_vertex>',
         `#include <beginnormal_vertex>
+        // Height and slope from three profile evaluations (forward differences),
+        // reused for the displacement below.
         vec2 surfaceXZ = (modelMatrix * vec4(position, 1.)).xz;
-        float dx = (visibleRoadHeight(surfaceXZ + vec2(.02, 0.)) -
-                    visibleRoadHeight(surfaceXZ - vec2(.02, 0.))) / .04;
-        float dz = (visibleRoadHeight(surfaceXZ + vec2(0., .02)) -
-                    visibleRoadHeight(surfaceXZ - vec2(0., .02))) / .04;
+        float surfaceHeight = visibleRoadHeight(surfaceXZ);
+        float dx = (visibleRoadHeight(surfaceXZ + vec2(.02, 0.)) - surfaceHeight) / .02;
+        float dz = (visibleRoadHeight(surfaceXZ + vec2(0., .02)) - surfaceHeight) / .02;
         objectNormal = normalize(vec3(-dx, dz, 1.));
       `
       );
       shader.vertexShader = shader.vertexShader.replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
-        vec2 surfacePosition = (modelMatrix * vec4(position, 1.)).xz;
-        transformed.z += visibleRoadHeight(surfacePosition);
+        transformed.z += surfaceHeight;
       `
       );
       shader.vertexShader = shader.vertexShader.replace(
@@ -166,40 +213,188 @@ export function setupRoad(scene) {
         '#include <worldpos_vertex>\nvRoadXZ = (modelMatrix * vec4(transformed, 1.0)).xz;'
       );
       shader.fragmentShader =
-        'varying vec2 vRoadXZ;\nuniform float roadWetness;\nuniform sampler2D roadWetnessMap;\n' +
+        'varying vec2 vRoadXZ;\nuniform float roadWetness;\nuniform sampler2D roadWetnessMap;\nuniform sampler2D grassMap;\nuniform sampler2D gravelMap;\nuniform sampler2D asphaltHeight;\nuniform float asphaltUvPerMetre;\n' +
         visibleProfile +
         shader.fragmentShader;
+      // Parallax: shift texture lookups along the view direction by the
+      // asphalt's height (±3 mm), so stones stand proud and pores sink.
+      // Texture u runs along world x and v along world -z.
       shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <map_fragment>',
-        `#include <map_fragment>
-        float roadAAZ = max(fwidth(vRoadXZ.y), 0.002);
+        'void main() {',
+        `void main() {
+        vec2 parallaxShift = vec2(0.);
+        #ifdef USE_MAP
+          vec3 toEye = cameraPosition - vec3(vRoadXZ.x, 0., vRoadXZ.y);
+          float eyeDistance = length(toEye);
+          toEye /= eyeDistance;
+          // Only near the camera, where the shift is visible; gradients are
+          // taken outside the branch so mip selection stays correct.
+          vec2 mapDx = dFdx(vMapUv), mapDy = dFdy(vMapUv);
+          if (eyeDistance < 25.) {
+            // The height map averages .82: stones above it, pores below.
+            float relief = textureGrad(asphaltHeight, vMapUv, mapDx, mapDy).r - .82;
+            parallaxShift = vec2(toEye.x, -toEye.z) / max(toEye.y, .25) * relief * .006 *
+              asphaltUvPerMetre * (1. - smoothstep(8., 25., eyeDistance));
+          }
+        #endif
+      `
+      );
+      const shifted = (chunk, uv) =>
+        THREE.ShaderChunk[chunk].replaceAll(
+          `texture2D( ${uv.split('|')[0]}, ${uv.split('|')[1]} )`,
+          `texture2D( ${uv.split('|')[0]}, ${uv.split('|')[1]} + parallaxShift )`
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <map_fragment>',
+          shifted('map_fragment', 'map|vMapUv').replace(
+            'diffuseColor *= sampledDiffuseColor;',
+            // The photo is fresh, near-black track asphalt; weathering
+            // greys it and lightens the stones, without its warm tint.
+            `sampledDiffuseColor.rgb = pow(sampledDiffuseColor.rgb, vec3(.6)) * 1.6;
+            sampledDiffuseColor.rgb = mix(vec3(dot(sampledDiffuseColor.rgb, vec3(.3, .59, .11))),
+              sampledDiffuseColor.rgb, .4);
+            diffuseColor *= sampledDiffuseColor;`
+          ) + '\n#include <map_fragment_road>'
+        )
+        .replace(
+          '#include <roughnessmap_fragment>',
+          shifted('roughnessmap_fragment', 'roughnessMap|vRoughnessMapUv') +
+            '\n#include <roughnessmap_fragment_road>'
+        )
+        .replace('#include <aomap_fragment>', shifted('aomap_fragment', 'aoMap|vAoMapUv'))
+        .replace(
+          '#include <normal_fragment_maps>',
+          shifted('normal_fragment_maps', 'normalMap|vNormalMapUv').replace(
+            'mapN.xy *= normalScale;',
+            // Asphalt relief only on asphalt; grass and gravel stay smooth.
+            'mapN.xy *= normalScale * (1. - offRoad);'
+          )
+        );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <map_fragment_road>',
+        `
+        // Roadside: asphalt to the shoulder, a gravel strip, then grass with
+        // patchy colour and dry spots. Noise reuses the small tileable mask.
+        // Lateral position relative to the curving road centre line.
+        float roadLat = vRoadXZ.y - roadCenterZ(vRoadXZ.x);
+        float lateral = abs(roadLat);
+        // The country road: an unpaved track of packed dirt and gravel, about
+        // 4.4 m wide, with grass right up to its edges.
+        float branchCentre = branchOffset(vRoadXZ.x);
+        float hasBranch = step(0., branchCentre);
+        float branchLat = roadLat - branchCentre;
+        float branchLateral = mix(1e3, abs(branchLat), hasBranch);
+        float offRoad = smoothstep(6.05, 6.25, lateral);
+        float track = (1. - smoothstep(1.9, 2.5, branchLateral)) * offRoad;
+        float verge = min(smoothstep(7.3, 8.1, lateral), smoothstep(2.2, 3., branchLateral));
+        float broadNoise = texture2D(roadWetnessMap, vRoadXZ / 23.).r;
+        float midNoise = texture2D(roadWetnessMap, vRoadXZ / 5.3).r;
+        float fineNoise = texture2D(roadWetnessMap, vRoadXZ / 1.7).r;
+        // Grass at two scales and offsets hides the tile; a summer-green tint
+        // and broad patches of lusher and drier grass add variation.
+        // Sampled only off the asphalt (most road pixels skip it), with
+        // gradients taken outside the branch for correct mip levels.
+        vec3 roadside = vec3(0.);
+        vec2 groundDx = dFdx(vRoadXZ), groundDy = dFdy(vRoadXZ);
+        if (offRoad > 0.) {
+          vec3 grassNear = textureGrad(grassMap, vRoadXZ / 2.6, groundDx / 2.6, groundDy / 2.6).rgb;
+          vec3 grassFar = textureGrad(grassMap, vRoadXZ.yx / 8.7 + .31, groundDx.yx / 8.7, groundDy.yx / 8.7).rgb;
+          vec3 grass = mix(grassNear, grassFar, .4) * vec3(.9, 1.12, .62);
+          grass *= .78 + .44 * broadNoise;
+          grass = mix(grass, grass * vec3(1.15, 1.02, .7), smoothstep(.62, .85, midNoise) * .45);
+          // Gravel at two scales and orientations, with broad lighter and
+          // darker stretches, so the shoulder does not repeat visibly.
+          vec3 gravelNear = textureGrad(gravelMap, vRoadXZ / 1.4, groundDx / 1.4, groundDy / 1.4).rgb;
+          vec3 gravelFar = textureGrad(gravelMap, vRoadXZ.yx / 3.9 + .57, groundDx.yx / 3.9, groundDy.yx / 3.9).rgb;
+          vec3 gravel = mix(gravelNear, gravelFar, .45) * vec3(.82, .82, .84) * (.8 + .4 * midNoise);
+          roadside = mix(gravel, grass, verge);
+          if (track > 0.) {
+            // Two worn wheel ruts, a grassy hump between them and grass
+            // creeping in at the edges, over gravel tinted to dry earth.
+            vec3 dirt = mix(gravelNear, gravelFar, .6) * vec3(.78, .66, .5) * (.75 + .4 * broadNoise);
+            float rut = exp(-pow((abs(branchLat) - .85) / .32, 2.));
+            dirt = mix(dirt, dirt * vec3(.78, .74, .7), rut * .8);
+            float hump = (1. - smoothstep(.25, .5, abs(branchLat))) * (.45 + .4 * fineNoise);
+            float edge = smoothstep(1.5, 2.3, branchLateral) * (.5 + .5 * midNoise);
+            dirt = mix(dirt, grass * .85, max(hump, edge));
+            roadside = mix(roadside, dirt, track);
+          }
+        }
+        // Asphalt history: polished wheel tracks in every lane, darker repair
+        // patches and meandering sealed cracks.
+        float onCarriageway = 1. - smoothstep(5.35, 5.55, lateral);
+        float laneOffset = mod(roadLat + 5.4, 3.6) - 1.8;
+        float wheelTrack = exp(-pow((abs(laneOffset) - .82) / .3, 2.)) * onCarriageway;
+        vec2 patchCell = floor(vec2(vRoadXZ.x / 11., (roadLat + 5.4) / 3.6));
+        float patchSeed = fract(sin(dot(patchCell, vec2(12.9898, 78.233))) * 43758.5453);
+        vec2 patchLocal = vec2(mod(vRoadXZ.x, 11.), mod(roadLat + 5.4, 3.6));
+        float patchLength = 2.5 + 5. * fract(patchSeed * 7.3);
+        // Slightly irregular, softened edges; newer asphalt is only a little darker.
+        float patchEdge = .06 + .1 * fineNoise;
+        float repairPatch = step(.74, patchSeed) * onCarriageway *
+          smoothstep(1.2, 1.2 + patchEdge, patchLocal.x) *
+          (1. - smoothstep(1.2 + patchLength - patchEdge, 1.2 + patchLength, patchLocal.x)) *
+          smoothstep(.35, .35 + patchEdge, patchLocal.y) *
+          (1. - smoothstep(3.25 - patchEdge, 3.25, patchLocal.y));
+        float crackField = abs(texture2D(roadWetnessMap, vRoadXZ / 7.).r - .5);
+        float crackWidth = max(fwidth(crackField), .0015);
+        float sealedCrack = (1. - smoothstep(.006, .006 + 1.5 * crackWidth, crackField)) *
+          smoothstep(.55, .7, midNoise) * onCarriageway;
+        diffuseColor.rgb *= 1. - .14 * wheelTrack;
+        diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * (.8 + .08 * midNoise), repairPatch);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.035), sealedCrack * .85);
+        diffuseColor.rgb = mix(diffuseColor.rgb, roadside, offRoad);
+        float roadAAZ = max(fwidth(roadLat), 0.002);
         float roadAAX = max(fwidth(vRoadXZ.x), 0.002);
-        float laneDistance = min(abs(vRoadXZ.y - 1.8), abs(vRoadXZ.y + 1.8));
+        float laneDistance = min(abs(roadLat - 1.8), abs(roadLat + 1.8));
         float lanePaint = 1.0 - smoothstep(0.065 - roadAAZ, 0.065 + roadAAZ, laneDistance);
         float dashX = abs(mod(vRoadXZ.x + 4.5, 9.0) - 4.5);
         float dashPaint = 1.0 - smoothstep(1.5 - roadAAX, 1.5 + roadAAX, dashX);
-        float edgeDistance = min(abs(vRoadXZ.y - 5.4), abs(vRoadXZ.y + 5.4));
+        float edgeDistance = min(abs(roadLat - 5.4), abs(roadLat + 5.4));
         float edgePaint = 1.0 - smoothstep(0.075 - roadAAZ, 0.075 + roadAAZ, edgeDistance);
+        // Where the country road leaves or joins, the right edge line is
+        // broken into short dashes across its mouth.
+        float mouth = hasBranch * step(0., roadLat) * (1. - step(5.9, branchCentre - 2.2));
+        float exitDash = 1. - smoothstep(1. - roadAAX, 1. + roadAAX, abs(mod(vRoadXZ.x + 2., 4.) - 2.));
+        edgePaint *= mix(1., exitDash, mouth);
+
         float paintVisibility = 1.0 - smoothstep(65.0, 170.0, length(cameraPosition.xz - vRoadXZ));
-        float paintMask = max(lanePaint * dashPaint, edgePaint) * paintVisibility;
-        float height = visibleRoadHeight(vRoadXZ);
+        // Paint is worn unevenly and most where tyres run.
+        float paintWear = (.72 + .28 * fineNoise) * (1. - .35 * wheelTrack);
+        float paintMask = max(lanePaint * dashPaint, edgePaint) * paintVisibility * paintWear;
+        // Colour comes from the full obstacle profile, not the displaced
+        // height (which fades in from 60 m), so bumps and holes do not pop
+        // into colour as they approach; the geometry rises smoothly under it.
+        float profileDistance = length(cameraPosition.xz - vRoadXZ);
+        float height = profileDistance < 160. ? roadHeight(vRoadXZ) : 0.;
         float raised = smoothstep(.004, .018, height);
-        float stripe = .5 + .5 * sin((vRoadXZ.x + vRoadXZ.y * .55) * 14.);
-        vec3 rubber = mix(vec3(.018), vec3(.72, .48, .045), smoothstep(.38, .62, stripe));
+        // Yellow-black stripes, filtered by their size on screen: sharp up
+        // close, softened as they shrink, and plain amber once narrower than
+        // a pixel, so distant bumps do not shimmer.
+        float stripePhase = (vRoadXZ.x + vRoadXZ.y * .55) * 14.;
+        float stripeFootprint = fwidth(stripePhase);
+        float stripe = .5 + .5 * sin(stripePhase);
+        float stripeEdge = .12 + .3 * stripeFootprint;
+        float yellow = smoothstep(.5 - stripeEdge, .5 + stripeEdge, stripe);
+        yellow = mix(yellow, .5, smoothstep(1.2, 2.6, stripeFootprint));
+        vec3 rubber = mix(vec3(.018), vec3(.72, .48, .045), yellow);
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.78, 0.78, 0.73), paintMask * (1. - raised));
-        diffuseColor.rgb = mix(diffuseColor.rgb, rubber, raised);
-        diffuseColor.rgb *= 1. - .5 * smoothstep(.003, .045, -height);
+        diffuseColor.rgb = mix(diffuseColor.rgb, rubber, raised * (1. - offRoad));
+        diffuseColor.rgb *= 1. - .5 * smoothstep(.003, .045, -height) * (1. - offRoad);
       `
       );
       shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <roughnessmap_fragment>',
-        `#include <roughnessmap_fragment>
+        '#include <roughnessmap_fragment_road>',
+        `
         float roadFilm = 0.;
+        // Tyres polish their tracks slightly smoother than the rest.
+        roughnessFactor = mix(roughnessFactor, .82, wheelTrack * .7);
         if (roadWetness > .001) {
           float waterMask = texture2D(roadWetnessMap, vRoadXZ / 32.).r;
           roadFilm = smoothstep(.32, .75, waterMask);
           float unresolvedFilm = smoothstep(25., 75., length(cameraPosition.xz - vRoadXZ));
-          roadFilm = mix(roadFilm, .48, unresolvedFilm);
+          roadFilm = mix(roadFilm, .48, unresolvedFilm) * (1. - offRoad);
           roughnessFactor = mix(.90, .60, roadFilm);
           diffuseColor.rgb *= mix(1., .9, roadFilm);
         }
@@ -209,14 +404,14 @@ export function setupRoad(scene) {
         '#include <lights_physical_fragment>',
         `#include <lights_physical_fragment>
         #ifdef USE_CLEARCOAT
-          material.clearcoat *= mix(1., mix(.4, 1.35, roadFilm), roadWetness);
+          material.clearcoat *= mix(1., mix(.4, 1.35, roadFilm), roadWetness) * (1. - .85 * offRoad);
           material.clearcoatRoughness = min(1., mix(material.clearcoatRoughness,
             mix(.52, .28, roadFilm) + geometryRoughness, roadWetness));
         #endif
       `
       );
     };
-    ground.material.customProgramCacheKey = () => 'continuous-asphalt-water-film';
+    ground.material.customProgramCacheKey = () => 'continuous-asphalt-roadside-country-road';
     ground.material.needsUpdate = true;
   }
 
@@ -231,6 +426,8 @@ export function setupRoad(scene) {
       material.clearcoatRoughness = enabled ? 0.4 : 0.12;
       material.envMapIntensity = enabled ? 1.05 : 1;
       material.bumpScale = enabled ? 0.0018 : 0.003;
+      // Water fills the pores: a wet road shows less relief.
+      material.normalScale.setScalar(enabled ? 0.55 : 1);
       material.needsUpdate = true;
     },
     update(x, z) {

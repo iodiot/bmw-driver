@@ -1,4 +1,12 @@
-import { roadHeight } from './road-profile.js';
+import {
+  road,
+  roadCenterZ,
+  roadLateral,
+  guardrailsAt,
+  guardrailSlope as railSlope,
+  railFaceGap,
+  surfaces,
+} from './road-profile.js';
 import { M5Powertrain, m5Specifications } from './powertrain.js';
 import { TyreDynamics } from './tyre-dynamics.js';
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
@@ -14,8 +22,20 @@ export const wheelLayout = [
   { name: 'Rear_mount_Left', x: -1.482, z: 0.791, r: 0.3425 },
   { name: 'Rear_mount_Right', x: -1.482, z: -0.791, r: 0.3425 },
 ];
+// Body outline points (body axes: +x forward, z sideways) checked against
+// the guardrails: bumper corners and the widest point of each side.
+const bodyCorners = [
+  [2.4, 0.9],
+  [2.4, -0.9],
+  [-2.42, 0.9],
+  [-2.42, -0.9],
+  [0.3, 0.95],
+  [0.3, -0.95],
+];
 export class DrivingSimulation {
-  constructor(layout = wheelLayout) {
+  // `surface` is the road by default; vehicle tests pass the straight track.
+  constructor(layout = wheelLayout, surface = road) {
+    this.surface = surface;
     this.layout = layout.map((w) => ({ ...w }));
     this.wheelbase = Math.max(...layout.map((w) => w.x)) - Math.min(...layout.map((w) => w.x));
     this.powertrain = new M5Powertrain();
@@ -46,6 +66,10 @@ export class DrivingSimulation {
       pedalUsed: false,
       brakeEnergy: 0,
       brakePressure: 0,
+      railContact: null,
+      surfaceGrip: 1,
+      surfaceRolling: 0.013,
+      surfaceName: 'asphalt',
     });
     this.powertrain.reset(this.speed);
     this.tyres.reset();
@@ -69,8 +93,107 @@ export class DrivingSimulation {
     dt = clamp(dt, 0, 1 / 15);
     const steps = Math.max(1, Math.ceil(dt * 240)),
       h = dt / steps;
+    // Strongest guardrail contact during this step, for sparks and telemetry.
+    this.railContact = null;
     for (let i = 0; i < steps; i++) this.integrate(h, input, raining);
     return this;
+  }
+
+  // Keeps the body inside the guardrails. Corners of the body that cross a
+  // rail face push the car back; velocity into the rail is removed with a
+  // small rebound, the rail scrapes speed off along its length, and the car
+  // swings toward the rail's direction. Rails come from the road layout, so
+  // the branch road's rails work the same as the main road's.
+  collideWithGuardrails(dt) {
+    const railTouch = 0.03;
+    const c = Math.cos(this.heading),
+      s = Math.sin(this.heading);
+    const centreLateral = roadLateral(this.x, this.z);
+    let deepest = null;
+    for (const [lx, lz] of bodyCorners) {
+      const x = this.x + c * lx + s * lz,
+        z = this.z - s * lx + c * lz,
+        lateral = z - roadCenterZ(x);
+      for (const rail of guardrailsAt(x)) {
+        // The side of the rail the car is on: its traffic side, or for a
+        // rail with traffic on both sides, wherever the car's centre is.
+        const traffic = rail.traffic || Math.sign(centreLateral - rail.lateral) || 1;
+        // Only the rail beside the car, not one across the field.
+        if (Math.abs(centreLateral - rail.lateral) > 4) continue;
+        // Within a few centimetres the body still rubs the rail: sparks fly,
+        // but only a corner that crosses the face is pushed back.
+        const depth = railFaceGap - traffic * (lateral - rail.lateral);
+        if (depth > -railTouch && (!deepest || depth > deepest.depth))
+          deepest = { x, side: -traffic, depth, rail: rail.lateral };
+      }
+    }
+    if (!deepest) return;
+    const { side } = deepest,
+      depth = Math.max(0, deepest.depth);
+    this.z -= side * depth;
+    // World velocity, rail normal (pointing into the rail) and rail tangent.
+    const k = railSlope(deepest.x, deepest.rail),
+      norm = Math.hypot(1, k);
+    const nx = (-side * k) / norm,
+      nz = side / norm,
+      tx = 1 / norm,
+      tz = k / norm;
+    let vx = c * this.speed - s * this.lateralVelocity,
+      vz = -(s * this.speed + c * this.lateralVelocity);
+    const into = vx * nx + vz * nz;
+    let along = vx * tx + vz * tz;
+    const impact = Math.max(0, into);
+    // Rebound of 15%; Coulomb friction from the impact plus steady scraping.
+    const friction = Math.min(Math.abs(along), 0.45 * 1.15 * impact + 4 * dt);
+    along -= Math.sign(along) * friction;
+    const normal = into > 0 ? -0.15 * into : into;
+    vx = along * tx + normal * nx;
+    vz = along * tz + normal * nz;
+    this.speed = Math.max(0, c * vx - s * vz);
+    this.lateralVelocity = -s * vx - c * vz;
+    this.tyres.lateralVelocity = this.lateralVelocity;
+    // Turn toward the rail's direction and damp the spin.
+    const railHeading = -Math.atan(k),
+      turn = Math.atan2(Math.sin(railHeading - this.heading), Math.cos(railHeading - this.heading));
+    if (Math.abs(turn) < Math.PI / 2) this.heading += turn * Math.min(1, 0.04 * impact + 2 * dt);
+    this.yawRate *= Math.exp(-6 * dt) * (impact > 0 ? 0.7 : 1);
+    this.tyres.yawRate = this.yawRate;
+    const strength = impact + 0.25 * Math.abs(along) * Math.min(1, depth * 40 + 0.4);
+    // Merely touching at walking pace makes no sparks.
+    if (deepest.depth <= 0 && Math.abs(along) < 1) return;
+    if (!this.railContact || strength > this.railContact.strength)
+      this.railContact = {
+        x: deepest.x,
+        z: roadCenterZ(deepest.x) + deepest.rail - side * railFaceGap,
+        side,
+        impact,
+        scrape: Math.abs(along),
+        strength,
+        velocityX: vx,
+        velocityZ: vz,
+        // The rail's direction (dz/dx), for how much of the side it touches.
+        railSlope: k,
+      };
+  }
+  // Grip and rolling resistance from what each wheel stands on, averaged:
+  // two wheels on the gravel pull at the car and cost part of its grip.
+  readSurface() {
+    const at = this.surface.surfaceAt;
+    const c = Math.cos(this.heading),
+      s = Math.sin(this.heading),
+      wet = this.tyres.wetness;
+    let grip = 0,
+      rolling = 0;
+    for (const w of this.wheels) {
+      w.surface = at ? at(this.x + c * w.x + s * w.z, this.z - s * w.x + c * w.z) : 'asphalt';
+      const kind = surfaces[w.surface];
+      // Relative to the tyre model's own asphalt grip at this wetness.
+      grip += (kind.grip + (kind.wetGrip - kind.grip) * wet) / (1 + (0.536 - 1) * wet);
+      rolling += kind.rolling;
+    }
+    this.surfaceGrip = grip / this.wheels.length;
+    this.surfaceRolling = rolling / this.wheels.length;
+    this.surfaceName = at ? at(this.x, this.z) : 'asphalt';
   }
   integrate(dt, input, raining) {
     if (input.accelerate || input.brake) this.pedalUsed = true;
@@ -78,18 +201,36 @@ export class DrivingSimulation {
     // A keyboard tap is a light pedal application; holding builds full braking
     // effort in 0.4 s. Releasing the key releases the pedal immediately.
     this.brakePressure = input.brake ? Math.min(1, this.brakePressure + dt * 2.5) : 0;
-    const acceleration =
+    let acceleration =
       this.powertrain.step(dt, this.speed, input, !this.pedalUsed) *
       (input.brake ? this.brakePressure : 1);
+    // Cruise control for self-driving: eases toward the set speed (gently up,
+    // firmer down for a bend) until the driver touches a pedal.
+    if (Number.isFinite(input.cruiseSpeed) && !this.pedalUsed)
+      acceleration = clamp((input.cruiseSpeed - this.speed) * 0.5, -2.5, 1.8);
     const limit = Math.min(
       (25 * Math.PI) / 180,
       Math.atan((8.5 * this.wheelbase) / (this.speed * this.speed + 1))
     );
-    this.steer +=
-      (((input.left ? 1 : 0) - (input.right ? 1 : 0)) * limit - this.steer) *
-      (1 - Math.exp(-6.5 * dt));
+    // Keys steer to the speed-dependent lock; lane keeping may request a
+    // continuous angle instead, within the same limit.
+    // Its smooth, small corrections tolerate more lock at speed than key taps.
+    const assistLimit = Math.min(
+      (25 * Math.PI) / 180,
+      Math.atan((45 * this.wheelbase) / (this.speed * this.speed + 1))
+    );
+    const steerTarget = Number.isFinite(input.steerAngle)
+      ? clamp(input.steerAngle, -assistLimit, assistLimit)
+      : ((input.left ? 1 : 0) - (input.right ? 1 : 0)) * limit;
+    this.steer += (steerTarget - this.steer) * (1 - Math.exp(-6.5 * dt));
+    this.readSurface();
     const tyres = this.tyres.step(dt, this, input, raining, acceleration);
     this.speed = clamp(this.speed + tyres.acceleration * dt, 0, m5Specifications.topSpeed);
+    // Loose and soft ground drags more than asphalt (whose rolling resistance
+    // the powertrain already includes).
+    const extraRolling = this.surfaceRolling - surfaces.asphalt.rolling;
+    if (extraRolling > 0 && this.speed > 0)
+      this.speed = Math.max(0, this.speed - extraRolling * 9.81 * (1 + this.speed / 40) * dt);
     if (input.brake)
       this.brakeEnergy +=
         0.5 * m5Specifications.mass * (previousSpeed * previousSpeed - this.speed * this.speed);
@@ -106,6 +247,7 @@ export class DrivingSimulation {
     this.z -=
       (Math.sin(this.heading) * this.speed + Math.cos(this.heading) * this.lateralVelocity) * dt;
     this.distance += Math.hypot(this.speed, this.lateralVelocity) * dt;
+    if (this.surface.guardrails) this.collideWithGuardrails(dt);
     const c = Math.cos(this.heading),
       s = Math.sin(this.heading);
     const mass = suspensionSpecifications.sprungMass,
@@ -130,7 +272,7 @@ export class DrivingSimulation {
         const dx = w.r * fraction;
         ground = Math.max(
           ground,
-          roadHeight(x + cx * dx, z - sz * dx) - (w.r - Math.sqrt(w.r * w.r - dx * dx))
+          this.surface.height(x + cx * dx, z - sz * dx) - (w.r - Math.sqrt(w.r * w.r - dx * dx))
         );
       }
       const groundVelocity = (ground - w.ground) / dt;

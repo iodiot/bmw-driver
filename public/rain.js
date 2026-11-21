@@ -23,6 +23,8 @@ export function setupRain(scene) {
   unlitPattern.needsUpdate = true;
   const uniforms = {
     rainTime: { value: 0 },
+    // 0…1: how hard it rains, for rain that sets in and eases off.
+    rainAmount: { value: 1 },
     night: { value: 0 },
     cameraVelocity: { value: new THREE.Vector3() },
     vehiclePosition: { value: new THREE.Vector3() },
@@ -110,6 +112,7 @@ export function setupRain(scene) {
     `,
     fragmentShader: `
       uniform float night;
+      uniform float rainAmount;
       uniform vec3 rainColor;
       varying vec2 vUv;
       varying float vVisibility;
@@ -118,7 +121,8 @@ export function setupRain(scene) {
       void main() {
         float crossSection = 1. - smoothstep(.16, .5, abs(vUv.x - .5));
         float ends = smoothstep(0., .12, vUv.y) * (1. - smoothstep(.7, 1., vUv.y));
-        float alpha = crossSection * ends * vVisibility * mix(.60, .38 + vBeam * .42, night);
+        float alpha = crossSection * ends * vVisibility * mix(.60, .38 + vBeam * .42, night) *
+          rainAmount;
         if (alpha < .001) discard;
         vec3 color = mix(rainColor, vec3(1., .93, .82), vBeam * night * .85);
         gl_FragColor = vec4(color, alpha);
@@ -158,6 +162,7 @@ export function setupRain(scene) {
     `,
     fragmentShader: `
       uniform float night;
+      uniform float rainAmount;
       uniform vec3 rainColor;
       varying vec2 vUv;
       varying float vVisibility;
@@ -166,7 +171,7 @@ export function setupRain(scene) {
       void main() {
         float radius = length((vUv - .5) * 2.);
         float ring = 1. - smoothstep(.04, .15, abs(radius - .72));
-        float alpha = ring * vVisibility * mix(.32, .18 + vBeam * .32, night);
+        float alpha = ring * vVisibility * mix(.32, .18 + vBeam * .32, night) * rainAmount;
         if (alpha < .001) discard;
         gl_FragColor = vec4(mix(rainColor, vec3(1., .93, .82), night * vBeam), alpha);
         #include <colorspace_fragment>
@@ -185,7 +190,10 @@ export function setupRain(scene) {
   group.add(drops, splashes);
   scene.add(group);
   const previousCamera = new THREE.Vector3();
-  let cameraReady = false;
+  let cameraReady = false,
+    target = 0,
+    fadeTime = 0,
+    wasEnabled = false;
   const dayColor = new THREE.Color(0xe1edf5);
   const nightColor = new THREE.Color(0xa2bdd5);
 
@@ -197,10 +205,26 @@ export function setupRain(scene) {
       uniforms.lowBeamLeft.value = projectors[0].shadow.matrix;
       uniforms.lowBeamRight.value = projectors[1].shadow.matrix;
     },
-    setEnabled(enabled) {
-      group.visible = enabled;
+    // Turns rain on or off at once, or over `fade` seconds: the drops thin
+    // out or thicken while the rest of the weather has already changed.
+    setEnabled(enabled, fade = 0) {
+      target = enabled ? 1 : 0;
+      fadeTime = fade;
+      if (enabled) group.visible = true;
+      if (fade <= 0) {
+        uniforms.rainAmount.value = target;
+        group.visible = enabled;
+      } else if (enabled && !wasEnabled) uniforms.rainAmount.value = 0;
+      wasEnabled = enabled;
     },
     update(dt, camera, state, isNight) {
+      if (fadeTime > 0) {
+        const amount = uniforms.rainAmount;
+        const step = Math.min(dt, 1 / 15) / fadeTime;
+        amount.value +=
+          Math.sign(target - amount.value) * Math.min(step, Math.abs(target - amount.value));
+        if (amount.value === 0 && target === 0) group.visible = false;
+      }
       if (group.visible) uniforms.rainTime.value += Math.min(dt, 1 / 15);
       uniforms.night.value = isNight ? 1 : 0;
       uniforms.rainColor.value.copy(isNight ? nightColor : dayColor);

@@ -48,8 +48,10 @@ test('The projected pattern lands on the road, keeps the right-side rise and sha
   const light = headlights.projectors[0],
     pattern = headlights.pattern;
   const origin = light.getWorldPosition(new THREE.Vector3());
-  const onRoad = origin.clone().add(new THREE.Vector3(5, -origin.y, 0));
-  assert.ok(sampleWorld(light, pattern, onRoad) > 0.03);
+  const near = sampleWorld(light, pattern, origin.clone().add(new THREE.Vector3(5, -origin.y, 0))),
+    ahead = sampleWorld(light, pattern, origin.clone().add(new THREE.Vector3(12, -origin.y, 0)));
+  assert.ok(near > 0.005, 'The near road still receives light');
+  assert.ok(ahead > 0.3 && ahead > 10 * near, 'Most light reaches the road ahead, not the bumper');
   assert.equal(sampleWorld(light, pattern, origin.clone().add(new THREE.Vector3(10, 1, 0))), 0);
   const left = sampleWorld(light, pattern, origin.clone().add(new THREE.Vector3(10, 0, -2)));
   const right = sampleWorld(light, pattern, origin.clone().add(new THREE.Vector3(10, 0, 2)));
@@ -57,6 +59,11 @@ test('The projected pattern lands on the road, keeps the right-side rise and sha
     right > left + 0.01,
     'The real projection must illuminate the vehicle right, not mirror the pattern'
   );
+  // One texture row spans this much road 15 m ahead: coarse rows showed as
+  // bands across the lit road.
+  const lampHeight = origin.y,
+    rowAngle = (2 * Math.tan(lowBeamSettings.angle)) / pattern.image.height;
+  assert.ok((rowAngle * (15 ** 2 + lampHeight ** 2)) / lampHeight < 0.3, 'No visible bands');
   assert.equal(
     pattern.type,
     THREE.HalfFloatType,
@@ -95,7 +102,8 @@ test('Levelling preserves projector locations while settling the aim after body 
     assert.ok(Math.abs(direction.y - expectedY) < 1e-6);
   });
   headlights.setNight(false);
-  assert.equal(headlights.beams.visible, false);
+  assert.equal(headlights.lit, false);
+  assert.equal(headlights.beams.visible, true, 'Unlit beams stay in the scene: no recompiles');
   headlights.setNight(true);
-  assert.equal(headlights.beams.visible, true);
+  assert.equal(headlights.lit, true);
 });

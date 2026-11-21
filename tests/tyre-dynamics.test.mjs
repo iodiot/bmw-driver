@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
+import { straightTestTrack } from '../public/road-profile.js';
 import { test } from 'node:test';
 import { DrivingSimulation } from '../public/driving-physics.js';
 import { TyreDynamics } from '../public/tyre-dynamics.js';
 import { brakingMarkStrength } from '../public/skid-marks.js';
 
 function simulation(speed = 22) {
-  const sim = new DrivingSimulation();
+  const sim = new DrivingSimulation(undefined, straightTestTrack);
   sim.reset(speed);
   // Smooth asphalt avoids conflating suspension obstacle kicks with cornering.
   sim.z = 300;

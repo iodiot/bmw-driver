@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { straightTestTrack } from '../public/road-profile.js';
 import { test } from 'node:test';
 import { engineTorque, M5Powertrain, m5Specifications } from '../public/powertrain.js';
 import { DrivingSimulation } from '../public/driving-physics.js';
@@ -6,7 +7,7 @@ import { DrivingSimulation } from '../public/driving-physics.js';
 test('Full driving simulation matches BMW launch sprints and the standard 250 km/h limiter', () => {
   const results = [];
   for (const fps of [30, 60, 144]) {
-    const sim = new DrivingSimulation();
+    const sim = new DrivingSimulation(undefined, straightTestTrack);
     sim.reset(0);
     const times = {},
       gears = new Set();
@@ -34,7 +35,7 @@ test('Full driving simulation matches BMW launch sprints and the standard 250 km
 });
 
 test('Automatic DCT uses all seven gears, kicks down, and returns to D1 at a stop', () => {
-  const sim = new DrivingSimulation();
+  const sim = new DrivingSimulation(undefined, straightTestTrack);
   assert.equal(sim.powertrain.gear, 3, 'Demo cruise at 30 km/h starts in D3');
   sim.speed = 200 / 3.6;
   sim.powertrain.reset(sim.speed);
@@ -54,7 +55,7 @@ test('Automatic DCT uses all seven gears, kicks down, and returns to D1 at a sto
 });
 
 test('Coasting, pause, reset and clutch transitions remain continuous', () => {
-  const sim = new DrivingSimulation();
+  const sim = new DrivingSimulation(undefined, straightTestTrack);
   for (let i = 0; i < 120; i++) sim.step(1 / 60, {});
   assert.equal(sim.speed, 30 / 3.6, 'The initial demonstration maintains its cruise speed');
   for (let i = 0; i < 300; i++) sim.step(1 / 60, { accelerate: true });

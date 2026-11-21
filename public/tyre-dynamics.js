@@ -35,7 +35,8 @@ export class TyreDynamics {
 
   step(dt, state, input, raining, requestedAcceleration) {
     this.wetness += ((raining ? 1 : 0) - this.wetness) * (1 - Math.exp(-dt / 0.6));
-    const mu = 1.12 - 0.52 * this.wetness;
+    // Asphalt grip, dry to wet, scaled for what the wheels stand on.
+    const mu = (1.12 - 0.52 * this.wetness) * (state.surfaceGrip ?? 1);
     const speed = state.speed;
     const dynamic = smooth(2, 6, speed);
     const throttle = input.accelerate && !input.brake;

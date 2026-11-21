@@ -1,20 +1,25 @@
 import * as THREE from 'three';
 import { lowBeamProfile, lowBeamSettings } from './headlight-profile.js';
 
-export function createLowBeamPattern(size = 256) {
-  const data = new Uint16Array(size * size * 4);
+// The beam meets the road at a grazing angle, so a small step in vertical
+// angle spans metres of road: with 256 rows each texel covered about 2 m at
+// 15 m, and the linear steps between texels showed as bands across the lit
+// road. Rows are therefore dense (about 0.2 m at 15 m); the light varies
+// gently sideways, so fewer columns suffice.
+export function createLowBeamPattern(width = 128, height = 4096) {
+  const data = new Uint16Array(width * height * 4);
   const tangent = Math.tan(lowBeamSettings.angle);
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const horizontal = Math.atan((((x + 0.5) / size) * 2 - 1) * tangent);
-      const vertical = Math.atan((((y + 0.5) / size) * 2 - 1) * tangent);
+  for (let y = 0; y < height; y++) {
+    const vertical = Math.atan((((y + 0.5) / height) * 2 - 1) * tangent);
+    for (let x = 0; x < width; x++) {
+      const horizontal = Math.atan((((x + 0.5) / width) * 2 - 1) * tangent);
       const value = THREE.DataUtils.toHalfFloat(lowBeamProfile(horizontal, vertical));
-      const offset = (y * size + x) * 4;
+      const offset = (y * width + x) * 4;
       data[offset] = data[offset + 1] = data[offset + 2] = value;
       data[offset + 3] = THREE.DataUtils.toHalfFloat(1);
     }
   }
-  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.HalfFloatType);
+  const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.HalfFloatType);
   texture.name = 'Low beam angular distribution';
   texture.minFilter = texture.magFilter = THREE.LinearFilter;
   texture.generateMipmaps = false;
@@ -74,8 +79,14 @@ export function setupHeadlights(rig) {
     pattern,
     projectors,
     update,
+    // The lamps stay in the scene and switch by intensity: adding or removing
+    // lights would recompile every lit material, a visible hitch when they
+    // switch on by themselves at dusk.
+    get lit() {
+      return projectors[0].intensity > 0;
+    },
     setNight(enabled) {
-      beams.visible = enabled;
+      for (const light of projectors) light.intensity = enabled ? lowBeamSettings.intensity : 0;
       lens.material.emissiveIntensity = enabled ? 4 : 0.8;
     },
   };

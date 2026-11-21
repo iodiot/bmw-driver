@@ -57,3 +57,15 @@ test('The amber DSC warning flashes only during intervention and clears on pause
     assert.equal(warning.visible, false);
   }
 });
+
+test('Cluster scales follow the European F10 M5: 0–330 km/h numbered every 30', async () => {
+  const { speedometerLabels, speedometerMaximum, fuelState } = await import(
+    '../public/instruments.js'
+  );
+  assert.equal(speedometerMaximum, 330);
+  assert.deepEqual(speedometerLabels, [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330]);
+  const start = fuelState(0),
+    later = fuelState(100_000);
+  assert.ok(later.fraction < start.fraction && later.rangeKm < start.rangeKm);
+  assert.ok(start.rangeKm > 300 && start.rangeKm < 500);
+});

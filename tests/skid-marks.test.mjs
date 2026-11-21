@@ -3,11 +3,11 @@ import { test } from 'node:test';
 import * as THREE from 'three';
 import { DrivingSimulation } from '../public/driving-physics.js';
 import { brakingMarkStrength, setupSkidMarks } from '../public/skid-marks.js';
-import { roadHeight } from '../public/road-profile.js';
+import { roadHeight, straightTestTrack } from '../public/road-profile.js';
 
 const dry = { enabled: true, braking: true, raining: false };
 function state() {
-  const sim = new DrivingSimulation();
+  const sim = new DrivingSimulation(undefined, straightTestTrack);
   sim.reset(25);
   sim.acceleration = -13;
   sim.brakePressure = 1;
@@ -83,7 +83,7 @@ test('Tyre deposits require hard braking, speed, load and contact; rain makes th
 test('Short brake taps and low-speed stops leave clean asphalt; sustained emergency braking leaves traces', () => {
   for (const fps of [30, 60, 144]) {
     for (const speed of [30, 100]) {
-      const sim = new DrivingSimulation(),
+      const sim = new DrivingSimulation(undefined, straightTestTrack),
         marks = setupSkidMarks(new THREE.Scene(), sim.layout);
       sim.reset(speed / 3.6);
       for (let tap = 0; tap < 3; tap++) {
@@ -97,7 +97,7 @@ test('Short brake taps and low-speed stops leave clean asphalt; sustained emerge
       }
       assert.equal(marks.count, 0, `${fps} fps / ${speed} km/h: repeated taps must not draw marks`);
     }
-    const sim = new DrivingSimulation(),
+    const sim = new DrivingSimulation(undefined, straightTestTrack),
       marks = setupSkidMarks(new THREE.Scene(), sim.layout);
     sim.reset(30 / 3.6);
     for (let i = 0; i < fps * 2; i++) {
@@ -198,7 +198,7 @@ test('The mark buffer is bounded, quiet frames do not upload it, and old marks f
 
 test('Actual braking produces trails at different frame rates while cruising does not', () => {
   for (const fps of [30, 60, 144]) {
-    const sim = new DrivingSimulation(),
+    const sim = new DrivingSimulation(undefined, straightTestTrack),
       marks = setupSkidMarks(new THREE.Scene(), sim.layout);
     for (let i = 0; i < fps; i++) {
       sim.step(1 / fps);

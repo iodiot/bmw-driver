@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { straightTestTrack } from '../public/road-profile.js';
 import { test } from 'node:test';
 import * as THREE from 'three';
 import { GearShiftShake } from '../public/shift-shake.js';
@@ -6,7 +7,7 @@ import { DrivingSimulation } from '../public/driving-physics.js';
 
 test('Actual acceleration shifts give a short bounded impulse, braking downshifts give a weaker one', () => {
   for (const fps of [30, 60, 144]) {
-    const sim = new DrivingSimulation(),
+    const sim = new DrivingSimulation(undefined, straightTestTrack),
       shake = new GearShiftShake();
     shake.update(1 / fps, sim.powertrain.gear);
     assert.equal(shake.events, 0, 'Loading the initial D3 must not shake the camera');

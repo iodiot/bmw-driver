@@ -55,98 +55,146 @@ function arc(cx, cy, radius, start, end) {
     b = point(cx, cy, radius, end);
   return `M${a.join(',')} A${radius},${radius} 0 ${end - start > 180 ? 1 : 0},1 ${b.join(',')}`;
 }
+// Layout and markings follow a photograph of the European F10 M5 cluster:
+// a 0–330 km/h speedometer numbered every 30 km/h with a tick every 10 km/h,
+// a 0–8 tachometer and blue information displays in the lower opening of each
+// dial, on a semi-transparent panel over the scene.
+export const speedometerMaximum = 330;
+export const speedometerLabels = Array.from({ length: 12 }, (_, i) => i * 30);
+// Simplified fuel model for the range display: an 80 L tank
+// starting at three quarters, about 14 L/100 km when driven hard.
+export function fuelState(distanceMetres) {
+  const litres = clamp(60 - (Math.max(0, distanceMetres) / 1000) * 0.14, 0, 80);
+  return { fraction: litres / 80, rangeKm: (litres / 14) * 100 };
+}
+
+const cy = 137;
+function tick(cx, cyy, r1, r2, angle, cls) {
+  const a = point(cx, cyy, r1, angle),
+    b = point(cx, cyy, r2, angle);
+  return `<path d="M${a.map((v) => v.toFixed(2)).join(',')} L${b.map((v) => v.toFixed(2)).join(',')}" class="${cls}"/>`;
+}
+
 function dial(cx, maximum, major, minor, name) {
-  const cy = 137;
+  const rpm = name === 'rpm';
   let markings = '';
-  for (let value = 0; value <= maximum; value += minor) {
+  for (let value = 0; value <= maximum + 1e-9; value += minor) {
     const angle = gaugeAngle(value, maximum),
-      isMajor = value % major === 0;
-    const a = point(cx, cy, 105, angle),
-      b = point(cx, cy, isMajor ? 96 : 101, angle);
-    markings += `<path d="M${a.join(',')} L${b.join(',')}" class="${isMajor ? 'major-tick' : 'minor-tick'}"/>`;
+      isMajor = Math.abs(value / major - Math.round(value / major)) < 1e-9;
+    markings += tick(
+      cx,
+      cy,
+      106,
+      isMajor ? 97 : 100.5,
+      angle,
+      isMajor ? 'major-tick' : 'minor-tick'
+    );
     if (isMajor) {
-      const label = point(cx, cy, 82, angle);
-      markings += `<text x="${label[0]}" y="${label[1]}" class="dial-number">${value}</text>`;
+      const [lx, ly] = point(cx, cy, rpm ? 81 : 82, angle).map((v) => v.toFixed(2));
+      markings += `<text x="${lx}" y="${ly}" class="dial-number ${rpm ? 'rpm-number' : 'speed-number'}">${Math.round(value)}</text>`;
     }
   }
-  const warning =
-    name === 'rpm'
-      ? `
-    <path d="${arc(cx, cy, 111, gaugeAngle(6.8, 8), gaugeAngle(7.2, 8))}" class="rpm-warning"/>
-    <path d="${arc(cx, cy, 111, gaugeAngle(7.2, 8), gaugeAngle(8, 8))}" class="rpm-redline"/>`
-      : '';
+  // Tachometer: amber pre-shift segments, then the red zone from 7200 rpm.
+  let zone = '';
+  if (rpm)
+    for (let value = 6.5; value < 8; value += 0.1)
+      zone += tick(
+        cx,
+        cy,
+        112,
+        107.5,
+        gaugeAngle(value + 0.05, 8),
+        value < 7.15 ? 'rpm-warning' : 'rpm-redline'
+      );
+  // Blue information display arc in the dial's lower opening.
+  const display = `<path d="${arc(cx, cy, 103, 132, 228)}" class="info-arc"/>
+    <path d="${arc(cx, cy, 99, 136, 224)}" class="info-arc-inner"/>`;
   return `
     <circle cx="${cx}" cy="${cy}" r="117" class="dial-face"/>
-    <circle cx="${cx}" cy="${cy}" r="118" class="dial-bezel-shadow"/>
-    <circle cx="${cx}" cy="${cy}" r="115" class="dial-bezel"/>
-    <path d="${arc(cx, cy, 112, -120, 120)}" class="dial-inner-ring"/>
-    ${warning}${markings}
-    <text x="${cx}" y="108" class="dial-unit">${name === 'rpm' ? '1/min × 1000' : 'km/h'}</text>
+    <circle cx="${cx}" cy="${cy}" r="119.5" class="dial-bezel-shadow"/>
+    <circle cx="${cx}" cy="${cy}" r="116" class="dial-bezel"/>
+    <circle cx="${cx}" cy="${cy}" r="113.2" class="dial-bezel-edge"/>
+    ${display}${zone}${markings}
+    <text x="${cx}" y="${rpm ? 96 : 98}" class="dial-unit">${rpm ? '1/min x 1000' : 'km/h'}</text>
     <g id="${name}-needle" transform="rotate(-120 ${cx} ${cy})">
-      <path d="M${cx - 1.5},${cy + 18} L${cx - 1},${cy - 97} L${cx + 1.1},${cy - 98} L${cx + 2.6},${cy + 18}Z" fill="#07090b" transform="translate(1.5 1.5)"/>
-      <path d="M${cx - 2},${cy + 18} L${cx - 1},${cy - 97} L${cx + 0.9},${cy - 98} L${cx + 2},${cy + 18}Z" fill="url(#needle-red)"/>
-      <path d="M${cx},${cy + 12} L${cx},${cy - 94}" stroke="#ff8c72" stroke-width=".65"/>
+      <path d="M${cx - 2.6},${cy + 15} L${cx - 1},${cy - 88} L${cx + 1},${cy - 88} L${cx + 2.6},${cy + 15}Z" class="needle-glow" filter="url(#needle-blur)"/>
+      <path d="M${cx - 2.4},${cy + 15} L${cx - 0.9},${cy - 88} L${cx + 0.9},${cy - 88} L${cx + 2.4},${cy + 15}Z" fill="url(#needle-red)"/>
+      <path d="M${cx},${cy + 8} L${cx},${cy - 84}" class="needle-core"/>
     </g>
-    <circle cx="${cx}" cy="${cy}" r="9" fill="url(#needle-hub)" stroke="#353a40" stroke-width="1"/>
-    <circle cx="${cx}" cy="${cy}" r="3" fill="#1b2025"/>
+    <circle cx="${cx}" cy="${cy}" r="8.5" fill="url(#needle-hub)" stroke="#2c3137" stroke-width="1"/>
   `;
 }
+
+const fuelIcon =
+  '<path d="M-5,-5 h6 v10 h-6Z M-4,-4 h4 v3 h-4Z M1,-2 h2 v5 q0,1.5 1.5,1.5 v-7 l-1.5,-2"/>';
 
 export function setupInstruments(container) {
   container.innerHTML = `
     <svg viewBox="0 0 620 286" role="img" aria-label="BMW M5 instrument cluster">
       <defs>
+        <!-- Black-panel cluster: neutral smoked black, no blue cast. -->
         <linearGradient id="cluster-shell" x1="0" y1="0" x2="0" y2="1">
-          <stop stop-color="#30363c"/><stop offset=".08" stop-color="#171c21"/>
-          <stop offset=".55" stop-color="#0e1216"/><stop offset="1" stop-color="#080b0e"/>
+          <stop stop-color="#262626"/><stop offset=".07" stop-color="#121212"/>
+          <stop offset=".55" stop-color="#080808"/><stop offset="1" stop-color="#030303"/>
         </linearGradient>
-        <radialGradient id="dial-face" cx="45%" cy="30%" r="75%">
-          <stop stop-color="#242a30"/><stop offset=".65" stop-color="#151a1f"/>
-          <stop offset="1" stop-color="#0d1115"/>
+        <!-- Dial faces: deep black centre, a faintly lighter band under the
+             scale, black again at the bezel. -->
+        <radialGradient id="dial-face" cx="50%" cy="50%" r="50%">
+          <stop stop-color="#040404"/><stop offset=".62" stop-color="#090909"/>
+          <stop offset=".78" stop-color="#151515"/><stop offset=".92" stop-color="#0c0c0c"/>
+          <stop offset="1" stop-color="#020202"/>
         </radialGradient>
-        <linearGradient id="bezel-metal" x1="0" y1="0" x2=".3" y2="1">
-          <stop stop-color="#d3dbe1"/><stop offset=".35" stop-color="#667079"/>
-          <stop offset=".65" stop-color="#4a545e"/><stop offset="1" stop-color="#c1cbd3"/>
+        <linearGradient id="bezel-metal" x1="0" y1="0" x2=".35" y2="1">
+          <stop stop-color="#f4f7f9"/><stop offset=".22" stop-color="#9aa3ab"/>
+          <stop offset=".5" stop-color="#3f464d"/><stop offset=".78" stop-color="#a7b0b8"/>
+          <stop offset="1" stop-color="#eef2f5"/>
         </linearGradient>
         <linearGradient id="needle-red" x1="0" y1="0" x2="1" y2="0">
-          <stop stop-color="#b72222"/><stop offset=".45" stop-color="#ff4c37"/>
-          <stop offset="1" stop-color="#ef352b"/>
+          <stop stop-color="#d4201a"/><stop offset=".5" stop-color="#ff5a3d"/>
+          <stop offset="1" stop-color="#d4201a"/>
         </linearGradient>
+        <linearGradient id="info-blue" x1="0" y1="0" x2="1" y2="0">
+          <stop stop-color="#1d6fff" stop-opacity=".2"/><stop offset=".5" stop-color="#4aa3ff"/>
+          <stop offset="1" stop-color="#1d6fff" stop-opacity=".2"/>
+        </linearGradient>
+        <filter id="needle-blur" x="-200%" y="-10%" width="500%" height="120%">
+          <feGaussianBlur stdDeviation="2.4"/>
+        </filter>
         <radialGradient id="needle-hub" cx="35%" cy="30%">
-          <stop stop-color="#353b42"/><stop offset="1" stop-color="#101419"/>
+          <stop stop-color="#3a3a3a"/><stop offset="1" stop-color="#0a0a0a"/>
         </radialGradient>
       </defs>
       <path d="M9,268 L9,141 C9,57 67,12 155,12 C222,12 255,37 284,57 Q310,72 336,57 C365,37 398,12 465,12 C553,12 611,57 611,141 L611,268 Q611,280 598,280 L22,280 Q9,280 9,268Z" class="cluster-shell"/>
-      ${dial(155, 330, 30, 10, 'speed')}
-      ${dial(465, 8, 1, 0.25, 'rpm')}
-      <path d="M30,236 Q155,254 272,236 M348,236 Q465,254 590,236" class="cluster-lower-edge"/>
-      <text id="speed" x="155" y="214" class="digital-speed">0</text>
-      <text x="155" y="233" class="digital-unit">km/h</text>
-      <g transform="translate(436 185) skewX(-18)">
+      ${dial(155, speedometerMaximum, 30, 10, 'speed')}
+      ${dial(465, 8, 1, 0.5, 'rpm')}
+      <g transform="translate(130 210)" class="side-icon">${fuelIcon}</g>
+      <text id="range" x="160" y="214" class="info-text">0 km</text>
+      <g transform="translate(436 172) skewX(-18)">
         <path d="M0,0 H7 V14 H0Z" fill="#71bdea"/><path d="M8,0 H15 V14 H8Z" fill="#264d8f"/>
         <path d="M16,0 H23 V14 H16Z" fill="#e54b53"/>
       </g>
-      <text x="464" y="200" class="m-mark">M</text>
-      <text id="gear" x="310" y="218" class="gear-display">D1</text>
-      <text x="310" y="239" class="transmission-label">M DCT</text>
-      <text id="trip" x="310" y="265" class="trip-display">TRIP 0.0 km</text>
+      <text x="464" y="187" class="m-mark">M</text>
+      <text id="gear" x="310" y="214" class="gear-display">D1</text>
+      <text x="310" y="234" class="transmission-label">M DCT</text>
       <g id="low-beam-indicator" transform="translate(318 120) scale(-1 1)" class="low-beam-indicator" visibility="hidden">
         <path d="M6,0 Q-2,0 -2,7 Q-2,14 6,14Z M9,2 l8,-3 M9,6 l8,-3 M9,10 l8,-3 M9,14 l8,-3"/>
       </g>
-      <g id="dsc-indicator" transform="translate(310 86) scale(.62)" class="dsc-indicator" visibility="hidden" aria-label="DSC stabilizing vehicle">
+      <g id="dsc-indicator" transform="translate(296 71) scale(1.18)" class="dsc-indicator" visibility="hidden" aria-label="DSC stabilizing vehicle">
         <title>Dynamic Stability Control intervention</title>
-        <path d="M-10,1 L-7,-8 Q0,-11 7,-8 L10,1 V12 H-10Z M-7,-6 H7 L8,0 H-8Z M-12,2 H-10 M10,2 H12 M-7,6 H-4 M4,6 H7"/>
-        <path d="M-7,16 C-14,20 0,22 -7,26 S-12,31 -8,34 M7,16 C0,20 14,22 7,26 S2,31 6,34"/>
+        <!-- The standard skidding-car symbol: the car with two S-shaped tracks
+             beneath it (outline from Material Design Icons, car-traction-control,
+             Apache License 2.0). -->
+        <path class="dsc-symbol" d="M9.5,11H10.5C10.8,11 11,10.8 11,10.5V9H19V10.5C19,10.8 19.2,11 19.5,11H20.5C20.8,11 21,10.8 21,10.5V9L21,8.5V6L19.6,1.7C19.5,1.3 19.1,1 18.7,1H11.4C11,1 10.6,1.3 10.5,1.7L9,6V8.5L9,9V10.5C9,10.8 9.2,11 9.5,11M11.3,2H18.6L19.5,5H10.4L11.3,2M12,23H10C10,22.2 8.1,21.5 6.6,20.9C4.5,20.1 2,19.2 2,17C2,14.7 4.3,14.1 6.2,13.5C7.9,13.1 9,12.7 9,12H11C11,14.3 8.7,14.9 6.8,15.5C5.1,15.9 4,16.3 4,17C4,17.8 5.9,18.5 7.4,19.1C9.5,19.9 12,20.8 12,23M22,23H20C20,22.2 18.1,21.5 16.6,20.9C14.5,20.1 12,19.2 12,17C12,14.7 14.3,14.1 16.2,13.5C17.8,13 19,12.7 19,12H21C21,14.3 18.7,14.9 16.8,15.5C15.2,15.9 14,16.3 14,17C14,17.8 15.9,18.5 17.4,19.1C19.5,19.9 22,20.8 22,23Z"/>
       </g>
     </svg>`;
-  const svg = container.querySelector('svg');
-  const speedNeedle = container.querySelector('#speed-needle');
-  const rpmNeedle = container.querySelector('#rpm-needle');
-  const speedText = container.querySelector('#speed');
-  const gearText = container.querySelector('#gear');
-  const tripText = container.querySelector('#trip');
-  const lowBeams = container.querySelector('#low-beam-indicator');
-  const dsc = container.querySelector('#dsc-indicator');
+  const $ = (selector) => container.querySelector(selector);
+  const svg = $('svg'),
+    speedNeedle = $('#speed-needle'),
+    rpmNeedle = $('#rpm-needle'),
+    rangeText = $('#range'),
+    gearText = $('#gear'),
+    lowBeams = $('#low-beam-indicator'),
+    dsc = $('#dsc-indicator');
   const warning = new DscIndicatorMotion();
   const motion = new InstrumentMotion();
   let textTime = 0;
@@ -165,24 +213,23 @@ export function setupInstruments(container) {
       container.dataset.dscVisible = String(warning.visible);
       speedNeedle.setAttribute(
         'transform',
-        `rotate(${gaugeAngle(motion.speed, 330).toFixed(3)} 155 137)`
+        `rotate(${gaugeAngle(motion.speed, speedometerMaximum).toFixed(3)} 155 ${cy})`
       );
       rpmNeedle.setAttribute(
         'transform',
-        `rotate(${gaugeAngle(motion.rpm, 8000).toFixed(3)} 465 137)`
+        `rotate(${gaugeAngle(motion.rpm, 8000).toFixed(3)} 465 ${cy})`
       );
+      const fuel = fuelState(simulation.distance);
       textTime -= dt;
       if (textTime <= 0) {
         textTime = 0.1;
-        const speed = Math.round(simulation.speed * 3.6),
-          gear = `D${simulation.powertrain.gear}`;
-        speedText.textContent = String(speed);
+        const gear = `D${simulation.powertrain.gear}`;
         gearText.textContent = gear;
-        tripText.textContent = `TRIP ${(simulation.distance / 1000).toFixed(1)} km`;
+        rangeText.textContent = `${Math.round(fuel.rangeKm)} km`;
         lowBeams.setAttribute('visibility', night ? 'visible' : 'hidden');
         svg.setAttribute(
           'aria-label',
-          `BMW M5 instrument cluster: ${speed} km/h, ${Math.round(simulation.powertrain.rpm)} rpm, gear ${gear}${warning.active ? ', DSC intervening' : ''}`
+          `BMW M5 instrument cluster: ${Math.round(motion.speed)} km/h, ${Math.round(simulation.powertrain.rpm)} rpm, gear ${gear}${warning.active ? ', DSC intervening' : ''}`
         );
       }
     },
