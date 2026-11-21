@@ -703,6 +703,7 @@ export function setupInterior(rig) {
     }
     mesh.geometry.setIndex(kept);
     if (lining.length) headliners.push([mesh, lining]);
+    mesh.castShadow = false;
     // Inside the cabin the sky and grass reflect only faintly.
     mesh.material.envMapIntensity = 0.35;
   });
@@ -810,9 +811,12 @@ export function setupInterior(rig) {
   shroud.position.set(0, -0.012, -0.12);
   mount.add(column, shroud);
   interior.add(mount);
+  // Inside the body, the cabin's parts would only shade each other: they
+  // receive the body's shadow but cast none, which keeps them out of the
+  // shadow map's draw calls.
   interior.traverse((o) => {
     if (o.isMesh) {
-      o.castShadow = true;
+      o.castShadow = false;
       o.receiveShadow = true;
     }
   });

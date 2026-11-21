@@ -330,11 +330,9 @@ export function buildDoorCard(side, materials) {
     0.017,
     'Door pocket'
   );
+  // Inside the body: shaded by it, casting nothing (see the interior).
   card.traverse((o) => {
-    if (o.isMesh) {
-      o.castShadow = true;
-      o.receiveShadow = true;
-    }
+    if (o.isMesh) o.receiveShadow = true;
   });
   return card;
 }

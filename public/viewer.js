@@ -25,7 +25,7 @@ import { refineCarMaterials } from './car-materials.js';
 import { laneKeepingSteer, nearestLane, curveSpeed, bumpSpeed } from './lane-keeping.js';
 import { setupSparks } from './sparks.js';
 import { setupMinimap } from './minimap.js';
-import { setupMirrors, setupRearViewMirror } from './mirrors.js';
+import { setMirrorInterval, setupMirrors, setupRearViewMirror } from './mirrors.js';
 import { createWeatherCycle, weatherCycle } from './weather-cycle.js';
 import { daylight, dayCycle, wrapHours } from './time-of-day.js';
 import { setupDayBar } from './day-bar.js';
@@ -173,6 +173,13 @@ function applyCameraFov() {
   camera.near = cameraView === 'chase' ? 0.05 : 0.02;
   camera.updateProjectionMatrix();
 }
+// The rear-view mirror renders only from the driver's seat; the door
+// mirrors update less often when small, in the chase view.
+let rearViewMirror = null;
+function applyMirrors() {
+  if (rearViewMirror) rearViewMirror.mirror.visible = cameraView === 'driver';
+  setMirrorInterval(cameraView === 'chase' ? 4 : 2);
+}
 function setCameraView(view) {
   cameraView = view;
   controls.enabled = view === 'chase';
@@ -181,6 +188,7 @@ function setCameraView(view) {
   if (view === 'chase') resetView();
   document.body.dataset.cameraView = view;
   dayBar.setCamera(view, cameraViews[view].label);
+  applyMirrors();
 }
 // In the seat or on the bonnet, dragging turns the driver's head.
 let lookPointer = null;
@@ -450,7 +458,8 @@ new GLTFLoader().load(
       brakes = setupBrakes(rig);
       licensePlates = setupLicensePlates(rig);
       setupMirrors(rig);
-      setupRearViewMirror(rig);
+      rearViewMirror = setupRearViewMirror(rig);
+      applyMirrors();
       interior = setupInterior(rig);
       cockpitCluster = setupCockpitCluster(rig);
       centreDisplay = setupCentreDisplay(rig);
@@ -468,7 +477,24 @@ new GLTFLoader().load(
           for (const m of Array.isArray(o.material) ? o.material : [o.material]) materials.add(m);
         }
       });
+      // Compile and upload what first appears later (the rear-view mirror,
+      // turn signals, dust and smoke, the beam patterns) now, so none of it
+      // stalls a frame when it first shows.
+      const later = [];
+      scene.traverse((o) => {
+        if (
+          !o.visible &&
+          (o.name.startsWith('Turn signal') ||
+            ['Rear-view mirror', 'Wheel dust', 'Tyre smoke'].includes(o.name))
+        )
+          later.push(o);
+      });
+      for (const o of later) o.visible = true;
       await renderer.compileAsync(scene, camera);
+      for (const o of later) o.visible = false;
+      applyMirrors();
+      renderer.initTexture(headlights.pattern);
+      renderer.initTexture(headlights.highPattern);
       skidMarks.warmup(renderer, camera, scene);
       Object.assign(document.body.dataset, {
         loaded: 'true',

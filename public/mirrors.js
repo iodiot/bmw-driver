@@ -151,6 +151,13 @@ export function mirrorDirection(side) {
 }
 
 let renderingMirror = false;
+// Frames between updates of each door mirror. Seen close, from the driver's
+// seat, they update every other frame (the two in turn, one extra scene
+// render per frame); small in the chase view, every fourth.
+let mirrorInterval = 2;
+export function setMirrorInterval(frames) {
+  mirrorInterval = Math.max(2, Math.round(frames));
+}
 
 export function setupMirrors(rig, { resolution = 512 } = {}) {
   const { found, ...sides } = findMirrorGlass(rig.body);
@@ -214,7 +221,7 @@ export function setupMirrors(rig, { resolution = 512 } = {}) {
     let draws = 0;
     mirror.onBeforeRender = (renderer, scene) => {
       if (renderingMirror) return;
-      if ((draws++ + turn) % 2) return;
+      if ((draws++ + turn) % mirrorInterval) return;
       renderingMirror = true;
       const previousTarget = renderer.getRenderTarget(),
         shadowUpdate = renderer.shadowMap.autoUpdate,

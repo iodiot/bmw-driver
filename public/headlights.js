@@ -44,9 +44,11 @@ export function setupHeadlights(rig) {
   beams.name = 'Low beams';
   rig.body.add(beams);
   const pattern = createLowBeamPattern();
-  // The high beam's pattern, made on first use.
-  let highPattern = null,
-    night = false,
+  // The high beam's pattern, made with the low beam's while the scene loads:
+  // made on first use, at nightfall, it cost a visible hitch.
+  const highPattern = createLowBeamPattern(128, 4096, highBeamProfile);
+  highPattern.name = 'High beam angular distribution';
+  let night = false,
     high = false;
   const projectors = [];
   for (const side of [-1, 1]) {
@@ -96,6 +98,7 @@ export function setupHeadlights(rig) {
     beams,
     lens,
     pattern,
+    highPattern,
     projectors,
     update,
     // The lamps stay in the scene and switch by intensity: adding or removing
@@ -120,10 +123,6 @@ export function setupHeadlights(rig) {
     setHighBeam(enabled) {
       if (enabled === high) return;
       high = enabled;
-      if (high && !highPattern) {
-        highPattern = createLowBeamPattern(128, 4096, highBeamProfile);
-        highPattern.name = 'High beam angular distribution';
-      }
       apply();
     },
   };
