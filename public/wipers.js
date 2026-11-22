@@ -299,6 +299,8 @@ export function setupWipers(rig, bodyWater) {
   });
   const group = new THREE.Group();
   group.name = 'Windshield wipers';
+  // Its parts move: never joined with the body's still ones.
+  group.userData.keep = true;
   rig.body.add(group);
   const armMaterial = new THREE.MeshStandardMaterial({
     color: 0x171b20,

@@ -45,3 +45,18 @@ test('Still parts sharing a material become one mesh in the same place; kept par
     assert.ok(normal.dot(faceCentre.sub(centre)) > 0, 'outward');
   }
 });
+
+test('Parts under a group marked to keep (the wipers) are never joined', () => {
+  const root = new THREE.Group();
+  const black = new THREE.MeshStandardMaterial();
+  const wipers = new THREE.Group();
+  wipers.userData.keep = true;
+  const arms = [0, 1].map(() => new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), black));
+  wipers.add(...arms);
+  const trim = [0, 1].map(() => new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), black));
+  root.add(wipers, ...trim);
+  const { before, after } = mergeStaticMeshes(root);
+  assert.equal(before, 4);
+  assert.equal(after, 3, 'the two trim parts became one; the arms stay');
+  for (const arm of arms) assert.equal(arm.parent, wipers);
+});

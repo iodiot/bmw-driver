@@ -4,7 +4,8 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 // Joins the meshes under `root` that never move, and share a material, into
 // one mesh per material: the cabin is some two hundred small parts (switches,
 // seams, vents), each a draw call of its own every frame. Meshes under
-// `keep` (and any with userData.keep) stay as they are. Returns the number of
+// `keep` (and any with userData.keep, or under a group with it: parts that
+// move, like the wipers) stay as they are. Returns the number of
 // meshes before and after.
 export function mergeStaticMeshes(root, keep = []) {
   root.updateMatrixWorld(true);
@@ -28,7 +29,7 @@ export function mergeStaticMeshes(root, keep = []) {
       Object.keys(o.geometry.morphAttributes).length
     )
       return;
-    for (let p = o; p && p !== root; p = p.parent) if (!p.visible) return;
+    for (let p = o; p && p !== root; p = p.parent) if (!p.visible || p.userData.keep) return;
     const g = o.geometry;
     const layout = Object.entries(g.attributes)
       .map(([name, a]) => `${name}${a.itemSize}${a.normalized ? 'n' : ''}`)
