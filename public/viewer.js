@@ -84,9 +84,13 @@ document.addEventListener('keydown', (e) => {
 });
 document.body.dataset.capture = String(new URLSearchParams(location.search).get('capture') === '1');
 const scene = new THREE.Scene();
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// Phones and tablets (a touch screen as the main pointer): fewer pixels, no
+// multisampling (their dense screens hide the edges), a smaller shadow map
+// and less frequent mirrors, for a steady frame rate on their GPUs.
+const lowPower = matchMedia('(pointer: coarse)').matches;
+const renderer = new THREE.WebGLRenderer({ antialias: !lowPower });
 renderer.setSize(innerWidth, innerHeight);
-const renderQuality = new RenderQuality(devicePixelRatio);
+const renderQuality = new RenderQuality(devicePixelRatio, lowPower ? 1_200_000 : undefined);
 renderer.setPixelRatio(renderQuality.resize(innerWidth, innerHeight));
 // Khronos PBR Neutral keeps material colours true (deep black paint, natural
 // grass) without ACES hue shifts or AgX's washed-out blacks.
@@ -123,6 +127,8 @@ fill.position.set(-2, 2, -4);
 scene.add(fill);
 const environment = setupEnvironment(scene, renderer, sun),
   road = setupRoad(scene);
+if (lowPower) sun.shadow.mapSize.set(1024, 1024);
+document.body.dataset.lowPower = String(lowPower);
 const rain = setupRain(scene);
 const roadside = guardrailsEnabled ? setupRoadside(scene) : null;
 const structures = setupRoadStructures(scene);
@@ -206,7 +212,7 @@ function applyCameraFov() {
 let rearViewMirror = null;
 function applyMirrors() {
   if (rearViewMirror) rearViewMirror.mirror.visible = cameraView === 'driver';
-  setMirrorInterval(cameraView === 'chase' ? 4 : 2);
+  setMirrorInterval((cameraView === 'chase' ? 4 : 2) * (lowPower ? 2 : 1));
 }
 function setCameraView(view) {
   cameraView = view;

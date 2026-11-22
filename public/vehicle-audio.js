@@ -244,6 +244,9 @@ export function setupVehicleAudio({ sound, volume, status }) {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) throw new Error('Audio is unavailable');
     context = new AudioContextClass();
+    // iPhones play it even with the ringer switched to silent, as a game
+    // would.
+    if (navigator.audioSession) navigator.audioSession.type = 'playback';
     master = context.createGain();
     master.gain.value = 0;
     const limiter = context.createDynamicsCompressor();
@@ -397,8 +400,10 @@ export function setupVehicleAudio({ sound, volume, status }) {
   const gesture = () => {
     if (sound.checked && !running()) void unlock();
   };
-  document.addEventListener('pointerdown', gesture, { capture: true });
-  document.addEventListener('keydown', gesture, { capture: true });
+  // A mouse press or a key lets sound start, but on a touch screen only the
+  // end of a touch does (the touch pedals and wheel included).
+  for (const type of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'])
+    document.addEventListener(type, gesture, { capture: true });
   sound.addEventListener('change', () => {
     remember();
     if (sound.checked) void unlock();
