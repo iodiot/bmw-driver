@@ -143,8 +143,8 @@ const originalObstacles = [
 // Another layout's obstacles, over 600 m: three or four speed bumps across
 // the road of different kinds (a narrow rubber strip, a standard hump, a
 // long hump or a table), and fifteen to twenty-two potholes of every size,
-// from a fist-sized hole in a wheel track to a broken patch a metre and a
-// half across, anywhere in the lanes.
+// from half a metre to a broken patch over a metre and a half across,
+// anywhere in the lanes.
 function drawnObstacles(random) {
   const pick = (low, high) => low + (high - low) * random();
   const round = (v, step) => Math.round(v / step) * step;
@@ -174,14 +174,15 @@ function drawnObstacles(random) {
       z = lane + pick(-1.3, 1.3);
     if (!clear(x) || bumps.some((b) => Math.abs(b - x) < 6)) continue;
     if (holes.some((h) => Math.abs(h.x - x) < 7 && Math.abs(h.z - z) < 2.5)) continue;
-    // Mostly small holes, now and then a large broken patch.
-    const size = random() < 0.25 ? pick(1, 1.6) : pick(0.35, 0.9);
+    // Mostly holes a tyre drops into (one under about half a metre it
+    // simply rolls over), now and then a large broken patch.
+    const size = random() < 0.25 ? pick(1.1, 1.7) : pick(0.55, 1);
     const hole = {
       x: round(x, 0.1),
       z: round(z, 0.01),
       l: round(size * pick(0.8, 1.4), 0.01),
       w: round(size * pick(0.7, 1.1), 0.01),
-      h: -round(pick(0.035, 0.07) * (0.7 + 0.3 * Math.min(1, size)), 0.001),
+      h: -round(pick(0.045, 0.075) * (0.75 + 0.25 * Math.min(1, size)), 0.001),
     };
     holes.push(hole);
     list.push(hole);

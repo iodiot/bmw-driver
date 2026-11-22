@@ -51,6 +51,16 @@ export class GearShiftShake {
     this.x = 0.65 * decay * Math.sin(this.age * Math.PI * 2 * 17 + 0.35);
     this.y = 2.4 * decay * Math.cos(this.age * Math.PI * 2 * 12);
   }
+  // A wheel hitting a pothole or a bump: the same short jolt, unless a
+  // stronger one is still ringing.
+  kick(strength) {
+    const current = this.age < 0.34 ? this.amplitude * Math.exp(-this.age / 0.085) : 0;
+    if (strength <= current) return;
+    this.age = 0;
+    this.amplitude = this.lastStrength = strength;
+    this.lastKind = 'road';
+    this.events++;
+  }
   apply(camera, width, height) {
     const active = this.x !== 0 || this.y !== 0;
     if (active || this.applied) {

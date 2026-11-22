@@ -101,6 +101,9 @@ export class DrivingSimulation {
       h = dt / steps;
     // Strongest guardrail contact during this step, for sparks and telemetry.
     this.railContact = null;
+    // Each wheel's highest load during this step (a pothole's edge loads a
+    // tyre for only a few hundredths of a second).
+    for (const w of this.wheels) w.peakLoad = w.load;
     for (let i = 0; i < steps; i++) this.integrate(h, input, raining);
     return this;
   }
@@ -390,6 +393,7 @@ export class DrivingSimulation {
       const tyre = Math.max(-staticLoad, rawTyre);
       w.contact = rawTyre > -staticLoad;
       w.load = staticLoad + tyre;
+      w.peakLoad = Math.max(w.peakLoad ?? w.load, w.load);
       w.damperForce = damping * relativeV;
       w.compressionVelocity = relativeV;
       w.velocity += ((tyre - suspension) / wheelMass) * dt;

@@ -23,6 +23,7 @@ import { RenderQuality } from './render-quality.js';
 import { setupInstruments } from './instruments.js';
 import { setupSuspensionDisplay } from './suspension-display.js';
 import { GearShiftShake } from './shift-shake.js';
+import { RoadJolt } from './road-jolt.js';
 import { setupVehicleAudio } from './vehicle-audio.js';
 import { setupSkidMarks } from './skid-marks.js';
 import { setupLicensePlates } from './license-plates.js';
@@ -60,6 +61,7 @@ const instruments = setupInstruments($('#instruments'));
 const suspensionDisplay = setupSuspensionDisplay($('#suspension-display'));
 const minimap = setupMinimap($('#minimap'));
 const shiftShake = new GearShiftShake();
+const roadJolt = new RoadJolt();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const vehicleAudio = setupVehicleAudio({
   sound: $('#sound'),
@@ -468,6 +470,7 @@ function restart(x = 0) {
   keptLane = null;
   autopilot = true;
   shiftShake.reset(sim.powertrain.gear);
+  roadJolt.reset();
   instruments.reset();
   exhaust.reset();
   brakes.reset();
@@ -824,8 +827,11 @@ renderer.setAnimationLoop(() => {
         chaseSwing = false;
     }
     camera.position.copy(controls.target).add(offset);
-    rig.body.position.y = 0.55 + sim.heave;
-    rig.body.rotation.set(sim.roll, 0, sim.pitch);
+    // Potholes and bumps jolt the body and the camera (see road-jolt.js).
+    roadJolt.update(dt, sim.wheels, { enabled: driving, speed: sim.speed });
+    if (roadJolt.fresh && !reducedMotion.matches) shiftShake.kick(0.6 + 0.9 * roadJolt.fresh);
+    rig.body.position.y = 0.55 + sim.heave + roadJolt.heave;
+    rig.body.rotation.set(sim.roll + roadJolt.roll, 0, sim.pitch + roadJolt.pitch);
     headlights.setHighBeam(
       highBeamWanted({
         night: lowBeamsOn,
@@ -961,6 +967,7 @@ renderer.setAnimationLoop(() => {
         engineRpm: sim.powertrain.rpm.toFixed(0),
         transmission: '7-speed M DCT',
         shiftShakeCount: String(shiftShake.events),
+        roadJolts: String(roadJolt.events),
         shiftShakeKind: shiftShake.lastKind,
         shiftShakeStrength: shiftShake.lastStrength.toFixed(3),
         skidMarkSegments: String(skidMarks.mesh.visible ? skidMarks.count : 0),
