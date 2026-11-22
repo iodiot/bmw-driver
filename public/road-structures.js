@@ -108,6 +108,11 @@ export function tunnelCover(x, lateral) {
     (1 - smooth(halfWidth - 0.5, halfWidth + 0.5, Math.abs(lateral)))
   );
 }
+// Whether x along the road is between the tunnel's portals.
+export function insideTunnel(x) {
+  const u = sectionOf(x);
+  return u >= structureLayout.tunnel.from && u <= structureLayout.tunnel.to;
+}
 // Whether a ground point lies in a bridge deck's shadow (0 to 1). `sunShift`
 // is the sun direction's horizontal part over its height: the deck at
 // height h shades the point that far from it, times h. `height`: the

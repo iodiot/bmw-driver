@@ -51,18 +51,10 @@ export class GearShiftShake {
     this.x = 0.65 * decay * Math.sin(this.age * Math.PI * 2 * 17 + 0.35);
     this.y = 2.4 * decay * Math.cos(this.age * Math.PI * 2 * 12);
   }
-  // A wheel hitting a pothole or a bump: the same short jolt, unless a
-  // stronger one is still ringing.
-  kick(strength) {
-    const current = this.age < 0.34 ? this.amplitude * Math.exp(-this.age / 0.085) : 0;
-    if (strength <= current) return;
-    this.age = 0;
-    this.amplitude = this.lastStrength = strength;
-    this.lastKind = 'road';
-    this.events++;
-  }
-  apply(camera, width, height) {
-    const active = this.x !== 0 || this.y !== 0;
+  // `extraY`: another vertical offset in pixels to add (the road's jolt).
+  apply(camera, width, height, extraY = 0) {
+    const y = this.y + extraY;
+    const active = this.x !== 0 || y !== 0;
     if (active || this.applied) {
       // Off-axis projection jolts the scene without moving OrbitControls' camera
       // or target. Reset the base projection each time so offsets never drift.
@@ -70,7 +62,7 @@ export class GearShiftShake {
       if (active) {
         const scale = clamp(height / 720, 0.65, 1.25);
         camera.projectionMatrix.elements[8] -= (2 * this.x * scale) / width;
-        camera.projectionMatrix.elements[9] += (2 * this.y * scale) / height;
+        camera.projectionMatrix.elements[9] += (2 * y * scale) / height;
         camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
       }
     }

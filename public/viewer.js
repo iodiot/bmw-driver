@@ -7,6 +7,7 @@ import { setupRoadside } from './roadside.js';
 import {
   setupRoadStructures,
   tunnelCover,
+  insideTunnel,
   bridgeShade,
   structureUniforms,
 } from './road-structures.js';
@@ -298,7 +299,9 @@ function warmNightPrograms() {
 // daylight's values.
 const sunDirection = new THREE.Vector3(),
   tunnelLampColour = new THREE.Color(1, 0.9, 0.76);
-let inTunnel = false;
+let inTunnel = false,
+  // How far the camera is in the tunnel: no rain seen or heard there.
+  cameraShelter = 0;
 // An overpass's shadow on the car. The car's body takes no shadow-map
 // shadows (on this model its own would streak the paint), so its materials
 // take the sun through `carSunlight` instead, and their sky reflections are
@@ -373,8 +376,11 @@ function applyStructureLight() {
   ambient.color.setRGB(...light.ambientColour).lerp(tunnelLampColour, cover);
   fill.intensity = light.fill * (1 - cover);
   scene.environmentIntensity = (1 - 0.2 * light.darkness) * (1 - 0.8 * cover);
+  // Out of the rain, seen and heard, when the camera or the car is under
+  // the tunnel's roof.
   const p = camera.position;
-  rain.setShelter(tunnelCover(p.x, roadLateral(p.x, p.z)));
+  cameraShelter = Math.max(cover, tunnelCover(p.x, roadLateral(p.x, p.z)));
+  rain.setShelter(cameraShelter);
   if (cover > 0.05 !== inTunnel) {
     inTunnel = cover > 0.05;
     headlights?.setNight(lowBeamsOn || inTunnel);
@@ -388,6 +394,18 @@ function applyStructureLight() {
   carSkylight.value = 1 - 0.5 * shade;
   carReflection.value = 1 - 0.6 * shade;
   document.body.dataset.deckShade = carShade.toFixed(3);
+}
+// In the tunnel the chase camera stays inside its walls and under its
+// vault, rather than looking at the car through the lining.
+function keepCameraInTunnel() {
+  const p = camera.position;
+  if (!insideTunnel(p.x)) return;
+  const lateral = roadLateral(p.x, p.z),
+    limit = 7.1;
+  if (Math.abs(lateral) <= limit && p.y <= 5.8) return;
+  if (Math.abs(lateral) > limit) p.z = roadCenterZ(p.x) + Math.sign(lateral) * limit;
+  p.y = Math.min(p.y, 5.8);
+  camera.lookAt(controls.target);
 }
 // Continuous changes for the current time and weather.
 function applyDaylight() {
@@ -829,7 +847,6 @@ renderer.setAnimationLoop(() => {
     camera.position.copy(controls.target).add(offset);
     // Potholes and bumps jolt the body and the camera (see road-jolt.js).
     roadJolt.update(dt, sim.wheels, { enabled: driving, speed: sim.speed });
-    if (roadJolt.fresh && !reducedMotion.matches) shiftShake.kick(0.6 + 0.9 * roadJolt.fresh);
     rig.body.position.y = 0.55 + sim.heave + roadJolt.heave;
     rig.body.rotation.set(sim.roll + roadJolt.roll, 0, sim.pitch + roadJolt.pitch);
     headlights.setHighBeam(
@@ -996,19 +1013,21 @@ renderer.setAnimationLoop(() => {
   minimap.update(dt, sim);
   vehicleAudio.update(dt, sim, {
     driving,
-    raining: rainLevel,
+    raining: rainLevel * (1 - cameraShelter),
     accelerate: Boolean(sim?.reversing ? input.brake : input.accelerate),
     brake: Boolean(sim?.reversing ? input.accelerate : input.brake),
     distance: cameraView !== 'chase' ? 4 : rig ? camera.position.distanceTo(rig.root.position) : 8,
     inside: cameraViews[cameraView].inside ? 1 : 0,
   });
   dayBar.setSound(vehicleAudio.audible, $('#sound').checked);
-  if (cameraView === 'chase' || !rig) controls.update(dt);
-  else {
+  if (cameraView === 'chase' || !rig) {
+    controls.update(dt);
+    keepCameraInTunnel();
+  } else {
     seatCamera.step(dt, driving ? sim : null);
     seatCamera.place(camera, cameraView, rig.root, rig.body);
   }
-  shiftShake.apply(camera, innerWidth, innerHeight);
+  shiftShake.apply(camera, innerWidth, innerHeight, reducedMotion.matches ? 0 : roadJolt.cameraY);
   rain.update(dt, camera, sim, nightMode);
   document.body.dataset.orbit = String(controls.autoRotate);
   document.body.dataset.cameraAzimuth = controls.getAzimuthalAngle().toFixed(4);
