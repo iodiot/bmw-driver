@@ -193,8 +193,11 @@ export function setupMinimap(container) {
         7,
         h - 17
       );
-      ctx.fillStyle = '#ffc846';
-      ctx.fillText(`▬ bump ${Math.round(bump)} m`, 7, h - 5);
+      // A layout may have no speed bump at all.
+      if (Number.isFinite(bump)) {
+        ctx.fillStyle = '#ffc846';
+        ctx.fillText(`▬ bump ${Math.round(bump)} m`, 7, h - 5);
+      }
     },
   };
 }
