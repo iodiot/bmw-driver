@@ -772,8 +772,10 @@ const autopilotSpeed = 25;
 let cameraFollowHeading = 0,
   keptLane = null,
   autopilot = true;
-// Frame pacing. On a screen faster than about 100 Hz every other frame is
-// skipped (60 frames a second on a 120 Hz screen, for half the work), and
+// Frame pacing. On a phone or tablet with a screen faster than about
+// 100 Hz every other frame is skipped (60 frames a second on a 120 Hz
+// screen, for half the work and battery; computers keep the screen's rate),
+// and
 // while the car is paused and the view still, a few frames a second keep
 // the sky and the time of day moving.
 let tickAt = 0,
@@ -788,7 +790,7 @@ renderer.setAnimationLoop((time) => {
   const interval = time - tickAt;
   tickAt = time;
   if (interval > 0 && interval < 50) tickInterval += (interval - tickInterval) * 0.05;
-  if (tickInterval < 9.5) {
+  if (lowPower && tickInterval < 9.5) {
     skipTick = !skipTick;
     if (skipTick) return;
   }
