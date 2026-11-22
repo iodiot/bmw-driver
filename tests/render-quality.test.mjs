@@ -8,15 +8,15 @@ function run(quality, fps, seconds) {
 
 test('Retina framebuffers respect the pixel budget without upscaling low-DPI screens', () => {
   const quality = new RenderQuality(2);
-  assert.equal(quality.resize(1280, 720), 2);
+  assert.equal(quality.resize(1200, 600), 2);
   const ratio = quality.resize(2560, 1440);
-  assert.ok(2560 * 1440 * ratio ** 2 <= 4_000_001);
+  assert.ok(2560 * 1440 * ratio ** 2 <= 3_000_001);
   assert.equal(new RenderQuality(1).resize(1280, 720), 1);
 });
 
 test('Sustained slow frames lower resolution, stable frames recover it gradually', () => {
   const quality = new RenderQuality(2);
-  quality.resize(1280, 720);
+  quality.resize(1200, 600);
   run(quality, 60, 10);
   assert.equal(quality.ratio, 2, 'A stable 60 fps must retain full resolution');
   run(quality, 30, 5);
@@ -34,7 +34,7 @@ test('Sustained slow frames lower resolution, stable frames recover it gradually
 
 test('A single stall or hidden-tab gap does not reduce resolution', () => {
   const quality = new RenderQuality(2);
-  quality.resize(1280, 720);
+  quality.resize(1200, 600);
   run(quality, 60, 5);
   quality.update(0.12);
   run(quality, 60, 2);

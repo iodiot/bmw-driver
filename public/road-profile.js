@@ -321,27 +321,41 @@ float branchOffset(float x) {
 float roadHeight(vec2 p) {
   float h = 0.;
   float lateral = p.y - roadCenterZ(p.x);
+  // Distance into the obstacles' period once; each obstacle then costs a
+  // subtraction and a comparison unless the point is beside it.
+  float px = mod(p.x, ${f(roadPeriod)});
  ${obstacles
-   .map((o) =>
-     o.h < 0
-       ? `{
-    float u = (mod(p.x - ${f(o.x)} + ${f(roadPeriod / 2)}, ${f(roadPeriod)}) - ${f(roadPeriod / 2)}) / ${f(o.l / 2)};
-    float v = (lateral - (${f(o.z)})) / ${f(o.w / 2)};
-    float r = length(vec2(u, v));
-    if (r < 1.3) {
-      float a = atan(v, u);
-      float edge = .9 + .16 * sin(3. * a + ${f(potholePhases(o)[0])}) + .09 * sin(5. * a + ${f(potholePhases(o)[1])});
-      h += ${f(o.h)} * (1. - smoothstep(.7, 1., r / edge)) * (.85 + .15 * cos(u * 4. + ${f(potholePhases(o)[0])}));
+   .map((o) => {
+     const half = o.l / 2,
+       reach = o.h < 0 ? half * 1.3 : half;
+     // Only an obstacle within reach of the period's ends needs wrapping.
+     const wrap =
+       o.x - reach < 0 || o.x + reach > roadPeriod
+         ? `dx -= ${f(roadPeriod)} * floor(dx / ${f(roadPeriod)} + .5);`
+         : '';
+     const body =
+       o.h < 0
+         ? `float u = dx / ${f(half)};
+      float v = (lateral - (${f(o.z)})) / ${f(o.w / 2)};
+      float r = length(vec2(u, v));
+      if (r < 1.3) {
+        float a = atan(v, u);
+        float edge = .9 + .16 * sin(3. * a + ${f(potholePhases(o)[0])}) + .09 * sin(5. * a + ${f(potholePhases(o)[1])});
+        h += ${f(o.h)} * (1. - smoothstep(.7, 1., r / edge)) * (.85 + .15 * cos(u * 4. + ${f(potholePhases(o)[0])}));
+      }`
+         : `float u = abs(dx) / ${f(half)};
+      float v = abs(lateral - (${f(o.z)})) / ${f(o.w / 2)};
+      if (v < 1.) h += ${f(o.h)} *
+        ${o.table ? '(1. - smoothstep(.65, 1., u))' : '(.5 + .5 * cos(3.14159265359 * u))'} *
+        (1. - smoothstep(.72, 1., v));`;
+     return `{
+    float dx = px - ${f(o.x)};
+    ${wrap}
+    if (abs(dx) < ${f(reach)}) {
+      ${body}
     }
-  }`
-       : `{
-    float u = abs(mod(p.x - ${f(o.x)} + ${f(roadPeriod / 2)}, ${f(roadPeriod)}) - ${f(roadPeriod / 2)}) / ${f(o.l / 2)};
-    float v = abs(lateral - (${f(o.z)})) / ${f(o.w / 2)};
-    if (u < 1. && v < 1.) h += ${f(o.h)} *
-      ${o.table ? '(1. - smoothstep(.65, 1., u))' : '(.5 + .5 * cos(3.14159265359 * u))'} *
-      (1. - smoothstep(${o.h < 0 ? '0.' : '.72'}, 1., v));
-  }`
-   )
+  }`;
+   })
    .join('\n')}
   return h;
 }

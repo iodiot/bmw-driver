@@ -239,10 +239,10 @@ export function setupCentreDisplay(rig) {
   let elapsed = Infinity;
   return {
     group,
-    update(dt, simulation, { hours = 13, raining = false, night = false } = {}) {
+    update(dt, simulation, { hours = 13, raining = false, night = false, visible = true } = {}) {
       screenMesh.material.color.setScalar(night ? 0.6 : 0.85);
       elapsed += dt;
-      if (elapsed < refresh || !simulation) return;
+      if (elapsed < refresh || !simulation || !visible) return;
       elapsed = 0;
       drawScreen(display.ctx, ...screen.pixels, simulation, hours, raining);
       display.texture.needsUpdate = true;

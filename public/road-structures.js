@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { roadBranch, roadCenterZ, roadCenterSlope, roadCurve } from './road-profile.js';
+import { roadBranch, roadCenterZ, roadCenterSlope } from './road-profile.js';
 import { roadSeed, seededRandom } from './road-seed.js';
 
 // Structures along the motorway, repeating with the country road every
@@ -137,24 +137,22 @@ export function bridgeShade(x, z, sunShift, height = 0) {
 
 // The same, for the road's shader. Needs roadCenterZ (roadProfileGLSL).
 const f = (n) => Number(n).toFixed(6);
+// The same, for the road's shader. The bridges nearest the car come as
+// uniforms (each its place on the road and the road's direction there), so
+// a pixel need not work out the road's curve for them.
 export const structuresGLSL = (() => {
   const { from, to, daylight, halfWidth } = structureLayout.tunnel;
   const { clearance, deck, width, halfSpan } = structureLayout.bridge;
-  const terms = roadCurve.map(({ amplitude, wavelength }) => ({
-    a: amplitude,
-    k: (2 * Math.PI) / wavelength,
-  }));
+  const count = structureLayout.bridges.length;
   return `
 uniform vec2 structureSunShift;
-float roadCenterSlope(float x) {
-  return ${terms.map(({ a, k }) => `${f(a * k)} * sin(${f(k)} * x)`).join(' + ')};
-}
-float tunnelCover(vec2 p) {
-  float u = mod(p.x, ${f(period)});
-  float lateral = abs(p.y - roadCenterZ(p.x));
+uniform vec4 structureBridges[${count}];
+// By distance along the road and offset from its centre.
+float tunnelCover(float x, float lateral) {
+  float u = mod(x, ${f(period)});
   return smoothstep(${f(from)}, ${f(from + daylight)}, u) *
     (1. - smoothstep(${f(to - daylight)}, ${f(to)}, u)) *
-    (1. - smoothstep(${f(halfWidth - 0.5)}, ${f(halfWidth + 0.5)}, lateral));
+    (1. - smoothstep(${f(halfWidth - 0.5)}, ${f(halfWidth + 0.5)}, abs(lateral)));
 }
 // 1 on the tunnel's floor (paved up to its kerbs), 0 elsewhere.
 float tunnelFloor(vec2 p) {
@@ -164,19 +162,14 @@ float tunnelFloor(vec2 p) {
 float bridgeShade(vec2 p) {
   vec2 q = p + structureSunShift * ${f(clearance + deck / 2)};
   float shade = 0.;
-  ${structureLayout.bridges
-    .map(
-      (u) => `{
-    float bx = ${f(u)} + ${f(period)} * floor((q.x - ${f(u)}) / ${f(period)} + .5);
-    float s = roadCenterSlope(bx);
-    float n = sqrt(1. + s * s);
-    vec2 d = vec2(q.x - bx, q.y - roadCenterZ(bx));
-    float along = (d.x + s * d.y) / n, across = (d.y - s * d.x) / n;
+  for (int i = 0; i < ${count}; i++) {
+    vec4 b = structureBridges[i];
+    vec2 d = q - b.xy;
+    if (abs(d.x) > ${f(halfSpan + width)}) continue;
+    float along = d.x * b.z + d.y * b.w, across = d.y * b.z - d.x * b.w;
     shade = max(shade, (1. - smoothstep(${f(width / 2 - 0.3)}, ${f(width / 2 + 0.3)}, abs(along))) *
       (1. - smoothstep(${f(halfSpan - 0.3)}, ${f(halfSpan + 0.3)}, abs(across))));
-  }`
-    )
-    .join('\n  ')}
+  }
   return shade;
 }
 // Tunnel lamps on the road: warm-white, a little brighter under each lamp.
@@ -186,7 +179,12 @@ vec3 tunnelLamps(vec2 p) {
 `;
 })();
 // Shared with the road's material: the sun's horizontal shift per metre.
-export const structureUniforms = { structureSunShift: { value: new THREE.Vector2() } };
+export const structureUniforms = {
+  structureSunShift: { value: new THREE.Vector2() },
+  // Per bridge nearest the car: x and z of its place, then cos and sin of
+  // the road's direction there.
+  structureBridges: { value: structureLayout.bridges.map(() => new THREE.Vector4(1e9, 0, 1, 0)) },
+};
 
 // A point at distance x along the road, lateral offset `lat` and height y.
 const onRoad = (x, lat, y, target = new THREE.Vector3()) => target.set(x, y, roadCenterZ(x) + lat);
@@ -1111,6 +1109,14 @@ export function setupRoadStructures(scene) {
         if (at !== b.at) {
           place(b.bridge, at, 0);
           b.at = at;
+          const slope = roadCenterSlope(at),
+            n = Math.hypot(1, slope);
+          structureUniforms.structureBridges.value[bridges.indexOf(b)].set(
+            at,
+            roadCenterZ(at),
+            1 / n,
+            slope / n
+          );
         }
       }
       const { from } = structureLayout.tunnel;

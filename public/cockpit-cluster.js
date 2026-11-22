@@ -236,10 +236,12 @@ export function setupCockpitCluster(rig) {
   draw(0, 0, 'D1');
   return {
     mesh,
-    update(dt, simulation, night = false) {
+    // `visible`: seen from the driver's seat; from outside the canvas is
+    // neither redrawn nor uploaded.
+    update(dt, simulation, night = false, visible = true) {
       material.color.setScalar(night ? 0.62 : 0.85);
       elapsed += dt;
-      if (elapsed < refresh || !simulation) return;
+      if (elapsed < refresh || !simulation || !visible) return;
       elapsed = 0;
       draw(
         simulation.speed * 3.6,

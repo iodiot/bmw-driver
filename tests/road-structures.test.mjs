@@ -74,15 +74,10 @@ test("A bridge's shadow falls under its deck at noon and moves with the sun", ()
 });
 
 test('The road shader has the same structures', () => {
-  for (const name of [
-    'tunnelCover',
-    'tunnelFloor',
-    'bridgeShade',
-    'tunnelLamps',
-    'roadCenterSlope',
-  ])
+  for (const name of ['tunnelCover', 'tunnelFloor', 'bridgeShade', 'tunnelLamps'])
     assert.match(structuresGLSL, new RegExp(`\\b${name}\\(`));
   assert.match(structuresGLSL, /uniform vec2 structureSunShift/);
+  assert.match(structuresGLSL, /uniform vec4 structureBridges\[2\]/);
 });
 
 test('Structures are placed at the nearest occurrence as the car drives on', () => {

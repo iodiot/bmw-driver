@@ -116,13 +116,29 @@ function dial(cx, maximum, major, minor, name) {
     <circle cx="${cx}" cy="${cy}" r="113.2" class="dial-bezel-edge"/>
     ${display}${zone}${markings}
     <text x="${cx}" y="${rpm ? 96 : 98}" class="dial-unit">${rpm ? '1/min x 1000' : 'km/h'}</text>
-    <g id="${name}-needle" transform="rotate(-120 ${cx} ${cy})">
-      <path d="M${cx - 2.6},${cy + 15} L${cx - 1},${cy - 88} L${cx + 1},${cy - 88} L${cx + 2.6},${cy + 15}Z" class="needle-glow" filter="url(#needle-blur)"/>
-      <path d="M${cx - 2.4},${cy + 15} L${cx - 0.9},${cy - 88} L${cx + 0.9},${cy - 88} L${cx + 2.4},${cy + 15}Z" fill="url(#needle-red)"/>
-      <path d="M${cx},${cy + 8} L${cx},${cy - 84}" class="needle-core"/>
-    </g>
-    <circle cx="${cx}" cy="${cy}" r="8.5" fill="url(#needle-hub)" stroke="#2c3137" stroke-width="1"/>
   `;
+}
+
+// A needle on a layer of its own, the cluster's size: the browser draws it
+// once and turns it as a whole, rather than redrawing the cluster's scales,
+// glow and shadow every frame. Pointing straight up; turned by CSS.
+function needleLayer(cx, name) {
+  return `
+    <svg viewBox="0 0 620 286" class="cluster-needle" id="${name}-needle" aria-hidden="true"
+      style="transform-origin: ${((cx / 620) * 100).toFixed(3)}% ${((cy / 286) * 100).toFixed(3)}%">
+      <defs>
+        <linearGradient id="${name}-needle-red" x1="0" y1="0" x2="1" y2="0">
+          <stop stop-color="#d4201a"/><stop offset=".5" stop-color="#ff5a3d"/>
+          <stop offset="1" stop-color="#d4201a"/>
+        </linearGradient>
+        <filter id="${name}-needle-blur" x="-200%" y="-10%" width="500%" height="120%">
+          <feGaussianBlur stdDeviation="2.4"/>
+        </filter>
+      </defs>
+      <path d="M${cx - 2.6},${cy + 15} L${cx - 1},${cy - 88} L${cx + 1},${cy - 88} L${cx + 2.6},${cy + 15}Z" class="needle-glow" filter="url(#${name}-needle-blur)"/>
+      <path d="M${cx - 2.4},${cy + 15} L${cx - 0.9},${cy - 88} L${cx + 0.9},${cy - 88} L${cx + 2.4},${cy + 15}Z" fill="url(#${name}-needle-red)"/>
+      <path d="M${cx},${cy + 8} L${cx},${cy - 84}" class="needle-core"/>
+    </svg>`;
 }
 
 const fuelIcon =
@@ -149,20 +165,10 @@ export function setupInstruments(container) {
           <stop offset=".5" stop-color="#3f464d"/><stop offset=".78" stop-color="#a7b0b8"/>
           <stop offset="1" stop-color="#eef2f5"/>
         </linearGradient>
-        <linearGradient id="needle-red" x1="0" y1="0" x2="1" y2="0">
-          <stop stop-color="#d4201a"/><stop offset=".5" stop-color="#ff5a3d"/>
-          <stop offset="1" stop-color="#d4201a"/>
-        </linearGradient>
         <linearGradient id="info-blue" x1="0" y1="0" x2="1" y2="0">
           <stop stop-color="#1d6fff" stop-opacity=".2"/><stop offset=".5" stop-color="#4aa3ff"/>
           <stop offset="1" stop-color="#1d6fff" stop-opacity=".2"/>
         </linearGradient>
-        <filter id="needle-blur" x="-200%" y="-10%" width="500%" height="120%">
-          <feGaussianBlur stdDeviation="2.4"/>
-        </filter>
-        <radialGradient id="needle-hub" cx="35%" cy="30%">
-          <stop stop-color="#3a3a3a"/><stop offset="1" stop-color="#0a0a0a"/>
-        </radialGradient>
       </defs>
       <path d="M9,268 L9,141 C9,57 67,12 155,12 C222,12 255,37 284,57 Q310,72 336,57 C365,37 398,12 465,12 C553,12 611,57 611,141 L611,268 Q611,280 598,280 L22,280 Q9,280 9,268Z" class="cluster-shell"/>
       ${dial(155, speedometerMaximum, 30, 10, 'speed')}
@@ -191,9 +197,20 @@ export function setupInstruments(container) {
              Apache License 2.0). -->
         <path class="dsc-symbol" d="M9.5,11H10.5C10.8,11 11,10.8 11,10.5V9H19V10.5C19,10.8 19.2,11 19.5,11H20.5C20.8,11 21,10.8 21,10.5V9L21,8.5V6L19.6,1.7C19.5,1.3 19.1,1 18.7,1H11.4C11,1 10.6,1.3 10.5,1.7L9,6V8.5L9,9V10.5C9,10.8 9.2,11 9.5,11M11.3,2H18.6L19.5,5H10.4L11.3,2M12,23H10C10,22.2 8.1,21.5 6.6,20.9C4.5,20.1 2,19.2 2,17C2,14.7 4.3,14.1 6.2,13.5C7.9,13.1 9,12.7 9,12H11C11,14.3 8.7,14.9 6.8,15.5C5.1,15.9 4,16.3 4,17C4,17.8 5.9,18.5 7.4,19.1C9.5,19.9 12,20.8 12,23M22,23H20C20,22.2 18.1,21.5 16.6,20.9C14.5,20.1 12,19.2 12,17C12,14.7 14.3,14.1 16.2,13.5C17.8,13 19,12.7 19,12H21C21,14.3 18.7,14.9 16.8,15.5C15.2,15.9 14,16.3 14,17C14,17.8 15.9,18.5 17.4,19.1C19.5,19.9 22,20.8 22,23Z"/>
       </g>
+    </svg>
+    ${needleLayer(155, 'speed')}
+    ${needleLayer(465, 'rpm')}
+    <svg viewBox="0 0 620 286" class="cluster-hubs" aria-hidden="true">
+      <defs>
+        <radialGradient id="needle-hub-top" cx="35%" cy="30%">
+          <stop stop-color="#3a3a3a"/><stop offset="1" stop-color="#0a0a0a"/>
+        </radialGradient>
+      </defs>
+      <circle cx="155" cy="${cy}" r="8.5" fill="url(#needle-hub-top)" stroke="#2c3137" stroke-width="1"/>
+      <circle cx="465" cy="${cy}" r="8.5" fill="url(#needle-hub-top)" stroke="#2c3137" stroke-width="1"/>
     </svg>`;
   const $ = (selector) => container.querySelector(selector);
-  const svg = $('svg'),
+  const svg = $('svg[role="img"]'),
     speedNeedle = $('#speed-needle'),
     rpmNeedle = $('#rpm-needle'),
     rangeText = $('#range'),
@@ -227,14 +244,8 @@ export function setupInstruments(container) {
       dsc.setAttribute('visibility', warning.visible ? 'visible' : 'hidden');
       container.dataset.dscActive = String(warning.active);
       container.dataset.dscVisible = String(warning.visible);
-      speedNeedle.setAttribute(
-        'transform',
-        `rotate(${gaugeAngle(motion.speed, speedometerMaximum).toFixed(3)} 155 ${cy})`
-      );
-      rpmNeedle.setAttribute(
-        'transform',
-        `rotate(${gaugeAngle(motion.rpm, 8000).toFixed(3)} 465 ${cy})`
-      );
+      speedNeedle.style.transform = `rotate(${gaugeAngle(motion.speed, speedometerMaximum).toFixed(2)}deg)`;
+      rpmNeedle.style.transform = `rotate(${gaugeAngle(motion.rpm, 8000).toFixed(2)}deg)`;
       const fuel = fuelState(simulation.distance);
       textTime -= dt;
       if (textTime <= 0) {

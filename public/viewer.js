@@ -873,8 +873,15 @@ renderer.setAnimationLoop(() => {
     interior.setDaylight(1 - light.darkness);
     // Ambient lighting comes up with the dusk.
     setAmbientLight(Math.max(0, (light.darkness - 0.35) / 0.4));
-    cockpitCluster.update(dt, sim, nightMode);
-    centreDisplay.update(dt, sim, { hours: timeOfDay, raining: rainMode, night: nightMode });
+    // The cabin's screens are redrawn only while seen from the driver's seat.
+    const inCabin = cameraView === 'driver';
+    cockpitCluster.update(dt, sim, nightMode, inCabin);
+    centreDisplay.update(dt, sim, {
+      hours: timeOfDay,
+      raining: rainMode,
+      night: nightMode,
+      visible: inCabin,
+    });
     brakes.update(dt, {
       energy: sim.brakeEnergy - previousBrakeEnergy,
       speed: driving ? sim.speed : 0,

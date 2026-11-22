@@ -427,7 +427,7 @@ export function setupRoad(scene) {
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <lights_fragment_begin>',
-          `float tunnelLit = tunnelCover(vRoadXZ);
+          `float tunnelLit = tunnelCover(vRoadXZ.x, roadLat);
           float structureSun = (1. - tunnelLit) * (1. - bridgeShade(vRoadXZ));
           ` +
             THREE.ShaderChunk.lights_fragment_begin.replace(

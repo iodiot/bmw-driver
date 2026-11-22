@@ -1,7 +1,10 @@
 // Keep Retina framebuffers bounded, then adapt to sustained rendering load.
 // This changes only canvas resolution; weather density and physics stay intact.
+// The road's shading costs most per pixel and its cost grows faster than the
+// pixel count (measured: 1.8 Mpx about 5 ms, 3.1 Mpx about 15 ms), so a full
+// Retina screen starts at 3 Mpx rather than 4.
 export class RenderQuality {
-  constructor(devicePixelRatio = 1, maxPixels = 4_000_000) {
+  constructor(devicePixelRatio = 1, maxPixels = 3_000_000) {
     this.devicePixelRatio = Math.min(devicePixelRatio, 2);
     this.maxPixels = maxPixels;
     this.ratio = this.limit = this.devicePixelRatio;
@@ -41,7 +44,7 @@ export class RenderQuality {
     if (this.elapsed < 1) return this.ratio;
     this.samples.sort((a, b) => a - b);
     const frame = this.samples[Math.floor(this.samples.length * 0.75)];
-    if (frame > 1 / 50 && this.ratio > this.floor) {
+    if (frame > 1 / 54 && this.ratio > this.floor) {
       this.ratio = Math.max(this.floor, this.ratio * 0.85);
       this.recoveryDelay = 12;
       this.warmup = 0.5;

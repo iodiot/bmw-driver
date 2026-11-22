@@ -342,13 +342,15 @@ export function setupEnvironment(scene, renderer, sun) {
       cloudDrift.value += dt * 0.012;
       // The sky shader turns only its cloud coordinates. Between captures, turn
       // the reflection by the same drift so reflected clouds glide instead of
-      // jumping; frequent captures keep the sun and moon offset below 0.4°.
-      // The photographed sky is static, so its reflection never needs a refresh.
+      // jumping; a capture every 1.5 s (each a cube render and its filtering,
+      // a visible cost when it came twice a second) keeps the sun and moon
+      // within about 1° of their places. The photographed sky is static, so
+      // its reflection never needs a refresh.
       if (photoSkyMix.value > 0.999 && capturedPhoto === photoSkyMix.value)
         scene.environmentRotation.set(0, 0, 0);
       else {
         reflectionAge += dt;
-        if (reflectionAge >= 0.5) {
+        if (reflectionAge >= 1.5) {
           // Reuse both the capture cube and the filtered target. Reallocating and
           // disposing GPU textures here caused periodic driver stalls.
           refreshReflection(reflections.get(currentReflection));
