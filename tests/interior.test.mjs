@@ -156,7 +156,14 @@ test('The rebuilt dashboard replaces the model dash, recessed behind the instrum
   const zs = clusterLayout.corners.map((c) => c[2]);
   assert.ok(Math.min(...zs) >= dashLayout.cluster.from - 1e-9);
   assert.ok(Math.max(...zs) <= dashLayout.cluster.to + 1e-9);
-  // The centre stack runs from its foot up to the screen and fits between the seats.
+  // The centre stack runs from its foot up to the screen, about as wide as
+  // the screen (as on the F10) and clear of the instruments.
   const { bottom, top, width } = dashLayout.stack;
-  assert.ok(top[1] > bottom[1] + 0.2 && width < 0.25);
+  assert.ok(top[1] > bottom[1] + 0.15);
+  assert.ok(width <= dashLayout.screen.width && width > dashLayout.screen.width * 0.85);
+  assert.ok(bottom[2] - width / 2 > dashLayout.cluster.to);
+  // The screen is set into the dash under its brow: its top below the dash
+  // top, directly above the stack.
+  assert.ok(dashLayout.screen.top[1] < 0.418);
+  assert.ok(Math.abs(dashLayout.screen.bottom[1] - top[1]) < 0.015);
 });

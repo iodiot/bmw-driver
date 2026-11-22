@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { roundedBlock } from './door-trim.js';
+import { cognacLeather, grainScale, leatherGrain, roundedBlock } from './door-trim.js';
 
 // The lower cabin the model lacks: footwells, pedals and the centre console.
 //
@@ -28,8 +28,8 @@ export const footwell = Object.freeze({
 });
 export const consoleLayout = Object.freeze({
   halfWidth: 0.11,
-  // From under the centre stack's foot back between the seats.
-  front: 0.5,
+  // From the centre stack's foot back between the seats.
+  front: 0.56,
   rear: -0.78,
   top: 0.19,
   armrestFrom: -0.22,
@@ -149,6 +149,7 @@ export function cabinFloorMaterials() {
       roughness: 0.6,
       ...inside,
     }),
+    armrest: cognacLeather('Console armrest leather'),
     leather: new THREE.MeshPhysicalMaterial({
       name: 'Console leather',
       color: 0x1c1c1f,
@@ -157,6 +158,8 @@ export function cabinFloorMaterials() {
       sheenRoughness: 0.55,
       sheenColor: new THREE.Color(0x45454d),
       ...inside,
+      normalMap: leatherGrain(),
+      normalScale: grainScale,
     }),
     chrome: new THREE.MeshStandardMaterial({
       name: 'Console chrome',
@@ -347,13 +350,54 @@ export function buildConsole(materials) {
     placed(
       new THREE.Mesh(
         roundedBlock(armrestFrom - rear, armrestTop - top + 0.02, halfWidth * 2 + 0.01, 0.03),
-        materials.leather
+        materials.armrest
       ),
       [(armrestFrom + rear) / 2, (armrestTop + top) / 2, 0],
       0,
       'Console armrest'
     )
   );
+  // Pearl-chrome edges along both sides of the top, the gloss cupholder
+  // cover at the front with its split, and an oval chrome surround round
+  // the selector and its keys.
+  const edgeLength = front - armrestFrom - 0.05;
+  for (const side of [-1, 1])
+    group.add(
+      placed(
+        new THREE.Mesh(roundedBlock(edgeLength, 0.005, 0.006, 0.002), materials.chrome),
+        [armrestFrom + 0.025 + edgeLength / 2, top + 0.009, side * (halfWidth - 0.006)],
+        0,
+        'Console chrome edge'
+      )
+    );
+  const coverFrom = selector + 0.09,
+    coverTo = front - 0.025;
+  group.add(
+    placed(
+      new THREE.Mesh(
+        roundedBlock(coverTo - coverFrom, 0.006, halfWidth * 2 - 0.03, 0.003),
+        materials.gloss
+      ),
+      [(coverFrom + coverTo) / 2, top + 0.012, 0],
+      0,
+      'Cupholder cover'
+    ),
+    placed(
+      new THREE.Mesh(
+        new THREE.BoxGeometry(0.0025, 0.003, halfWidth * 2 - 0.035),
+        materials.plastic
+      ),
+      [(coverFrom + coverTo) / 2, top + 0.0155, 0],
+      0,
+      'Cupholder cover split'
+    )
+  );
+  const surround = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.0028, 8, 48), materials.chrome);
+  surround.rotation.x = Math.PI / 2;
+  surround.scale.set(1.25, 0.82, 1);
+  surround.position.set(selector + 0.005, top + 0.012, 0);
+  surround.name = 'Selector surround';
+  group.add(surround);
   // M DCT selector: a chrome-ringed gate and the leather lever, leaning back.
   const gate = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.045, 0.012, 32), materials.chrome);
   gate.position.set(selector, top + 0.014, 0);

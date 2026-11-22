@@ -18,9 +18,9 @@ export const doorTrim = Object.freeze({
   sill: 0.386,
   // Where the leather upper meets the lower panel, and the trim strip.
   leatherFrom: 0.33,
-  strip: 0.352,
+  strip: 0.335,
   armrest: Object.freeze({ from: -0.42, to: 0.2, top: 0.312, depth: 0.068 }),
-  opener: Object.freeze([0.42, 0.352]),
+  opener: Object.freeze([0.42, 0.333]),
   speaker: Object.freeze({ x: 0.33, y: 0.215, r: 0.056 }),
 });
 
@@ -41,6 +41,95 @@ export function isOldDoorTriangle(a, b, c, meshName) {
     z < 0.8 &&
     Math.abs(normal.z) > 0.7
   );
+}
+
+// Leather grain: a tileable relief of small rounded pebbles, as a normal
+// map. The image is made once; each surface takes its own repeat so the
+// grain is the same size (a 256-pixel tile spans `tile` metres on surfaces
+// whose uvs are in metres).
+let grainImage = null;
+function leatherGrainImage(size = 256) {
+  if (grainImage) return grainImage;
+  const height = new Float32Array(size * size);
+  let seed = 9173;
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  // Pebbles of a few pixels, wrapping at the edges so the tile repeats.
+  for (let n = 0; n < 2600; n++) {
+    const cx = random() * size,
+      cy = random() * size,
+      r = 2.2 + random() * 3.2,
+      h = 0.5 + random() * 0.5;
+    for (let dy = -Math.ceil(r); dy <= Math.ceil(r); dy++)
+      for (let dx = -Math.ceil(r); dx <= Math.ceil(r); dx++) {
+        const d = Math.hypot(dx, dy) / r;
+        if (d >= 1) continue;
+        const x = (Math.floor(cx + dx) + size) % size,
+          y = (Math.floor(cy + dy) + size) % size;
+        height[y * size + x] = Math.max(height[y * size + x], h * Math.sqrt(1 - d * d));
+      }
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const g = canvas.getContext('2d'),
+    image = g.createImageData(size, size);
+  const at = (x, y) => height[((y + size) % size) * size + ((x + size) % size)];
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const dx = (at(x + 1, y) - at(x - 1, y)) * 1.6,
+        dy = (at(x, y - 1) - at(x, y + 1)) * 1.6;
+      const len = Math.hypot(dx, dy, 1),
+        i = (y * size + x) * 4;
+      image.data[i] = (-dx / len) * 127.5 + 127.5;
+      image.data[i + 1] = (-dy / len) * 127.5 + 127.5;
+      image.data[i + 2] = (1 / len) * 127.5 + 127.5;
+      image.data[i + 3] = 255;
+    }
+  g.putImageData(image, 0, 0);
+  grainImage = canvas;
+  return canvas;
+}
+export function leatherGrain(repeatU = 1 / 0.07, repeatV = repeatU) {
+  const texture = new THREE.CanvasTexture(leatherGrainImage());
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(repeatU, repeatV);
+  texture.anisotropy = 4;
+  return texture;
+}
+// The grain's strength on leather surfaces.
+export const grainScale = new THREE.Vector2(0.45, 0.45);
+
+// BMW Cognac leather for the seats, door armrests and the centre armrest,
+// against the black dashboard and lining: a warm brown with an orange cast.
+export const cognac = Object.freeze({ colour: 0x48210f, sheen: 0x7c4e31 });
+export function cognacLeather(name, extra = {}) {
+  return new THREE.MeshPhysicalMaterial({
+    name,
+    color: cognac.colour,
+    roughness: 0.55,
+    sheen: 0.5,
+    sheenRoughness: 0.5,
+    sheenColor: new THREE.Color(cognac.sheen),
+    envMapIntensity: 0.3,
+    normalMap: leatherGrain(),
+    normalScale: grainScale,
+    ...extra,
+  });
+}
+
+// The cabin's ambient lighting: thin amber lines under the door rolls and
+// along the dashboard's trim band, dark by day and lit after dusk
+// (setAmbientLight). One shared unlit material, no light sources.
+export const ambientLightColour = new THREE.Color(0xff9440);
+export const ambientLight = new THREE.MeshBasicMaterial({
+  name: 'Ambient light',
+  color: 0x000000,
+  toneMapped: false,
+});
+export function setAmbientLight(level) {
+  ambientLight.color.copy(ambientLightColour).multiplyScalar(Math.max(0, Math.min(1, level)) * 1.4);
 }
 
 // A block w × h (x, y) and d deep (z) with rounded edges, centred. The
@@ -116,6 +205,8 @@ export function doorMaterials() {
   // Inside the cabin the sky and grass reflect only faintly.
   const inside = { envMapIntensity: 0.25 };
   return {
+    // The armrest and pull handle in Cognac, matching the seats.
+    accent: cognacLeather('Door armrest leather'),
     leather: new THREE.MeshPhysicalMaterial({
       name: 'Door leather',
       color: 0x1c1c1f,
@@ -124,6 +215,8 @@ export function doorMaterials() {
       sheenRoughness: 0.55,
       sheenColor: new THREE.Color(0x45454d),
       ...inside,
+      normalMap: leatherGrain(),
+      normalScale: grainScale,
     }),
     lower: new THREE.MeshStandardMaterial({
       name: 'Door panel',
@@ -217,13 +310,46 @@ export function buildDoorCard(side, materials) {
     materials.leather
   );
   at(upper, 0, 0, 0.006, 'Door leather upper');
-  // Sill cap: the rounded top edge under the window.
+  // The padded roll along the door top under the window, standing into
+  // the cabin, as on the F10: a soft leather section run along the door.
+  // Its section (depth into the cabin, height); the strip and opener sit
+  // under it.
+  const rollSection = [
+    [-0.012, sill + 0.006],
+    [0.024, sill + 0.004],
+    [0.042, sill - 0.012],
+    [0.044, sill - 0.026],
+    [0.03, sill - 0.034],
+    [0.008, sill - 0.036],
+    [-0.012, sill - 0.036],
+  ];
+  const rollShape = new THREE.Shape(
+    rollSection.map(([w, y]) => new THREE.Vector2(-side * (face - w), y))
+  );
+  const rollLength = to - from - 0.09;
+  const roll = new THREE.Mesh(
+    new THREE.ExtrudeGeometry(rollShape, {
+      depth: rollLength,
+      bevelEnabled: true,
+      bevelThickness: 0.012,
+      bevelSize: 0.006,
+      bevelSegments: 4,
+      curveSegments: 12,
+    }),
+    materials.leather
+  );
+  // The section's plane is (z, y); it runs along x from the B-pillar.
+  roll.rotation.y = Math.PI / 2;
+  roll.position.x = from + 0.025;
+  roll.name = 'Door top roll';
+  card.add(roll);
+  // Ambient light line just under the roll (clear of its rounded edge).
   at(
-    new THREE.Mesh(roundedBlock(to - from - 0.06, 0.016, 0.05, 0.007), materials.leather),
-    (from + to) / 2 - 0.03,
-    sill,
-    0.006,
-    'Door sill cap'
+    new THREE.Mesh(roundedBlock(rollLength - 0.02, 0.004, 0.004, 0.0012), ambientLight),
+    from + 0.025 + rollLength / 2,
+    sill - 0.047,
+    0.02,
+    'Door ambient light'
   );
   // Aluminium Trace strip, from the B-pillar to the opener.
   at(
@@ -252,7 +378,7 @@ export function buildDoorCard(side, materials) {
   // Armrest.
   const length = armrest.to - armrest.from;
   at(
-    new THREE.Mesh(roundedBlock(length, 0.034, armrest.depth, 0.014), materials.leather),
+    new THREE.Mesh(roundedBlock(length, 0.034, armrest.depth, 0.014), materials.accent),
     (armrest.from + armrest.to) / 2,
     armrest.top - 0.017,
     armrest.depth / 2,
@@ -306,7 +432,7 @@ export function buildDoorCard(side, materials) {
     new THREE.Vector3(armrest.to + 0.11, armrest.top + 0.024, side * (face - 0.045)),
     new THREE.Vector3(armrest.to + 0.15, armrest.top + 0.03, side * (face - 0.02)),
   ]);
-  const pull = new THREE.Mesh(new THREE.TubeGeometry(curve, 24, 0.011, 10), materials.leather);
+  const pull = new THREE.Mesh(new THREE.TubeGeometry(curve, 24, 0.011, 10), materials.accent);
   pull.name = 'Door pull handle';
   card.add(pull);
   // Speaker: perforated grille in a thin chrome ring.

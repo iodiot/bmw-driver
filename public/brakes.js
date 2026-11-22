@@ -397,13 +397,13 @@ export function setupBrakes(rig) {
       for (const assembly of assemblies) {
         const temperature = heat.discs[assembly.index].surface;
         const glow = brakeGlow(temperature);
-        const orange = THREE.MathUtils.smoothstep(temperature, 520, 850);
+        const orange = THREE.MathUtils.smoothstep(temperature, 420, 720);
         // Keep the glowing iron orange rather than mixing red light with a blue
         // sky reflection and bleaching it pink through the scene's tone curve.
         assembly.metal.color.lerpColors(
           coldIron,
           hotIron,
-          THREE.MathUtils.smoothstep(temperature, 450, 650)
+          THREE.MathUtils.smoothstep(temperature, 320, 520)
         );
         assembly.metal.emissive.setRGB(1, 0.045 + orange * 0.2, 0.001 + orange * 0.008);
         assembly.metal.emissiveIntensity = glow * 3;

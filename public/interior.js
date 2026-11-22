@@ -1,7 +1,16 @@
 import * as THREE from 'three';
-import { buildDoorCard, doorMaterials, isOldDoorTriangle, roundedBlock } from './door-trim.js';
+import {
+  buildDoorCard,
+  cognacLeather,
+  doorMaterials,
+  grainScale,
+  leatherGrain,
+  isOldDoorTriangle,
+  roundedBlock,
+} from './door-trim.js';
 import { buildCabinFloor, footwell, isOldFootwellTriangle } from './cabin-floor.js';
 import { buildDashboard, buildRoofFittings, isOldDashTriangle } from './dashboard.js';
+import { isOldRearMirrorTriangle } from './mirrors.js';
 
 // New front seats and M steering wheel. The downloaded model's front seats
 // are a few dozen flat triangles and its wheel a coarse ring; both are
@@ -12,7 +21,7 @@ import { buildDashboard, buildRoofFittings, isOldDashTriangle } from './dashboar
 // with the steering. Body space: x forward, y up, z to the right; the car is
 // left-hand drive, so the driver sits at negative z.
 // Share of the sky's indirect light that reaches the cabin's surfaces.
-export const cabinOcclusion = 0.45;
+export const cabinOcclusion = 0.55;
 export const interiorLayout = Object.freeze({
   // Fitted to the model's own wheel: rim centre, axis toward the driver.
   wheel: Object.freeze({
@@ -128,7 +137,7 @@ function fabricTexture() {
 // face (the model's low-poly trim): faces meeting at a point share one
 // normal there, oriented like the face, unless the faces fold back sharply
 // (an edge kept crisp).
-export function smoothNormals(geometry) {
+export function smoothNormals(geometry, crease = 0.5) {
   const position = geometry.attributes.position,
     index = geometry.index,
     key = (i) =>
@@ -159,7 +168,7 @@ export function smoothNormals(geometry) {
     for (const id of face.ids) {
       sum.set(0, 0, 0);
       for (const other of byPoint.get(key(id)))
-        if (other.unit.dot(face.unit) > 0.5) sum.add(other.n);
+        if (other.unit.dot(face.unit) > crease) sum.add(other.n);
       sum.normalize();
       normals.set([sum.x, sum.y, sum.z], id * 3);
     }
@@ -172,14 +181,22 @@ export function loft(rings, shade = null) {
   const n = rings[0].length,
     positions = [],
     colours = [],
+    uvs = [],
     indices = [];
-  rings.forEach((ring, r) =>
+  // Uvs in metres: round each section, and along the sections, so surface
+  // textures (the leather grain) keep their size.
+  const along = new Array(n).fill(0);
+  rings.forEach((ring, r) => {
+    let round = 0;
     ring.forEach((p, i) => {
+      if (i) round += p.distanceTo(ring[i - 1]);
+      if (r) along[i] += p.distanceTo(rings[r - 1][i]);
       positions.push(p.x, p.y, p.z);
+      uvs.push(round, along[i]);
       const v = shade ? shade(r, i) : 1;
       colours.push(v, v, v);
-    })
-  );
+    });
+  });
   for (let r = 0; r < rings.length - 1; r++)
     for (let i = 0; i < n; i++) {
       const a = r * n + i,
@@ -197,6 +214,7 @@ export function loft(rings, shade = null) {
     const k = positions.length / 3;
     positions.push(centre.x, centre.y, centre.z);
     colours.push(1, 1, 1);
+    uvs.push(0, 0);
     for (let i = 0; i < n; i++) {
       const a = r * n + i,
         b = r * n + ((i + 1) % n);
@@ -206,6 +224,7 @@ export function loft(rings, shade = null) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colours, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   // Faces must point outward whichever way the outlines run: compare the
@@ -248,6 +267,34 @@ export function ring(points2d, origin, axisA, axisB, scale = 1, count = 40) {
 
 // Perforated panels a shade darker than the smooth bolsters, on the seating
 // face only: `inPanel(lateral, depth)` picks them out.
+// A seam along lofted sections: through the point of each section on its
+// front (upper) half nearest a lateral position, as a thin tube.
+function seamAlong(rings, lateral, material) {
+  const points = rings.map((r) => {
+    const depths = r.local.map(([, b]) => b);
+    const mid = (Math.min(...depths) + Math.max(...depths)) / 2;
+    // The front edge between the two points either side of the lateral
+    // position, interpolated, so the seam runs straight.
+    let found = null;
+    for (let i = 0; i < r.length; i++) {
+      const j = (i + 1) % r.length;
+      const [a0, b0] = r.local[i],
+        [a1, b1] = r.local[j];
+      if (b0 < mid || b1 < mid || (a0 - lateral) * (a1 - lateral) > 0 || a0 === a1) continue;
+      const t = (lateral - a0) / (a1 - a0);
+      found = r[i].clone().lerp(r[j], t);
+      break;
+    }
+    return found;
+  });
+  const path = points.filter(Boolean);
+  const seam = new THREE.Mesh(
+    new THREE.TubeGeometry(new THREE.CatmullRomCurve3(path), path.length * 3, 0.0011, 5),
+    material
+  );
+  seam.name = 'Seat seam';
+  return seam;
+}
 const panelShade = (rings, inPanel) => (r, i) => (inPanel(...rings[r].local[i]) ? 0.62 : 1);
 
 // Mirrors the right half of an outline (from the top centre, clockwise
@@ -263,10 +310,10 @@ function mirrored(half) {
 }
 // Seat cushion cross-section (lateral, height): a flat centre between raised
 // side bolsters, a flat base.
-function cushionProfile(hw, top, bottom, bolster) {
+function cushionProfile(hw, top, bottom, bolster, dip = 0) {
   return mirrored([
-    [0, top],
-    [hw - 0.13, top + 0.004],
+    [0, top - dip],
+    [hw - 0.13, top + 0.004 - dip * 0.5],
     [hw - 0.09, top + bolster * 0.6],
     [hw - 0.045, top + bolster],
     [hw - 0.01, top + bolster * 0.75],
@@ -278,10 +325,10 @@ function cushionProfile(hw, top, bottom, bolster) {
 }
 // Backrest cross-section (lateral, forward depth): a recessed centre panel
 // between forward-reaching bolsters, a gently rounded back.
-function backrestProfile(hw, bolster, thickness) {
+function backrestProfile(hw, bolster, thickness, dip = 0) {
   return mirrored([
-    [0, 0],
-    [hw - 0.13, 0.004],
+    [0, -dip],
+    [hw - 0.13, 0.004 - dip * 0.5],
     [hw - 0.09, bolster * 0.55],
     [hw - 0.045, bolster],
     [hw - 0.01, bolster * 0.8],
@@ -293,42 +340,35 @@ function backrestProfile(hw, bolster, thickness) {
 }
 // Rear bench cross-sections: two outer seats with shallow dishes and a
 // raised centre, across the full width.
-function benchCushionProfile(hw, top, bottom) {
+function benchCushionProfile(hw, top, bottom, dip = 0) {
+  // Two sculpted outer places either side of a raised middle.
   return mirrored([
-    [0, top + 0.016],
-    [0.2, top + 0.012],
-    [0.36, top - 0.004],
-    [0.5, top + 0.02],
-    [hw - 0.03, top + 0.03],
+    [0, top + 0.02],
+    [0.2, top + 0.014],
+    [0.36, top - 0.012 - dip],
+    [0.5, top + 0.03],
+    [hw - 0.03, top + 0.036],
     [hw, top - 0.02],
     [hw - 0.02, bottom],
     [0, bottom],
   ]);
 }
-function benchBackProfile(hw, thickness) {
+function benchBackProfile(hw, thickness, dip = 0) {
   return mirrored([
-    [0, 0.028],
-    [0.2, 0.024],
-    [0.36, 0],
-    [0.5, 0.034],
-    [hw - 0.03, 0.045],
+    [0, 0.04],
+    [0.2, 0.03],
+    [0.36, -0.012 - dip],
+    [0.5, 0.05],
+    [hw - 0.03, 0.056],
     [hw, -0.02],
     [hw - 0.02, -thickness],
     [0, -thickness - 0.006],
   ]);
 }
 
-const leather = () =>
-  new THREE.MeshPhysicalMaterial({
-    name: 'Merino leather',
-    vertexColors: true,
-    color: 0x1f1f22,
-    roughness: 0.58,
-    sheen: 0.45,
-    sheenRoughness: 0.55,
-    sheenColor: new THREE.Color(0x4a4a52),
-    envMapIntensity: 0.3,
-  });
+// Seats, headrests and the rear bench in BMW Cognac leather (the centre
+// panels a shade darker through the vertex colours).
+const leather = () => cognacLeather('Merino leather', { vertexColors: true });
 
 const Z = new THREE.Vector3(0, 0, 1),
   Y = new THREE.Vector3(0, 1, 0);
@@ -375,14 +415,21 @@ function buildSeat(centreZ, materials) {
   const cushionRings = [];
   const shift = interiorLayout.seatForward;
   const xs = [-0.47, -0.42, -0.34, -0.24, -0.15, -0.09, -0.06, -0.045].map((x) => x + shift);
-  xs.forEach((x, i) => {
+  // Stitched pleats across the centre panel: a shallow crease at each, with
+  // sections close either side to keep it narrow.
+  const cushionPleats = [0.3, 0.45, 0.6].map((t) => xs[0] + t * (xs.at(-1) - xs[0]));
+  const cushionXs = [...xs, ...cushionPleats.flatMap((x) => [x - 0.012, x, x + 0.012])].sort(
+    (a, b) => a - b
+  );
+  cushionXs.forEach((x) => {
     const t = (x - xs[0]) / (xs.at(-1) - xs[0]),
       floor = cabinFloor(x);
-    const bolster = 0.055 * Math.sin(Math.PI * Math.min(1, t * 1.15)) + 0.01;
-    const scale = i === xs.length - 1 ? 0.82 : i === xs.length - 2 ? 0.95 : i === 0 ? 0.92 : 1;
+    const bolster = 0.07 * Math.sin(Math.PI * Math.min(1, t * 1.15)) + 0.01;
+    const scale = x === xs.at(-1) ? 0.82 : x === xs.at(-2) ? 0.95 : x === xs[0] ? 0.92 : 1;
+    const dip = cushionPleats.includes(x) ? 0.005 : 0;
     cushionRings.push(
       ring(
-        cushionProfile(hw, floor + 0.07 + 0.015 * t, floor - 0.02, bolster),
+        cushionProfile(hw, floor + 0.07 + 0.015 * t, floor - 0.02, bolster, dip),
         new THREE.Vector3(x, 0, centreZ),
         Z,
         Y,
@@ -406,15 +453,21 @@ function buildSeat(centreZ, materials) {
     top = new THREE.Vector3(-0.53 + shift, 0.545, centreZ);
   const { up, height, forward } = reclined(base, top);
   const backRings = [];
-  const us = [0, 0.08, 0.25, 0.45, 0.65, 0.8, 0.9, 0.96, 1];
-  us.forEach((u, i) => {
+  const baseUs = [0, 0.08, 0.25, 0.45, 0.65, 0.8, 0.9, 0.96, 1];
+  const backPleats = [0.2, 0.32, 0.44, 0.56, 0.68];
+  const us = [...baseUs, ...backPleats.flatMap((u) => [u - 0.025, u, u + 0.025])].sort(
+    (a, b) => a - b
+  );
+  us.forEach((u) => {
     const width =
       hw + 0.012 * Math.sin(Math.PI * Math.min(1, u * 1.6)) - 0.035 * Math.max(0, u - 0.75) * 4;
-    const bolster = 0.08 * Math.sin(Math.PI * Math.min(1, 0.15 + u * 1.05)) + 0.01;
-    const scale = i === us.length - 1 ? 0.8 : i === us.length - 2 ? 0.93 : 1;
+    // Sport-seat side bolsters, deepest at the small of the back.
+    const bolster = 0.1 * Math.sin(Math.PI * Math.min(1, 0.15 + u * 1.05)) + 0.01;
+    const scale = u === 1 ? 0.8 : u === 0.96 ? 0.93 : 1;
+    const dip = backPleats.includes(u) ? 0.006 : 0;
     backRings.push(
       ring(
-        backrestProfile(width, bolster, 0.08 + 0.015 * (1 - u)),
+        backrestProfile(width, bolster, 0.08 + 0.015 * (1 - u), dip),
         base.clone().addScaledVector(up, u * height),
         Z,
         forward,
@@ -444,6 +497,11 @@ function buildSeat(centreZ, materials) {
       .add(new THREE.Vector3(0, 0, dz));
     post.quaternion.setFromUnitVectors(Y, up);
     seat.add(post);
+  }
+  // Seams where the centre panels meet the bolsters.
+  for (const side of [-1, 1]) {
+    seat.add(seamAlong(cushionRings, side * (hw - 0.13), materials.seam));
+    seat.add(seamAlong(backRings, side * (hw - 0.13), materials.seam));
   }
   seat.add(cushion, backrest, head);
   return seat;
@@ -481,14 +539,25 @@ function buildBench(materials) {
   const base = new THREE.Vector3(-1.13, cabinFloor(-1.13) + 0.05, 0),
     top = new THREE.Vector3(-1.255, 0.465, 0);
   const { up, height, forward } = reclined(base, top);
-  const us = [0, 0.1, 0.35, 0.65, 0.88, 0.96, 1];
-  const backRings = us.map((u, i) =>
+  // Stitched pleats across the outer places, as on the front seats.
+  const pleats = [0.25, 0.42, 0.59];
+  const us = [
+    0,
+    0.1,
+    0.35,
+    0.65,
+    0.88,
+    0.96,
+    1,
+    ...pleats.flatMap((u) => [u - 0.03, u, u + 0.03]),
+  ].sort((a, b) => a - b);
+  const backRings = us.map((u) =>
     ring(
-      benchBackProfile(hw - 0.02 * u, 0.09),
+      benchBackProfile(hw - 0.02 * u, 0.09, pleats.includes(u) ? 0.006 : 0),
       base.clone().addScaledVector(up, u * height),
       Z,
       forward,
-      i === us.length - 1 ? 0.9 : i === us.length - 2 ? 0.97 : 1,
+      u === 1 ? 0.9 : u === 0.96 ? 0.97 : 1,
       count
     )
   );
@@ -500,6 +569,11 @@ function buildBench(materials) {
     materials.leather
   );
   backrest.name = 'Bench backrest';
+  // Seams round the outer places' centre panels.
+  for (const lateral of [-0.48, -0.24, 0.24, 0.48]) {
+    bench.add(seamAlong(cushionRings, lateral, materials.seam));
+    bench.add(seamAlong(backRings, lateral, materials.seam));
+  }
   bench.add(cushion, backrest);
   for (const z of [-0.36, 0, 0.36]) {
     const headBase = base
@@ -604,14 +678,25 @@ function buildWheel(materials) {
   const { radius, grip } = interiorLayout.wheel;
   const wheel = new THREE.Group();
   wheel.name = 'M steering wheel';
-  // Rim, slightly oval in section like a sports grip.
+  // Thick rim, oval in section like the M grip.
   const rim = new THREE.Mesh(
-    new THREE.TorusGeometry(radius, grip, 20, 120),
+    new THREE.TorusGeometry(radius, grip, 22, 140),
     materials.wheelLeather
   );
-  rim.scale.set(1, 1, 1.12);
+  rim.scale.set(1, 1, 1.15);
   rim.name = 'Steering wheel rim';
   wheel.add(rim);
+  // M tricolour stitching on the rim's inner edge beside the lower spoke.
+  [0x6fb8e8, 0x2b3c8f, 0xe03a3e].forEach((color, i) => {
+    const stitch = new THREE.Mesh(
+      new THREE.TorusGeometry(radius - grip * 0.92, 0.0016, 6, 16, 0.045),
+      new THREE.MeshStandardMaterial({ color, roughness: 0.6 })
+    );
+    stitch.rotation.z = -Math.PI / 2 + 0.11 + i * 0.05;
+    stitch.position.z = 0.004;
+    stitch.name = 'M stitching';
+    wheel.add(stitch);
+  });
   // Thumb rests at a quarter to three.
   for (const side of [-1, 1]) {
     const thumb = new THREE.Mesh(
@@ -624,69 +709,120 @@ function buildWheel(materials) {
     thumb.rotation.z = a;
     wheel.add(thumb);
   }
-  // Hub with the airbag pad, a little toward the driver.
-  const hub = plate(roundedOutline(0.12, 0.105, 0.03, 0.135), 0.02, 0.014, materials.plastic);
-  hub.position.set(0, 0.0, 0.012);
+  // Airbag cover: a domed, rounded trapezoid, wider at the top, with the roundel.
+  const hub = plate(roundedOutline(0.088, 0.096, 0.026, 0.124), 0.016, 0.014, materials.plastic);
+  hub.position.set(0, 0.008, 0.012);
   hub.name = 'Airbag pad';
   wheel.add(hub);
   const logo = new THREE.Mesh(
-    new THREE.CircleGeometry(0.0195, 40),
+    new THREE.CircleGeometry(0.0185, 40),
     new THREE.MeshStandardMaterial({
       map: badgeTexture(roundel, 128, 128),
       roughness: 0.35,
       metalness: 0.2,
     })
   );
-  logo.position.set(0, 0.012, 0.0465);
+  logo.position.set(0, 0.022, 0.0425);
   wheel.add(logo);
-  // Side spokes from the hub to the rim, with button panels.
+  // Side spokes: broad wedges from the hub to the rim, a little below the
+  // centre, each with a gloss key panel, and a pearl-chrome strip along the
+  // lower edge.
   for (const side of [-1, 1]) {
     const spoke = plate(
       [
-        [0.05, 0.002],
-        [radius - 0.006, -0.008],
-        [radius - 0.006, -0.042],
-        [0.05, -0.052],
+        [0.05, 0.014],
+        [0.1, 0.008],
+        [radius - 0.008, -0.002],
+        [radius - 0.008, -0.044],
+        [0.1, -0.05],
+        [0.046, -0.044],
       ].map(([x, y]) => [side * x, y]),
       0.012,
-      0.006,
-      materials.plastic
+      0.007,
+      materials.wheelLeather
     );
     spoke.position.z = 0.004;
+    spoke.name = 'Steering wheel spoke';
     wheel.add(spoke);
-    const trim = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.004, 0.004), materials.chrome);
-    trim.position.set(side * 0.118, -0.047, 0.024);
-    trim.rotation.z = side * 0.06;
+    const panel = new THREE.Mesh(roundedBlock(0.064, 0.03, 0.006, 0.006), materials.buttons);
+    panel.position.set(side * 0.098, -0.014, 0.025);
+    panel.name = 'Wheel key panel';
+    wheel.add(panel);
+    for (const [dx, dy] of [
+      [-0.016, 0.007],
+      [0.016, 0.007],
+      [-0.016, -0.007],
+      [0.016, -0.007],
+    ]) {
+      const key = new THREE.Mesh(roundedBlock(0.024, 0.011, 0.004, 0.003), materials.plastic);
+      key.position.set(side * 0.098 + dx, -0.014 + dy, 0.0285);
+      key.name = 'Wheel key';
+      wheel.add(key);
+    }
+    const trim = new THREE.Mesh(roundedBlock(0.12, 0.004, 0.005, 0.0015), materials.chrome);
+    trim.position.set(side * 0.112, -0.049, 0.021);
+    trim.rotation.z = side * 0.05;
+    trim.name = 'Spoke chrome strip';
     wheel.add(trim);
-    const buttons = new THREE.Mesh(new THREE.BoxGeometry(0.058, 0.03, 0.006), materials.buttons);
-    buttons.position.set(side * 0.102, -0.022, 0.026);
-    wheel.add(buttons);
     // Shift paddle behind the rim.
-    const paddle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.03, 0.004), materials.paddle);
+    const paddle = new THREE.Mesh(roundedBlock(0.05, 0.03, 0.004, 0.0015), materials.paddle);
     paddle.position.set(side * (radius - 0.03), 0.01, -0.03);
     wheel.add(paddle);
   }
-  // Split lower spoke with the M badge between its bars.
+  // M1 and M2 keys on the left spoke, below its panel.
+  ['M1', 'M2'].forEach((label, i) => {
+    const x = -0.088 + i * 0.022;
+    const key = new THREE.Mesh(roundedBlock(0.018, 0.011, 0.004, 0.003), materials.plastic);
+    key.position.set(x, -0.036, 0.024);
+    key.name = `${label} key`;
+    // Its legend, on a plane just in front (an extruded key's uvs are in
+    // metres, not 0–1).
+    const legend = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.014, 0.008),
+      new THREE.MeshBasicMaterial({
+        map: badgeTexture(
+          (g, w, h) => {
+            g.fillStyle = '#d9dde2';
+            g.font = `700 ${Math.round(h * 0.7)}px Arial, sans-serif`;
+            g.textAlign = 'center';
+            g.textBaseline = 'middle';
+            g.fillText(label, w / 2, h / 2 + 1);
+          },
+          64,
+          36
+        ),
+        transparent: true,
+        color: 0x9a9ea4,
+      })
+    );
+    legend.position.set(x, -0.036, 0.0265);
+    wheel.add(key, legend);
+  });
+  // Split lower spoke: two bars with chrome edges and the M badge between.
   for (const side of [-1, 1]) {
     const bar = plate(
       [
-        [side * 0.012, -0.05],
-        [side * 0.03, -0.05],
-        [side * 0.024, -radius + 0.006],
-        [side * 0.008, -radius + 0.006],
+        [side * 0.014, -0.042],
+        [side * 0.034, -0.042],
+        [side * 0.026, -radius + 0.006],
+        [side * 0.01, -radius + 0.006],
       ],
       0.01,
       0.005,
-      materials.plastic
+      materials.wheelLeather
     );
     bar.position.z = 0.003;
     wheel.add(bar);
+    const edge = new THREE.Mesh(roundedBlock(0.003, 0.11, 0.004, 0.001), materials.chrome);
+    edge.position.set(side * 0.034, -0.1, 0.019);
+    edge.rotation.z = side * -0.07;
+    wheel.add(edge);
   }
   const badge = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.034, 0.016),
+    new THREE.PlaneGeometry(0.03, 0.014),
     new THREE.MeshStandardMaterial({ map: badgeTexture(mBadge, 128, 60), roughness: 0.4 })
   );
-  badge.position.set(0, -0.12, 0.016);
+  badge.position.set(0, -0.122, 0.017);
   wheel.add(badge);
   return wheel;
 }
@@ -723,7 +859,8 @@ export function setupInterior(rig) {
         isOldBenchTriangle(a, b, c, mesh.name) ||
         isOldDoorTriangle(a, b, c, mesh.name) ||
         isOldFootwellTriangle(a, b, c, mesh.name) ||
-        isOldDashTriangle(a, b, c, mesh.name)
+        isOldDashTriangle(a, b, c, mesh.name) ||
+        isOldRearMirrorTriangle(a, b, c, mesh.name)
       )
         removed++;
       else if (isHeadlinerTriangle(a, b, c, mesh.name)) lining.push(...ids);
@@ -739,12 +876,15 @@ export function setupInterior(rig) {
     leather: leather(),
     wheelLeather: new THREE.MeshPhysicalMaterial({
       name: 'Steering wheel leather',
-      color: 0x151517,
+      color: 0x1f1f22,
       roughness: 0.62,
       sheen: 0.4,
       sheenRoughness: 0.6,
       sheenColor: new THREE.Color(0x3c3c44),
       envMapIntensity: 0.3,
+      // The rim's uvs run once round it (1.2 m) and round its grip (0.13 m).
+      normalMap: leatherGrain(17, 2),
+      normalScale: grainScale,
     }),
     plastic: new THREE.MeshStandardMaterial({
       name: 'Interior black',
@@ -763,6 +903,12 @@ export function setupInterior(rig) {
       metalness: 0.9,
       roughness: 0.3,
     }),
+    // Tonal stitching, a little lighter than the leather.
+    seam: new THREE.MeshStandardMaterial({
+      name: 'Seat seam',
+      color: 0x74503a,
+      roughness: 0.7,
+    }),
     paddle: new THREE.MeshStandardMaterial({
       name: 'Paddle',
       color: 0x3a3d42,
@@ -773,18 +919,26 @@ export function setupInterior(rig) {
   const interior = new THREE.Group();
   interior.name = 'Interior';
   // The headliner: the same triangles in their own mesh, in anthracite cloth.
+  // Facing down, the lining gets none of the sun and only the scene's dark
+  // ground light; in a car it is lit by light bounced off the seats, dash
+  // and windows, which a faint glow of its own stands in for.
   const lining = new THREE.MeshStandardMaterial({
     name: 'Anthracite headliner',
     color: 0x3d3e43,
     map: fabricTexture(),
     roughness: 0.95,
+    emissive: 0x2a2b30,
+    emissiveMap: fabricTexture(),
+    emissiveIntensity: 0.55,
   });
+  lining.userData.bounce = 0.55;
   for (const [mesh, ids] of headliners) {
     const geometry = new THREE.BufferGeometry();
     for (const [name, attribute] of Object.entries(mesh.geometry.attributes))
       geometry.setAttribute(name, attribute);
     geometry.setIndex(ids);
-    geometry.setAttribute('normal', smoothNormals(geometry));
+    // Soft creases: the pillars and lining read as one padded surface.
+    geometry.setAttribute('normal', smoothNormals(geometry, 0.15));
     const headliner = new THREE.Mesh(geometry, lining);
     headliner.name = 'Headliner';
     mesh.add(headliner);
@@ -884,6 +1038,20 @@ export function setupInterior(rig) {
   body.traverse((o) => {
     if (o.isMesh && ['Object_53', 'Object_37', 'Headliner'].includes(o.name)) occlude(o);
   });
+  // The light cloth lining and pillars catch light bounced round the cabin:
+  // half the occlusion, so they read dark grey rather than black.
+  body.traverse((o) => {
+    if (o.isMesh && o.name === 'Headliner') o.material.aoMapIntensity = 0.5;
+  });
+  // The body has no floor pan and a sun-facing panel casts no shadow, so
+  // low sun slipping under the sills or round the arches crossed the cabin
+  // and left through the roof, drawing bright streaks in the car's shadow.
+  // The model's cabin shell and the lining (a few hundred triangles) close
+  // it.
+  body.traverse((o) => {
+    if (o.isMesh && ['Object_53', 'Object_37', 'Headliner'].includes(o.name)) o.castShadow = true;
+  });
+  let bounced = null;
   return {
     interior,
     wheel,
@@ -892,6 +1060,17 @@ export function setupInterior(rig) {
     // trim) take the same dimmed sky light.
     occlude(object) {
       object.traverse((o) => o.isMesh && occlude(o));
+    },
+    // Bounced daylight on the lining and visors fades with the daylight.
+    setDaylight(level) {
+      if (!bounced) {
+        bounced = [];
+        body.traverse((o) => {
+          for (const m of [o.material].flat())
+            if (m?.userData?.bounce !== undefined && !bounced.includes(m)) bounced.push(m);
+        });
+      }
+      for (const m of bounced) m.emissiveIntensity = m.userData.bounce * level;
     },
     update(simulation) {
       wheel.rotation.z = (simulation?.steer ?? 0) * interiorLayout.wheel.ratio;

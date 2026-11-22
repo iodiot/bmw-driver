@@ -31,6 +31,7 @@ import { daylight, dayCycle, wrapHours } from './time-of-day.js';
 import { setupDayBar } from './day-bar.js';
 import { setupRearGlow } from './rear-glow.js';
 import { setupInterior } from './interior.js';
+import { setAmbientLight } from './door-trim.js';
 import { SeatCamera, cameraViews, nextCameraView, viewFov } from './camera-views.js';
 import { setupCockpitCluster } from './cockpit-cluster.js';
 import { setupCentreDisplay } from './centre-display.js';
@@ -464,12 +465,7 @@ new GLTFLoader().load(
       interior = setupInterior(rig);
       cockpitCluster = setupCockpitCluster(rig);
       centreDisplay = setupCentreDisplay(rig);
-      for (const name of [
-        'iDrive screen housing',
-        'iDrive screen brow',
-        'Dashboard trim band',
-        'Dashboard chrome line',
-      ])
+      for (const name of ['Dashboard trim band', 'Dashboard chrome line'])
         interior.occlude(centreDisplay.group.getObjectByName(name));
       licensePlates.setNight(nightMode);
       contactShadow = setupContactShadow(scene, sim.layout);
@@ -730,6 +726,9 @@ renderer.setAnimationLoop(() => {
     // Tail lamps light the road behind at dusk and night, more when braking.
     rearGlow.update(sim, light.darkness, lights.intensity / brakeLights.brake);
     interior.update(sim);
+    interior.setDaylight(1 - light.darkness);
+    // Ambient lighting comes up with the dusk.
+    setAmbientLight(Math.max(0, (light.darkness - 0.35) / 0.4));
     cockpitCluster.update(dt, sim, nightMode);
     centreDisplay.update(dt, sim, { hours: timeOfDay, raining: rainMode, night: nightMode });
     brakes.update(dt, {

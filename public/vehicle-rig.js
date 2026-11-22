@@ -117,6 +117,13 @@ export function addArchLiners(rig) {
   // lip ends about there, so a longer arc showed as a black plate beside the
   // tyre, below the bodywork.
   const reach = 0.1;
+  // Never drawn, only in the shadow pass (both sides, see the blocker below).
+  const shadowOnly = new THREE.MeshBasicMaterial({
+    name: 'Shadow only',
+    colorWrite: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
   const liners = rig.wheels.map((w) => {
     const side = Math.sign(w.z) || 1,
       radius = w.r + 0.045,
@@ -143,10 +150,60 @@ export function addArchLiners(rig) {
       material
     );
     wall.position.z = -side * (width / 2);
+    // Over the top of the arch the wing is wider than the liner: a band on
+    // from the liner's outer edge to just inside the wing's skin, so the
+    // sun cannot shine down through the slit between them (a one-sided wing
+    // casts no shadow from its upper face). Only over the top, where the
+    // wing is wide enough to hide it.
+    const bandWidth = 0.042;
+    const band = new THREE.Mesh(
+      new THREE.CylinderGeometry(
+        radius,
+        radius,
+        bandWidth,
+        20,
+        1,
+        true,
+        Math.PI / 2 + 0.45,
+        Math.PI - 0.9
+      ).rotateX(Math.PI / 2),
+      material
+    );
+    band.position.z = side * (width / 2 + bandWidth / 2);
     // They close the arches for the sun too: open arches let light through
     // under the car, a bright crescent in its shadow by each wheel.
-    arc.castShadow = wall.castShadow = true;
-    group.add(arc, wall);
+    arc.castShadow = wall.castShadow = band.castShadow = true;
+    // An unseen ring over the slit between tyre and liner on the outer
+    // side: sunlight slanting in through the liner and out through that slit
+    // drew thin bright arcs in the shadow. Just outside the tyre's face, from
+    // a little inside its tread out past the liner, so the wheel's own face
+    // stays in the sun.
+    const fill = new THREE.Mesh(
+      new THREE.RingGeometry(w.r - 0.01, radius + 0.03, 28, 1, -reach, Math.PI + 2 * reach),
+      shadowOnly
+    );
+    fill.position.z = side * (0.04 + 0.155);
+    fill.castShadow = true;
+    fill.name = 'Arch slit shadow';
+    // In front of and behind the tyre the body's arch opening is wider than
+    // the liner: an open slit from the liner's edge to the door and bumper
+    // skins, through which low sun crossed into the floorless cabin and out
+    // through the roof (a sun-facing panel casts nothing). Unseen sectors at
+    // the liner's outer edge close it, inside the body's skin.
+    const sectors = [
+      [-0.2, 0.8],
+      [Math.PI - 0.6, 0.8],
+    ].map(([start, length]) => {
+      const sector = new THREE.Mesh(
+        new THREE.RingGeometry(radius - 0.005, w.r + 0.34, 8, 1, start, length),
+        shadowOnly
+      );
+      sector.position.z = side * (width / 2);
+      sector.castShadow = true;
+      sector.name = 'Arch side shadow';
+      return sector;
+    });
+    group.add(arc, wall, band, fill, ...sectors);
     rig.body.add(group);
     return group;
   });
@@ -171,7 +228,9 @@ export function addArchLiners(rig) {
   // seen, but the shadow pass draws it.
   const blocker = new THREE.Mesh(
     new THREE.PlaneGeometry(4.7, 1.8),
-    new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false })
+    // Both sides: a one-sided plane casts no shadow toward the sun (three.js
+    // draws the back of one-sided surfaces into the shadow map).
+    shadowOnly
   );
   blocker.rotation.x = -Math.PI / 2;
   // Low, near the real car's ground clearance, so little light slips under
@@ -181,6 +240,39 @@ export function addArchLiners(rig) {
   blocker.name = 'Shadow blocker';
   under.add(blocker);
   rig.body.add(under);
+  // The body is a single-sided shell: seen from behind (inside a wing past
+  // a liner's edge, in gaps round the arches) its panels vanished and the
+  // sky showed through. Each painted panel gets a matt black inner face,
+  // drawn only where its back is toward the camera, so it never covers the
+  // paint.
+  const inner = new THREE.MeshStandardMaterial({
+    name: 'Body inner face',
+    color: 0x060607,
+    roughness: 1,
+    side: THREE.BackSide,
+  });
+  const shells = [];
+  rig.body.traverse((o) => {
+    if (o.isMesh && o.material?.name === 'M5_F10_Paint') shells.push(o);
+  });
+  // The roof panel's inner face is the roof lining seen from the seats:
+  // anthracite cloth, where the model's own lining does not reach.
+  const lining = new THREE.MeshStandardMaterial({
+    name: 'Roof lining',
+    color: 0x3a3b40,
+    roughness: 0.95,
+    emissive: 0x1c1d21,
+    side: THREE.BackSide,
+  });
+  lining.userData.bounce = 1;
+  for (const panel of shells) {
+    rig.body.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(panel);
+    const roof = box.min.y - rig.body.getWorldPosition(new THREE.Vector3()).y > 0.65;
+    const back = new THREE.Mesh(panel.geometry, roof ? lining : inner);
+    back.name = `${panel.name} inner face`;
+    panel.add(back);
+  }
   return { liners, under };
 }
 

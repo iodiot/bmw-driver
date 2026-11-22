@@ -38,6 +38,6 @@ export class BrakeHeatState {
 }
 
 export function brakeGlow(temperature) {
-  const x = Math.max(0, Math.min(1, (temperature - 480) / 430));
+  const x = Math.max(0, Math.min(1, (temperature - 330) / 370));
   return x * x * (3 - 2 * x);
 }

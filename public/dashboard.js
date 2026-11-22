@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { roundedBlock } from './door-trim.js';
+import { grainScale, leatherGrain, roundedBlock } from './door-trim.js';
 
 // The dashboard, rebuilt after the F10's. The model's own dash is a few
 // dozen flat triangles; it is cut away and replaced by:
@@ -7,10 +7,12 @@ import { roundedBlock } from './door-trim.js';
 //   sloping down to the knee panel and the glovebox, recessed behind the
 //   instruments;
 // - the instrument hood, a brow over the dials with cheeks down their sides;
-// - the centre stack, turned a little toward the driver: two vents with the
-//   hazard switch between, the radio with its CD slot, favourite keys and
-//   volume knob, the climate panel with two temperature knobs, its display
-//   and a key row, and a storage flap, all in a gloss-black frame;
+// - a recess under the dash top's brow for the iDrive screen, set in flush;
+// - the centre stack below it, turned a little toward the driver: two vents
+//   with the hazard switch between, the radio with its CD slot, favourite
+//   keys and volume knob, the climate panel with two temperature knobs, its
+//   display and a key row, in a gloss-black frame running down into the
+//   console;
 // - side vents at both ends, the light switch left of the wheel, and the
 //   glovebox's shut lines and handle.
 // Body space: x forward, y up, z to the right (driver at -z). Heights fit
@@ -20,12 +22,25 @@ export const dashLayout = Object.freeze({
   halfWidth: 0.71,
   // Where the instruments sit (their face's z range) and the stack.
   cluster: Object.freeze({ from: -0.615, to: -0.195 }),
+  // The iDrive screen set into the dash face under the dash top's brow, its
+  // top below the dash's top line, as on the F10 (body space: its top and
+  // bottom edges' x, y, its centre z and size).
+  screen: Object.freeze({
+    top: Object.freeze([0.646, 0.398]),
+    bottom: Object.freeze([0.627, 0.326]),
+    z: 0.0125,
+    width: 0.27,
+    // The recess in the dash it sits in, across z.
+    from: -0.16,
+    to: 0.185,
+  }),
+  // The centre stack below the screen, down into the console.
   stack: Object.freeze({
-    bottom: Object.freeze([0.497, 0.165, 0.0125]),
-    top: Object.freeze([0.636, 0.406]),
-    width: 0.205,
+    bottom: Object.freeze([0.556, 0.15, 0.0125]),
+    top: Object.freeze([0.598, 0.318]),
+    width: 0.27,
     // Turned toward the driver (radians about the vertical).
-    toward: -0.12,
+    toward: -0.1,
   }),
 });
 
@@ -36,7 +51,9 @@ export function isOldDashTriangle(a, b, c, meshName) {
   const x = (a.x + b.x + c.x) / 3,
     y = (a.y + b.y + c.y) / 3,
     z = Math.abs((a.z + b.z + c.z) / 3);
-  return x > 0.5 && x < 1.02 && y > 0.08 && y < 0.43 && z < 0.74;
+  // Short of the sides: the model's corner pieces by the pillars and doors
+  // stay, or the road showed through between the dash's ends and the doors.
+  return x > 0.5 && x < 1.02 && y > 0.08 && y < 0.43 && z < 0.66;
 }
 
 // Dash cross-sections (x, y): the general one, and a deeper one behind the
@@ -66,6 +83,24 @@ const recessProfile = [
   [0.672, 0.272],
   [0.62, 0.25],
   [0.586, 0.2],
+  [0.592, 0.125],
+  [0.64, 0.105],
+  [0.8, 0.11],
+  [0.97, 0.2],
+];
+
+// Behind the iDrive screen: the dash top runs on to a brow over a recess,
+// whose back wall holds the screen and whose floor meets the stack.
+const screenProfile = [
+  [0.975, 0.392],
+  [0.86, 0.41],
+  [0.72, 0.42],
+  [0.642, 0.419],
+  [0.624, 0.408],
+  [0.652, 0.398],
+  [0.662, 0.335],
+  [0.6, 0.318],
+  [0.585, 0.17],
   [0.592, 0.125],
   [0.64, 0.105],
   [0.8, 0.11],
@@ -126,10 +161,38 @@ const smooth = (a, b, x) => {
 function dashSection(z) {
   const { from, to } = dashLayout.cluster;
   const recess = smooth(from - 0.04, from + 0.02, z) * (1 - smooth(to - 0.02, to + 0.04, z));
-  return dashProfile.map(([x, y], i) => [
-    x + (recessProfile[i][0] - x) * recess,
-    y + (recessProfile[i][1] - y) * recess,
+  const { from: sFrom, to: sTo } = dashLayout.screen;
+  const screen = smooth(sFrom - 0.04, sFrom, z) * (1 - smooth(sTo, sTo + 0.04, z));
+  const points = dashProfile.map(([x, y], i) => [
+    x + (recessProfile[i][0] - x) * recess + (screenProfile[i][0] - x) * screen,
+    y + (recessProfile[i][1] - y) * recess + (screenProfile[i][1] - y) * screen,
   ]);
+  // The dash top's front edge stays inside the windscreen, which sweeps back
+  // toward the pillars: otherwise its corners showed through the glass.
+  const base = windscreenBase(z);
+  points[0][0] = Math.min(points[0][0], base - 0.1);
+  points[1][0] = Math.min(points[1][0], base - 0.135);
+  return points;
+}
+
+// The windscreen's lower edge (x, about 0.35 m up) across the car, measured
+// on the model.
+const windscreenEdge = [
+  [0, 1.089],
+  [0.2, 1.076],
+  [0.4, 1.052],
+  [0.6, 1.019],
+  [0.7, 0.982],
+  [0.75, 0.96],
+];
+export function windscreenBase(z) {
+  const a = Math.min(Math.abs(z), 0.75);
+  for (let i = 1; i < windscreenEdge.length; i++) {
+    const [z0, x0] = windscreenEdge[i - 1],
+      [z1, x1] = windscreenEdge[i];
+    if (a <= z1) return x0 + ((x1 - x0) * (a - z0)) / (z1 - z0);
+  }
+  return windscreenEdge.at(-1)[1];
 }
 
 function labelTexture(width, height, draw) {
@@ -155,6 +218,8 @@ export function dashboardMaterials() {
       sheenRoughness: 0.6,
       sheenColor: new THREE.Color(0x3c3d44),
       ...inside,
+      normalMap: leatherGrain(),
+      normalScale: grainScale,
     }),
     plastic: new THREE.MeshStandardMaterial({
       name: 'Dash plastic',
@@ -303,9 +368,9 @@ export function buildCentreStack(materials) {
       )
     );
   // Vents and the hazard switch.
-  const ventY = height - 0.04;
+  const ventY = height - 0.022;
   for (const side of [-1, 1])
-    stack.add(at(vent(0.084, 0.036, materials), side * 0.052, ventY, 0.004));
+    stack.add(at(vent(0.118, 0.038, materials), side * 0.072, ventY, 0.004));
   const hazard = at(
     new THREE.Mesh(roundedBlock(0.017, 0.017, 0.008, 0.003), materials.key),
     0,
@@ -333,17 +398,17 @@ export function buildCentreStack(materials) {
   stack.add(hazard, triangle);
   // Radio: gloss panel under a chrome strip, CD slot, volume knob and the
   // eight favourite keys.
-  const radioY = height - 0.092;
+  const radioY = height - 0.066;
   stack.add(
     at(
-      new THREE.Mesh(roundedBlock(0.196, 0.042, 0.01, 0.004), materials.gloss),
+      new THREE.Mesh(roundedBlock(0.272, 0.042, 0.01, 0.004), materials.gloss),
       0,
       radioY,
       0.003,
       'Radio'
     ),
     at(
-      new THREE.Mesh(roundedBlock(0.196, 0.003, 0.005, 0.001), materials.chrome),
+      new THREE.Mesh(roundedBlock(0.272, 0.003, 0.005, 0.001), materials.chrome),
       0,
       radioY + 0.023,
       0.005,
@@ -356,13 +421,13 @@ export function buildCentreStack(materials) {
       0.0085,
       'CD slot'
     ),
-    at(knob(0.0085, materials), -0.078, radioY + 0.002, 0.006, 'Volume knob')
+    at(knob(0.0085, materials), -0.112, radioY + 0.002, 0.006, 'Volume knob')
   );
   for (let i = 0; i < 8; i++)
     stack.add(
       at(
         new THREE.Mesh(roundedBlock(0.0165, 0.0085, 0.005, 0.002), materials.key),
-        -0.052 + i * 0.019,
+        -0.07 + i * 0.024,
         radioY - 0.011,
         0.0085,
         'Favourite key'
@@ -370,20 +435,20 @@ export function buildCentreStack(materials) {
     );
   // Climate panel: temperature knobs at the ends, a display strip and a key
   // row between them.
-  const climateY = height - 0.16;
+  const climateY = height - 0.121;
   stack.add(
     at(
-      new THREE.Mesh(roundedBlock(0.196, 0.072, 0.01, 0.005), materials.plastic),
+      new THREE.Mesh(roundedBlock(0.272, 0.072, 0.01, 0.005), materials.plastic),
       0,
       climateY,
       0.003,
       'Climate panel'
     ),
-    at(frame(0.198, 0.074, 0.002, 0.004, materials.chrome), 0, climateY, 0.006, 'Climate surround')
+    at(frame(0.274, 0.074, 0.002, 0.004, materials.chrome), 0, climateY, 0.006, 'Climate surround')
   );
   for (const side of [-1, 1])
     stack.add(
-      at(knob(0.0145, materials), side * 0.07, climateY + 0.006, 0.006, 'Temperature knob')
+      at(knob(0.0145, materials), side * 0.102, climateY + 0.006, 0.006, 'Temperature knob')
     );
   const display = new THREE.Mesh(
     new THREE.PlaneGeometry(0.096, 0.024),
@@ -413,22 +478,12 @@ export function buildCentreStack(materials) {
     stack.add(
       at(
         new THREE.Mesh(roundedBlock(0.0145, 0.0095, 0.005, 0.002), materials.key),
-        -0.0365 + i * 0.0146,
+        -0.0475 + i * 0.019,
         climateY - 0.017,
         0.0085,
         'Climate key'
       )
     );
-  // Storage flap at the foot of the stack.
-  stack.add(
-    at(
-      new THREE.Mesh(roundedBlock(0.19, 0.05, 0.008, 0.004), materials.gloss),
-      0,
-      0.03,
-      0.002,
-      'Storage flap'
-    )
-  );
   return stack;
 }
 
@@ -544,6 +599,54 @@ export function buildDashboard(materials = dashboardMaterials()) {
     )
   );
   group.add(buildCentreStack(materials));
+  // START ENGINE STOP button right of the column, between the instruments
+  // and the stack, in a chrome ring.
+  const start = new THREE.Group();
+  start.name = 'Start-stop button';
+  const startRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.0155, 0.0028, 10, 36),
+    materials.chrome
+  );
+  const startCap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.0135, 0.0135, 0.006, 32),
+    materials.gloss
+  );
+  startCap.rotation.x = Math.PI / 2;
+  const startLegend = new THREE.Mesh(
+    new THREE.CircleGeometry(0.012, 32),
+    new THREE.MeshBasicMaterial({
+      name: 'Start-stop legend',
+      transparent: true,
+      map: labelTexture(128, 128, (g, w, h) => {
+        g.fillStyle = '#d4d8dd';
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.font = '700 22px Arial, sans-serif';
+        g.fillText('START', w / 2, h * 0.36);
+        g.font = '600 15px Arial, sans-serif';
+        g.fillText('ENGINE', w / 2, h * 0.53);
+        g.font = '700 22px Arial, sans-serif';
+        g.fillText('STOP', w / 2, h * 0.7);
+      }),
+    })
+  );
+  startLegend.position.z = 0.0032;
+  start.add(startRing, startCap, startLegend);
+  start.position.set(0.583, 0.255, -0.158);
+  start.rotation.y = -Math.PI / 2;
+  start.rotateX(-0.18);
+  group.add(start);
+  // The shut line between the upper dash and the knee panel on the
+  // driver's side, under the instruments.
+  group.add(
+    at(
+      new THREE.Mesh(new THREE.BoxGeometry(0.003, 0.0025, 0.5), materials.seam),
+      0.5865,
+      0.222,
+      -0.44,
+      'Knee panel shut line'
+    )
+  );
   group.traverse((o) => {
     if (o.isMesh) o.receiveShadow = true;
   });
@@ -558,10 +661,13 @@ export function buildRoofFittings(materials = dashboardMaterials()) {
   group.name = 'Roof fittings';
   const fabric = new THREE.MeshStandardMaterial({
     name: 'Sun visor',
-    color: 0x3b3c41,
+    color: 0x5d5e63,
     roughness: 0.95,
+    // Bounced light, as for the lining.
+    emissive: 0x24252a,
     envMapIntensity: 0.2,
   });
+  fabric.userData.bounce = 1;
   // The windscreen's top edge meets the lining about 0.33 m forward of the
   // body's pivot, 0.72 m up; the visors lie under the lining behind it,
   // tilted down a little toward the glass.

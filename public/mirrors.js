@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { roundedBlock } from './door-trim.js';
 
 // Working door mirrors. The model's mirror glass is chrome triangles in each
 // mirror head; they are replaced by one flat glass of the same outline that
@@ -151,6 +152,51 @@ export function mirrorDirection(side) {
 }
 
 let renderingMirror = false;
+
+// The F10's interior mirror glass, centred: a straight lower edge, a top
+// edge arched over the middle and ends leaning in toward the top, with
+// tight lower corners and broad upper ones (after photographs of part
+// 51169320305).
+export function f10MirrorOutline(w, h) {
+  const a = w / 2,
+    b = -h / 2,
+    t = h / 2,
+    end = t - 0.16 * h;
+  const v = (x, y) => new THREE.Vector2(x, y);
+  const right = [
+    ...new THREE.LineCurve(v(0, b), v(a - 0.2 * h, b)).getPoints(1),
+    ...new THREE.QuadraticBezierCurve(v(a - 0.2 * h, b), v(a, b), v(a - 0.01 * h, b + 0.24 * h))
+      .getPoints(8)
+      .slice(1),
+    // The end, turning smoothly into the arch.
+    ...new THREE.CubicBezierCurve(
+      v(a - 0.01 * h, b + 0.24 * h),
+      v(a - 0.03 * h, b + 0.55 * h),
+      v(a - 0.19 * h, end - 0.11 * h),
+      v(a - 0.55 * h, end)
+    )
+      .getPoints(10)
+      .slice(1),
+    ...new THREE.QuadraticBezierCurve(v(a - 0.55 * h, end), v(a * 0.45, t), v(0, t))
+      .getPoints(16)
+      .slice(1),
+  ];
+  const left = right
+    .slice(1, -1)
+    .reverse()
+    .map((p) => v(-p.x, p.y));
+  return new THREE.Shape([...right, ...left]);
+}
+
+// The model's angular rear-view mirror housing and stem, in its interior
+// mesh, replaced by a smooth one.
+export function isOldRearMirrorTriangle(a, b, c, meshName) {
+  if (meshName !== 'Object_53') return false;
+  const x = (a.x + b.x + c.x) / 3,
+    y = (a.y + b.y + c.y) / 3,
+    z = Math.abs((a.z + b.z + c.z) / 3);
+  return x > 0.35 && x < 0.56 && y > 0.59 && y < 0.725 && z < 0.14;
+}
 const mirrorFar = 700;
 // Frames between updates of each door mirror. Seen close, from the driver's
 // seat, they update every other frame (the two in turn, one extra scene
@@ -257,8 +303,12 @@ export function setupMirrors(rig, { resolution = 512 } = {}) {
 export const rearViewMirror = Object.freeze({
   centre: Object.freeze([0.372, 0.63, 0]),
   camera: Object.freeze([-1, 0.66, 0]),
-  width: 0.236,
-  height: 0.054,
+  // Glass size; a thin black rim runs round it.
+  width: 0.255,
+  height: 0.066,
+  rim: 0.005,
+  // Where its stem meets the roof lining.
+  mount: Object.freeze([0.43, 0.728]),
   fov: 15,
   down: 3,
 });
@@ -269,28 +319,64 @@ export function setupRearViewMirror(rig, { resolution = 384 } = {}) {
   const target = new THREE.WebGLRenderTarget(resolution, Math.round(resolution / aspect), {
     type: THREE.HalfFloatType,
   });
-  const geometry = new THREE.PlaneGeometry(width, height);
-  // A mirror shows the view reversed left to right.
-  const uv = geometry.attributes.uv;
-  for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i));
+  const geometry = new THREE.ShapeGeometry(f10MirrorOutline(width, height));
+  // Uvs across the glass, reversed left to right as a mirror shows it.
+  const position = geometry.attributes.position,
+    uv = geometry.attributes.uv;
+  for (let i = 0; i < uv.count; i++)
+    uv.setXY(i, 0.5 - position.getX(i) / width, 0.5 + position.getY(i) / height);
   const mirror = new THREE.Mesh(
     geometry,
     new THREE.MeshBasicMaterial({ map: target.texture, color: 0xcfd2d5, fog: false })
   );
   mirror.name = 'Rear-view mirror';
-  const position = new THREE.Vector3(...centre);
-  mirror.position.copy(position);
+  const centrePoint = new THREE.Vector3(...centre);
+  mirror.position.copy(centrePoint);
   // Facing the driver (backward, -x).
   mirror.rotation.y = -Math.PI / 2;
-  // A black frame round the glass.
-  const frame = new THREE.Mesh(
-    new THREE.PlaneGeometry(width + 0.01, height + 0.01),
-    new THREE.MeshStandardMaterial({ name: 'Mirror frame', color: 0x0b0c0e, roughness: 0.4 })
-  );
-  frame.position.z = -0.002;
-  frame.name = 'Rear-view mirror frame';
-  mirror.add(frame);
   rig.body.add(mirror);
+  // Its smooth housing behind the glass, the stem and the base on the roof
+  // lining: always shown (only the glass's reflection is limited to the
+  // driver's view).
+  const plastic = new THREE.MeshStandardMaterial({
+    name: 'Mirror housing',
+    color: 0x111215,
+    roughness: 0.45,
+  });
+  // The housing: the glass outline with a rounded rim, its back domed.
+  const depth = 0.02,
+    back = 0.012;
+  const housingGeometry = new THREE.ExtrudeGeometry(f10MirrorOutline(width, height), {
+    depth,
+    bevelEnabled: true,
+    bevelSize: rearViewMirror.rim,
+    bevelThickness: back,
+    bevelSegments: 5,
+    curveSegments: 4,
+  });
+  // Its face just behind the glass (local +z faces the driver).
+  housingGeometry.translate(0, 0, -(depth + back + 0.0015));
+  const housing = new THREE.Mesh(housingGeometry, plastic);
+  housing.position.copy(centrePoint);
+  housing.rotation.y = -Math.PI / 2;
+  housing.name = 'Rear-view mirror housing';
+  const [mx, my] = rearViewMirror.mount;
+  const stemFrom = new THREE.Vector3(centre[0] + 0.028, centre[1] + 0.03, 0),
+    stemTo = new THREE.Vector3(mx, my - 0.008, 0);
+  const stem = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.008, 0.01, stemFrom.distanceTo(stemTo), 14),
+    plastic
+  );
+  stem.position.copy(stemFrom).add(stemTo).multiplyScalar(0.5);
+  stem.quaternion.setFromUnitVectors(
+    new THREE.Vector3(0, 1, 0),
+    stemTo.clone().sub(stemFrom).normalize()
+  );
+  stem.name = 'Rear-view mirror stem';
+  const base = new THREE.Mesh(roundedBlock(0.075, 0.02, 0.09, 0.008), plastic);
+  base.position.set(mx, my, 0);
+  base.name = 'Rear-view mirror base';
+  rig.body.add(housing, stem, base);
   const camera = new THREE.PerspectiveCamera(fov, aspect, 0.05, mirrorFar);
   camera.name = 'Rear-view mirror camera';
   camera.position.fromArray(rearViewMirror.camera);

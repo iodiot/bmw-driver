@@ -182,6 +182,41 @@ export function setupCockpitCluster(rig) {
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = 'Instrument cluster display';
   body.add(mesh);
+  // The dials stand out in chrome rings, each in a short black tube, rather
+  // than lying flat on the display.
+  const [tl, bl, tr, br] = p;
+  const across = br.clone().sub(bl),
+    upward = tl.clone().sub(bl);
+  const ringRadius = upward.length() * 0.44 * 1.03;
+  const chrome = new THREE.MeshStandardMaterial({
+    name: 'Dial chrome',
+    color: 0xc9cdd2,
+    metalness: 1,
+    roughness: 0.22,
+    envMapIntensity: 0.6,
+  });
+  const tube = new THREE.MeshStandardMaterial({
+    name: 'Dial tube',
+    color: 0x07080a,
+    roughness: 0.6,
+    side: THREE.DoubleSide,
+  });
+  const facing = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+  for (const u of [0.25, 0.75]) {
+    const centre = bl.clone().addScaledVector(across, u).addScaledVector(upward, 0.48);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(ringRadius, 0.0032, 10, 64), chrome);
+    ring.position.copy(centre).addScaledVector(normal, 0.012);
+    ring.quaternion.copy(facing);
+    ring.name = 'Dial ring';
+    const sleeve = new THREE.Mesh(
+      new THREE.CylinderGeometry(ringRadius, ringRadius, 0.012, 48, 1, true),
+      tube
+    );
+    sleeve.position.copy(centre).addScaledVector(normal, 0.006);
+    sleeve.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+    sleeve.name = 'Dial tube';
+    body.add(ring, sleeve);
+  }
   let elapsed = Infinity;
   function draw(speedKmh, rpm, gear) {
     ctx.drawImage(dials, 0, 0);

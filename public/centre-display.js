@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { roadCenterZ, branchOffset, roadEdge } from './road-profile.js';
 import { formatClock } from './time-of-day.js';
-import { roundedBlock } from './door-trim.js';
+import { ambientLight, roundedBlock } from './door-trim.js';
+import { dashLayout } from './dashboard.js';
 
 // The centre of the dashboard. The model shows a blurred portrait picture
 // there; the F10 has a wide iDrive screen set into the dashboard top, above
@@ -9,22 +10,14 @@ import { roundedBlock } from './door-trim.js';
 // country roads branching off and the car, beside the time, outside
 // temperature and radio, redrawn a few times a second.
 export const centreLayout = Object.freeze({
-  // The model's centre picture (body space): top left, bottom left, top
-  // right, bottom right as the driver sees it.
-  corners: Object.freeze([
-    Object.freeze([0.636, 0.406, -0.085]),
-    Object.freeze([0.495, 0.17, -0.086]),
-    Object.freeze([0.636, 0.406, 0.11]),
-    Object.freeze([0.495, 0.171, 0.11]),
-  ]),
-  // The iDrive screen: 8.8-inch class, 8:3.
-  screen: Object.freeze({ width: 0.3, height: 0.1125, pixels: [960, 360] }),
+  // The iDrive screen (its place is in dashboard.js): wide, about 3.6:1.
+  screen: Object.freeze({ width: 0.27, height: 0.0745, pixels: [960, 265] }),
   refresh: 1 / 4,
   // Map scale (pixels per metre) and how far ahead the car sits.
   mapScale: 1.3,
   // The trim band on the dashboard's sloping face (body space): across z,
   // its centre, height and the face's tilt.
-  band: Object.freeze({ from: 0.13, to: 0.69, x: 0.592, y: 0.302, height: 0.034, tilt: -0.52 }),
+  band: Object.freeze({ from: 0.16, to: 0.615, x: 0.594, y: 0.297, height: 0.046, tilt: -0.16 }),
 });
 
 const inside = { envMapIntensity: 0.25 };
@@ -36,9 +29,9 @@ const dashMaterial = new THREE.MeshStandardMaterial({
 });
 const trimMaterial = new THREE.MeshStandardMaterial({
   name: 'Dashboard Aluminium Trace',
-  color: 0x5a5d63,
-  metalness: 0.55,
-  roughness: 0.5,
+  color: 0x80848a,
+  metalness: 0.6,
+  roughness: 0.42,
   ...inside,
 });
 const chromeMaterial = new THREE.MeshStandardMaterial({
@@ -181,23 +174,20 @@ function drawScreen(ctx, w, h, simulation, hours, raining) {
 }
 
 export function setupCentreDisplay(rig) {
-  const { corners, screen, refresh } = centreLayout;
+  const { screen, refresh } = centreLayout;
   const body = rig.body;
   // The model's centre picture is its own mesh (beside the cluster, which
   // cockpit-cluster.js replaced): hide it entirely.
   const old = body.getObjectByName('Object_31');
   if (old) old.visible = false;
-  const p = corners.map((c) => new THREE.Vector3(...c));
-  const up = p[0].clone().sub(p[1]).normalize(),
-    right = p[2].clone().sub(p[0]).normalize(),
+  // The screen in its recess under the dash top's brow (dashboard.js).
+  const placed = dashLayout.screen;
+  const top = new THREE.Vector3(placed.top[0], placed.top[1], placed.z),
+    bottom = new THREE.Vector3(placed.bottom[0], placed.bottom[1], placed.z);
+  const up = top.clone().sub(bottom).normalize(),
+    right = new THREE.Vector3(0, 0, 1),
     normal = new THREE.Vector3().crossVectors(right, up).normalize();
-  if (normal.x > 0) normal.negate();
-  // The iDrive screen standing on the dashboard above it, in a bezel.
-  const topCentre = p[0].clone().add(p[2]).multiplyScalar(0.5);
-  const screenCentre = topCentre
-    .clone()
-    .addScaledVector(up, screen.height * 0.32)
-    .addScaledVector(normal, 0.012);
+  const screenCentre = top.clone().add(bottom).multiplyScalar(0.5).addScaledVector(normal, 0.003);
   const hw = screen.width / 2,
     hh = screen.height / 2;
   const corner = (sx, sy) =>
@@ -212,31 +202,14 @@ export function setupCentreDisplay(rig) {
   );
   screenMesh.name = 'iDrive screen';
   const bezel = new THREE.Mesh(
-    new THREE.BoxGeometry(screen.width + 0.014, screen.height + 0.014, 0.012),
+    new THREE.BoxGeometry(screen.width + 0.008, screen.height + 0.008, 0.01),
     new THREE.MeshStandardMaterial({ name: 'Screen bezel', color: 0x07080a, roughness: 0.25 })
   );
-  bezel.position.copy(screenCentre).addScaledVector(normal, -0.0065);
+  bezel.position.copy(screenCentre).addScaledVector(normal, -0.0055);
   bezel.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, normal));
-  // As in the F10, the screen sits in the dashboard rather than on it: a
-  // housing behind it reaches forward into the dash top, under a brow that
-  // shades the glass.
-  const basis = new THREE.Matrix4().makeBasis(right, up, normal);
-  const housing = new THREE.Mesh(
-    roundedBlock(screen.width + 0.03, screen.height + 0.022, 0.11, 0.008),
-    dashMaterial
-  );
-  housing.position.copy(screenCentre).addScaledVector(normal, -0.062);
-  housing.quaternion.setFromRotationMatrix(basis);
-  housing.name = 'iDrive screen housing';
-  const brow = new THREE.Mesh(roundedBlock(screen.width + 0.04, 0.012, 0.05, 0.005), dashMaterial);
-  brow.position
-    .copy(screenCentre)
-    .addScaledVector(up, screen.height / 2 + 0.012)
-    .addScaledVector(normal, -0.012);
-  brow.quaternion.setFromRotationMatrix(basis);
-  brow.name = 'iDrive screen brow';
+  // The hood over it is part of the dashboard (dashboard.js).
   // The trim band across the dashboard, from the centre stack to the
-  // passenger door at vent height, Aluminium Trace over a thin chrome line,
+  // passenger side vent at the height of the centre vents, Aluminium Trace over a thin chrome line,
   // on the dash's sloping face.
   const { band } = centreLayout;
   const length = band.to - band.from;
@@ -252,9 +225,16 @@ export function setupCentreDisplay(rig) {
   );
   chromeLine.rotation.z = band.tilt;
   chromeLine.name = 'Dashboard chrome line';
+  // The ambient light line just under the chrome.
+  const glowLine = chromeLine.clone();
+  glowLine.material = ambientLight;
+  glowLine.scale.set(0.6, 0.7, 1);
+  glowLine.position.y -= 0.0045;
+  glowLine.position.x -= 0.001;
+  glowLine.name = 'Dashboard ambient light';
   const group = new THREE.Group();
   group.name = 'Centre display';
-  group.add(bezel, screenMesh, housing, brow, trim, chromeLine);
+  group.add(bezel, screenMesh, trim, chromeLine, glowLine);
   body.add(group);
   let elapsed = Infinity;
   return {
