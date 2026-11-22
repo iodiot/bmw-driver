@@ -116,7 +116,7 @@ export function createRoadGeometry() {
   return geometry;
 }
 
-// `lite`: for phones, the asphalt without its normal map and parallax.
+// `lite`: for phones, the asphalt without its parallax.
 export function setupRoad(scene, { lite = false } = {}) {
   const ground = scene.getObjectByName('Asphalt ground');
   const roadCenter = { value: new THREE.Vector2() };
@@ -159,7 +159,7 @@ export function setupRoad(scene, { lite = false } = {}) {
         arm = asphaltTexture('asphalt-arm.jpg', false);
       material.map = asphaltTexture('asphalt.jpg', true);
       material.bumpMap = null;
-      material.normalMap = lite ? null : asphaltTexture('asphalt-normal.jpg', false);
+      material.normalMap = asphaltTexture('asphalt-normal.jpg', false);
       material.normalScale.set(1, 1);
       material.roughnessMap = arm;
       material.aoMap = arm;

@@ -4,9 +4,12 @@
 // pixel count (measured: 1.8 Mpx about 5 ms, 3.1 Mpx about 15 ms), so a full
 // Retina screen starts at 3 Mpx rather than 4.
 export class RenderQuality {
-  constructor(devicePixelRatio = 1, maxPixels = 3_000_000) {
+  // `minPixels`: never lower than this many pixels (on a phone, slow frames
+  // often come from the CPU, which lower resolution does not help).
+  constructor(devicePixelRatio = 1, maxPixels = 3_000_000, { minPixels = 0 } = {}) {
     this.devicePixelRatio = Math.min(devicePixelRatio, 2);
     this.maxPixels = maxPixels;
+    this.minPixels = minPixels;
     this.ratio = this.limit = this.devicePixelRatio;
     this.recoveryDelay = 0;
     this.reset();
@@ -20,7 +23,7 @@ export class RenderQuality {
 
   resize(width, height) {
     this.limit = Math.min(this.devicePixelRatio, Math.sqrt(this.maxPixels / (width * height)));
-    this.floor = Math.min(0.75, this.limit);
+    this.floor = Math.min(this.limit, Math.max(0.75, Math.sqrt(this.minPixels / (width * height))));
     this.ratio = this.limit;
     this.recoveryDelay = 0;
     this.reset();

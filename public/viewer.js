@@ -90,7 +90,9 @@ const scene = new THREE.Scene();
 const lowPower = matchMedia('(pointer: coarse)').matches;
 const renderer = new THREE.WebGLRenderer({ antialias: !lowPower });
 renderer.setSize(innerWidth, innerHeight);
-const renderQuality = new RenderQuality(devicePixelRatio, lowPower ? 900_000 : undefined);
+const renderQuality = lowPower
+  ? new RenderQuality(devicePixelRatio, 1_400_000, { minPixels: 900_000 })
+  : new RenderQuality(devicePixelRatio);
 renderer.setPixelRatio(renderQuality.resize(innerWidth, innerHeight));
 // Khronos PBR Neutral keeps material colours true (deep black paint, natural
 // grass) without ACES hue shifts or AgX's washed-out blacks.
@@ -125,7 +127,7 @@ scene.add(sun.target);
 const fill = new THREE.HemisphereLight(0xa0caff, 0x243246, 1);
 fill.position.set(-2, 2, -4);
 scene.add(fill);
-const environment = setupEnvironment(scene, renderer, sun, { refresh: lowPower ? 5 : 1.5 }),
+const environment = setupEnvironment(scene, renderer, sun, { refresh: lowPower ? 20 : 1.5 }),
   road = setupRoad(scene, { lite: lowPower });
 // Phones: no sun shadow map at all (a pass drawing the car again, and a
 // lookup in every lit pixel); the contact shadow stays under the car, and
@@ -215,7 +217,10 @@ function applyCameraFov() {
 let rearViewMirror = null;
 function applyMirrors() {
   if (rearViewMirror) rearViewMirror.mirror.visible = cameraView === 'driver';
-  setMirrorInterval(lowPower ? (cameraView === 'chase' ? 12 : 4) : cameraView === 'chase' ? 4 : 2);
+  // On a phone, from behind the car the door mirrors (each a whole scene
+  // render) keep their first picture, and the cabin is not drawn.
+  setMirrorInterval(lowPower ? (cameraView === 'chase' ? 1e9 : 4) : cameraView === 'chase' ? 4 : 2);
+  if (interior) interior.interior.visible = !(lowPower && cameraView === 'chase');
 }
 function setCameraView(view) {
   cameraView = view;
