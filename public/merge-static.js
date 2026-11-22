@@ -22,6 +22,8 @@ export function mergeStaticMeshes(root, keep = []) {
       o.isInstancedMesh ||
       o.isSkinnedMesh ||
       Array.isArray(o.material) ||
+      // Transparent parts are sorted one by one; joined, they would not be.
+      o.material.transparent ||
       o.onBeforeRender !== THREE.Object3D.prototype.onBeforeRender ||
       Object.keys(o.geometry.morphAttributes).length
     )

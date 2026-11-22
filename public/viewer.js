@@ -684,6 +684,21 @@ new GLTFLoader().load(
           later.push(o);
       });
       for (const o of later) o.visible = true;
+      // The car's still parts as one mesh per material, as the cabin's are
+      // (the glass, which the wipers and rain work on, the cabin and the
+      // wheels stay apart), and only its larger parts cast the sun's
+      // shadow: bolts, badges and calipers made no visible shadow but each
+      // a draw in the shadow pass.
+      const body = mergeStaticMeshes(rig.body, [interior.interior, ...bodyWater.glassMeshes]);
+      let casters = 0;
+      rig.root.traverse((o) => {
+        if (!o.isMesh || !o.castShadow) return;
+        if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+        if (o.geometry.boundingSphere.radius * o.getWorldScale(new THREE.Vector3()).x < 0.25)
+          o.castShadow = false;
+        else casters++;
+      });
+      document.body.dataset.carMeshes = `${body.before}>${body.after}, ${casters} casting`;
       shadeCarFromSun(rig.root);
       await renderer.compileAsync(scene, camera);
       for (const o of later) o.visible = false;
@@ -757,7 +772,29 @@ const autopilotSpeed = 25;
 let cameraFollowHeading = 0,
   keptLane = null,
   autopilot = true;
-renderer.setAnimationLoop(() => {
+// Frame pacing. On a screen faster than about 100 Hz every other frame is
+// skipped (60 frames a second on a 120 Hz screen, for half the work), and
+// while the car is paused and the view still, a few frames a second keep
+// the sky and the time of day moving.
+let tickAt = 0,
+  tickInterval = 1000 / 60,
+  skipTick = false,
+  drawnAt = 0,
+  viewChanged = true;
+controls.addEventListener('change', () => (viewChanged = true));
+for (const type of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'resize'])
+  addEventListener(type, () => (viewChanged = true), { passive: true });
+renderer.setAnimationLoop((time) => {
+  const interval = time - tickAt;
+  tickAt = time;
+  if (interval > 0 && interval < 50) tickInterval += (interval - tickInterval) * 0.05;
+  if (tickInterval < 9.5) {
+    skipTick = !skipTick;
+    if (skipTick) return;
+  }
+  if (sim && !driving && !viewChanged && time - drawnAt < 100) return;
+  viewChanged = false;
+  drawnAt = time;
   const frameDt = clock.getDelta();
   const dt = Math.min(frameDt, 1 / 15);
   // Frames per second on the top panel, counted over half a second.
@@ -769,7 +806,8 @@ renderer.setAnimationLoop(() => {
       fpsCount.frames = fpsCount.time = 0;
     }
   }
-  if (sim && !document.hidden) {
+  // (Paused frames come slowly on purpose and say nothing of the load.)
+  if (sim && driving && !document.hidden) {
     const ratio = renderQuality.update(frameDt);
     if (Math.abs(renderer.getPixelRatio() - ratio) > 0.001) renderer.setPixelRatio(ratio);
   }
