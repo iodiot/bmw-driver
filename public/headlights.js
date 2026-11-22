@@ -88,6 +88,9 @@ export function setupHeadlights(rig) {
     const settings = night && high ? highBeamSettings : lowBeamSettings;
     for (const light of projectors) {
       light.intensity = night ? settings.intensity : 0;
+      // Out of the scene's lights by day: every lit pixel (the road above
+      // all) would otherwise work out two dark projected lamps.
+      light.visible = night;
       light.distance = settings.range;
       light.map = night && high ? highPattern : pattern;
     }
@@ -101,9 +104,10 @@ export function setupHeadlights(rig) {
     highPattern,
     projectors,
     update,
-    // The lamps stay in the scene and switch by intensity: adding or removing
-    // lights would recompile every lit material, a visible hitch when they
-    // switch on by themselves at dusk.
+    // Switching the lamps' lights in and out changes every lit material's
+    // program; both versions are compiled while the scene loads (see
+    // warmNightPrograms in viewer.js), so the switch at dusk or in the tunnel
+    // only swaps programs.
     get lit() {
       return projectors[0].intensity > 0;
     },

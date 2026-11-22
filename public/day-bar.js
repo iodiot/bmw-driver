@@ -2,8 +2,8 @@ import { dayCycle, dayPhase, formatClock, sunElevation, wrapHours } from './time
 
 // Top-centre panel, coloured like the sky at the moment: the sun's path over
 // 24 hours with the sun or moon at the current time (click or drag to set
-// the time), the clock with a glowing sun or moon, the phase of day and the
-// next sunrise or sunset, a Day / Sunset / Night switch with the current
+// the time), the clock with a glowing sun or moon, the frame rate under it,
+// a Day / Sunset / Night switch with the current
 // phase lit, rain, pause with a ring showing how far the day has run, sound
 // and restart.
 const width = 132,
@@ -116,7 +116,7 @@ export function setupDayBar(
         <path class="moon" d="M17.5 17.2A7.2 7.2 0 0 1 8.8 8.5a7.2 7.2 0 1 0 8.7 8.7z"/>
       </svg>
       <b class="day-clock">13:00</b>
-      <span class="day-phase">Day</span>
+      <span class="day-fps" data-level="good" title="Frames per second"><i></i><b>–</b> FPS</span>
     </div>
     <div class="day-buttons">
       <div class="day-presets" role="group" aria-label="Time presets">
@@ -138,7 +138,8 @@ export function setupDayBar(
     body = svg.querySelector('.day-body'),
     now = svg.querySelector('.day-now'),
     clock = container.querySelector('.day-clock'),
-    phase = container.querySelector('.day-phase'),
+    fps = container.querySelector('.day-fps'),
+    fpsValue = fps.querySelector('b'),
     sun = container.querySelector('.day-celestial .sun'),
     moon = container.querySelector('.day-celestial .moon'),
     presets = [...container.querySelectorAll('[data-preset]')],
@@ -177,6 +178,13 @@ export function setupDayBar(
   let shown = '',
     soundShown = '';
   return {
+    // Frames per second, with a dot: green from 55, amber from 30, red below.
+    setFps(value) {
+      const shown = String(Math.round(value));
+      if (fpsValue.textContent !== shown) fpsValue.textContent = shown;
+      const level = value >= 55 ? 'good' : value >= 30 ? 'fair' : 'low';
+      if (fps.dataset.level !== level) fps.dataset.level = level;
+    },
     // The current camera view, named on the button.
     setCamera(view, label) {
       cameraButton.dataset.view = view;
@@ -210,9 +218,9 @@ export function setupDayBar(
       sun.style.opacity = night ? 0 : 1;
       moon.style.opacity = night ? 1 : 0;
       clock.textContent = text;
+      // The phase of day and next sunrise or sunset, for screen readers.
       const next = nextSunEvent(light.hours),
         name = dayPhase(light.hours);
-      phase.textContent = `${name} · ${next.kind} ${formatClock(next.at)}`;
       const [top, bottom] = panelSky(light, raining);
       container.style.setProperty('--sky-top', top);
       container.style.setProperty('--sky-bottom', bottom);

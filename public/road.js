@@ -218,6 +218,11 @@ export function setupRoad(scene) {
         'varying vec2 vRoadXZ;\nuniform float roadWetness;\nuniform sampler2D roadWetnessMap;\nuniform sampler2D grassMap;\nuniform sampler2D gravelMap;\nuniform sampler2D asphaltHeight;\nuniform float asphaltUvPerMetre;\n' +
         visibleProfile +
         structuresGLSL +
+        `vec4 asphaltTexel(sampler2D t, vec2 uv, vec4 fallback, bool on, vec2 shift, vec2 dx, vec2 dy) {
+          if (!on) return fallback;
+          return textureGrad(t, uv + shift, dx, dy);
+        }
+        ` +
         shader.fragmentShader;
       // Parallax: shift texture lookups along the view direction by the
       // asphalt's height (±3 mm), so stones stand proud and pores sink.
@@ -225,60 +230,8 @@ export function setupRoad(scene) {
       shader.fragmentShader = shader.fragmentShader.replace(
         'void main() {',
         `void main() {
-        vec2 parallaxShift = vec2(0.);
-        #ifdef USE_MAP
-          vec3 toEye = cameraPosition - vec3(vRoadXZ.x, 0., vRoadXZ.y);
-          float eyeDistance = length(toEye);
-          toEye /= eyeDistance;
-          // Only near the camera, where the shift is visible; gradients are
-          // taken outside the branch so mip selection stays correct.
-          vec2 mapDx = dFdx(vMapUv), mapDy = dFdy(vMapUv);
-          if (eyeDistance < 25.) {
-            // The height map averages .82: stones above it, pores below.
-            float relief = textureGrad(asphaltHeight, vMapUv, mapDx, mapDy).r - .82;
-            parallaxShift = vec2(toEye.x, -toEye.z) / max(toEye.y, .25) * relief * .006 *
-              asphaltUvPerMetre * (1. - smoothstep(8., 25., eyeDistance));
-          }
-        #endif
-      `
-      );
-      const shifted = (chunk, uv) =>
-        THREE.ShaderChunk[chunk].replaceAll(
-          `texture2D( ${uv.split('|')[0]}, ${uv.split('|')[1]} )`,
-          `texture2D( ${uv.split('|')[0]}, ${uv.split('|')[1]} + parallaxShift )`
-        );
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          '#include <map_fragment>',
-          shifted('map_fragment', 'map|vMapUv').replace(
-            'diffuseColor *= sampledDiffuseColor;',
-            // The photo is fresh, near-black track asphalt; weathering
-            // greys it and lightens the stones, without its warm tint.
-            `sampledDiffuseColor.rgb = pow(sampledDiffuseColor.rgb, vec3(.6)) * 1.6;
-            sampledDiffuseColor.rgb = mix(vec3(dot(sampledDiffuseColor.rgb, vec3(.3, .59, .11))),
-              sampledDiffuseColor.rgb, .4);
-            diffuseColor *= sampledDiffuseColor;`
-          ) + '\n#include <map_fragment_road>'
-        )
-        .replace(
-          '#include <roughnessmap_fragment>',
-          shifted('roughnessmap_fragment', 'roughnessMap|vRoughnessMapUv') +
-            '\n#include <roughnessmap_fragment_road>'
-        )
-        .replace('#include <aomap_fragment>', shifted('aomap_fragment', 'aoMap|vAoMapUv'))
-        .replace(
-          '#include <normal_fragment_maps>',
-          shifted('normal_fragment_maps', 'normalMap|vNormalMapUv').replace(
-            'mapN.xy *= normalScale;',
-            // Asphalt relief only on asphalt; grass and gravel stay smooth.
-            'mapN.xy *= normalScale * (1. - offRoad);'
-          )
-        );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <map_fragment_road>',
-        `
-        // Roadside: asphalt to the shoulder, a gravel strip, then grass with
-        // patchy colour and dry spots. Noise reuses the small tileable mask.
+        // Where on the ground this is, first: the fields and verges skip the
+        // asphalt's textures and parallax altogether.
         // Lateral position relative to the curving road centre line.
         float roadLat = vRoadXZ.y - roadCenterZ(vRoadXZ.x);
         float lateral = abs(roadLat);
@@ -291,6 +244,72 @@ export function setupRoad(scene) {
         float offRoad = smoothstep(6.05, 6.25, lateral) * (1. - tunnelFloor(vRoadXZ));
         float track = (1. - smoothstep(1.9, 2.5, branchLateral)) * offRoad;
         float verge = min(smoothstep(7.3, 8.1, lateral), smoothstep(2.2, 3., branchLateral));
+        bool onAsphalt = offRoad < 1.;
+        // The asphalt's photographs share one tiling, so one set of gradients
+        // serves them all (taken outside any branch, for correct mip levels).
+        vec4 asphaltArm = vec4(1.);
+        vec2 parallaxShift = vec2(0.), mapDx = vec2(0.), mapDy = vec2(0.);
+        #ifdef USE_MAP
+          vec3 toEye = cameraPosition - vec3(vRoadXZ.x, 0., vRoadXZ.y);
+          float eyeDistance = length(toEye);
+          toEye /= eyeDistance;
+          // Only near the camera, where the shift is visible.
+          mapDx = dFdx(vMapUv);
+          mapDy = dFdy(vMapUv);
+          if (eyeDistance < 25. && onAsphalt) {
+            // The height map averages .82: stones above it, pores below.
+            float relief = textureGrad(asphaltHeight, vMapUv, mapDx, mapDy).r - .82;
+            parallaxShift = vec2(toEye.x, -toEye.z) / max(toEye.y, .25) * relief * .006 *
+              asphaltUvPerMetre * (1. - smoothstep(8., 25., eyeDistance));
+          }
+        #endif
+      `
+      );
+      // Each asphalt lookup, shifted by the parallax, and only on asphalt.
+      const shifted = (chunk, uv, fallback) =>
+        THREE.ShaderChunk[chunk].replaceAll(
+          `texture2D( ${uv.split('|')[0]}, ${uv.split('|')[1]} )`,
+          `asphaltTexel( ${uv.split('|')[0]}, ${uv.split('|')[1]}, ${fallback}, onAsphalt, parallaxShift, mapDx, mapDy )`
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <map_fragment>',
+          shifted('map_fragment', 'map|vMapUv', 'vec4(.5)').replace(
+            'diffuseColor *= sampledDiffuseColor;',
+            // The photo is fresh, near-black track asphalt; weathering
+            // greys it and lightens the stones, without its warm tint.
+            `sampledDiffuseColor.rgb = pow(sampledDiffuseColor.rgb, vec3(.6)) * 1.6;
+            sampledDiffuseColor.rgb = mix(vec3(dot(sampledDiffuseColor.rgb, vec3(.3, .59, .11))),
+              sampledDiffuseColor.rgb, .4);
+            diffuseColor *= sampledDiffuseColor;`
+          ) + '\n#include <map_fragment_road>'
+        )
+        .replace(
+          '#include <roughnessmap_fragment>',
+          // The roughness and occlusion share one photograph (green and
+          // red): sampled once here, used again for the occlusion.
+          shifted('roughnessmap_fragment', 'roughnessMap|vRoughnessMapUv', 'vec4(1.)').replace(
+            'roughnessFactor *= texelRoughness.g;',
+            'roughnessFactor *= texelRoughness.g;\n\tasphaltArm = texelRoughness;'
+          ) + '\n#include <roughnessmap_fragment_road>'
+        )
+        .replace(
+          '#include <aomap_fragment>',
+          THREE.ShaderChunk.aomap_fragment.replace('texture2D( aoMap, vAoMapUv )', 'asphaltArm')
+        )
+        .replace(
+          '#include <normal_fragment_maps>',
+          shifted('normal_fragment_maps', 'normalMap|vNormalMapUv', 'vec4(.5, .5, 1., 1.)').replace(
+            'mapN.xy *= normalScale;',
+            // Asphalt relief only on asphalt; grass and gravel stay smooth.
+            'mapN.xy *= normalScale * (1. - offRoad);'
+          )
+        );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <map_fragment_road>',
+        `
+        // Roadside: asphalt to the shoulder, a gravel strip, then grass with
+        // patchy colour and dry spots. Noise reuses the small tileable mask.
         float broadNoise = texture2D(roadWetnessMap, vRoadXZ / 23.).r;
         float midNoise = texture2D(roadWetnessMap, vRoadXZ / 5.3).r;
         float fineNoise = texture2D(roadWetnessMap, vRoadXZ / 1.7).r;
@@ -307,10 +326,14 @@ export function setupRoad(scene) {
           grass *= .78 + .44 * broadNoise;
           grass = mix(grass, grass * vec3(1.15, 1.02, .7), smoothstep(.62, .85, midNoise) * .45);
           // Gravel at two scales and orientations, with broad lighter and
-          // darker stretches, so the shoulder does not repeat visibly.
-          vec3 gravelNear = textureGrad(gravelMap, vRoadXZ / 1.4, groundDx / 1.4, groundDy / 1.4).rgb;
-          vec3 gravelFar = textureGrad(gravelMap, vRoadXZ.yx / 3.9 + .57, groundDx.yx / 3.9, groundDy.yx / 3.9).rgb;
-          vec3 gravel = mix(gravelNear, gravelFar, .45) * vec3(.82, .82, .84) * (.8 + .4 * midNoise);
+          // darker stretches, so the shoulder does not repeat visibly; only
+          // on the verge and the country road, not across the fields.
+          vec3 gravelNear = vec3(0.), gravelFar = vec3(0.), gravel = vec3(0.);
+          if (verge < 1. || track > 0.) {
+            gravelNear = textureGrad(gravelMap, vRoadXZ / 1.4, groundDx / 1.4, groundDy / 1.4).rgb;
+            gravelFar = textureGrad(gravelMap, vRoadXZ.yx / 3.9 + .57, groundDx.yx / 3.9, groundDy.yx / 3.9).rgb;
+            gravel = mix(gravelNear, gravelFar, .45) * vec3(.82, .82, .84) * (.8 + .4 * midNoise);
+          }
           roadside = mix(gravel, grass, verge);
           if (track > 0.) {
             // Two worn wheel ruts, a grassy hump between them and grass

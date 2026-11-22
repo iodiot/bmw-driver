@@ -47,6 +47,7 @@ await build({
     three: 'node_modules/three/build/three.module.js',
     OrbitControls: 'node_modules/three/examples/jsm/controls/OrbitControls.js',
     GLTFLoader: 'node_modules/three/examples/jsm/loaders/GLTFLoader.js',
+    BufferGeometryUtils: 'node_modules/three/examples/jsm/utils/BufferGeometryUtils.js',
   },
   bundle: true,
   external: ['three'],
@@ -72,6 +73,7 @@ const imports = {
   three: './vendor/three.js',
   'three/addons/controls/OrbitControls.js': './vendor/OrbitControls.js',
   'three/addons/loaders/GLTFLoader.js': './vendor/GLTFLoader.js',
+  'three/addons/utils/BufferGeometryUtils.js': './vendor/BufferGeometryUtils.js',
 };
 html = html.replace(
   /<script type="importmap">[\s\S]*?<\/script>/,

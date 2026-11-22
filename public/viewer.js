@@ -37,6 +37,7 @@ import { daylight, dayCycle, wrapHours } from './time-of-day.js';
 import { setupDayBar } from './day-bar.js';
 import { setupRearGlow } from './rear-glow.js';
 import { setupInterior } from './interior.js';
+import { mergeStaticMeshes } from './merge-static.js';
 import { setAmbientLight } from './door-trim.js';
 import { SeatCamera, cameraViews, nextCameraView, viewFov } from './camera-views.js';
 import { setupCockpitCluster } from './cockpit-cluster.js';
@@ -98,6 +99,9 @@ renderer.domElement.addEventListener('pointerdown', () =>
 const cameraFov = 34,
   lensScale = Math.tan((46 * Math.PI) / 360) / Math.tan((cameraFov * Math.PI) / 360);
 const camera = new THREE.PerspectiveCamera(cameraFov, innerWidth / innerHeight, 0.05, 700);
+// Layer 1: the cabin, seen only by this camera (see the model's setup).
+const cabinLayer = 1;
+camera.layers.enable(cabinLayer);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.autoRotateSpeed = 0.6;
@@ -273,6 +277,18 @@ function applyWeather(fade = 0) {
   document.body.dataset.night = String(nightMode);
   document.body.dataset.rain = String(rainMode);
   document.body.dataset.lowBeams = String(Boolean(lowBeamsOn && headlights));
+}
+// The headlamps' lights are out of the scene by day (see headlights.js). Once
+// loaded, the programs with them in are compiled in the background (the
+// lamps lit at zero, so nothing shows), so dusk or the tunnel needs no
+// compile.
+function warmNightPrograms() {
+  if (!headlights || headlights.projectors[0].visible) return;
+  for (const light of headlights.projectors) light.visible = true;
+  renderer
+    .compileAsync(scene, camera)
+    .catch(console.error)
+    .finally(() => headlights.setNight(lowBeamsOn || inTunnel));
 }
 // In the tunnel the car's light changes: the sun and sky give way to the
 // tunnel's warm lamps, the low beams come on, and the camera is out of the
@@ -593,6 +609,12 @@ new GLTFLoader().load(
       centreDisplay = setupCentreDisplay(rig);
       for (const name of ['Dashboard trim band', 'Dashboard chrome line'])
         interior.occlude(centreDisplay.group.getObjectByName(name));
+      // The cabin's still parts as one mesh per material, and on a layer of
+      // their own: the main camera draws them, the mirrors' cameras and the
+      // sun's shadow pass (which see none of it) skip them.
+      const cabin = mergeStaticMeshes(interior.interior, [interior.wheel]);
+      interior.interior.traverse((o) => o.layers.set(cabinLayer));
+      document.body.dataset.cabinMeshes = `${cabin.before}>${cabin.after}`;
       licensePlates.setNight(nightMode);
       contactShadow = setupContactShadow(scene, sim.layout);
       contactShadow.setNight(nightMode);
@@ -627,6 +649,7 @@ new GLTFLoader().load(
       renderer.initTexture(headlights.pattern);
       renderer.initTexture(headlights.highPattern);
       skidMarks.warmup(renderer, camera, scene);
+      warmNightPrograms();
       Object.assign(document.body.dataset, {
         loaded: 'true',
         triangles: String(triangles),
@@ -671,6 +694,7 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 const clock = new THREE.Clock();
+const fpsCount = { frames: 0, time: 0 };
 const frameMovement = new THREE.Vector3();
 const frameCameraOffset = new THREE.Vector3();
 // Taking the wheel swings the chase camera round behind the car, as in a
@@ -691,6 +715,15 @@ let cameraFollowHeading = 0,
 renderer.setAnimationLoop(() => {
   const frameDt = clock.getDelta();
   const dt = Math.min(frameDt, 1 / 15);
+  // Frames per second on the top panel, counted over half a second.
+  if (!document.hidden && frameDt > 0 && frameDt < 1) {
+    fpsCount.frames++;
+    fpsCount.time += frameDt;
+    if (fpsCount.time >= 0.5) {
+      dayBar.setFps(fpsCount.frames / fpsCount.time);
+      fpsCount.frames = fpsCount.time = 0;
+    }
+  }
   if (sim && !document.hidden) {
     const ratio = renderQuality.update(frameDt);
     if (Math.abs(renderer.getPixelRatio() - ratio) > 0.001) renderer.setPixelRatio(ratio);
