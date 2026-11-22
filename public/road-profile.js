@@ -1,3 +1,4 @@
+import { roadSeed, seededRandom } from './road-seed.js';
 // Shared road geometry for the visible asphalt, roadside, physics and effects.
 //
 // The road follows a curving centre line z = roadCenterZ(x). All road
@@ -7,11 +8,36 @@
 // about 550 m, and straights where they cancel. All three bend the same way at
 // x = 0, so the drive opens with a 550 m bend. The road stays within about
 // 18° of the x axis, so lateral offsets stay within 5% of true distances.
-export const roadCurve = Object.freeze([
-  Object.freeze({ amplitude: 60, wavelength: 2400 }),
-  Object.freeze({ amplitude: 14, wavelength: 900 }),
-  Object.freeze({ amplitude: 5, wavelength: 530 }),
-]);
+const originalCurve = [
+  { amplitude: 60, wavelength: 2400 },
+  { amplitude: 14, wavelength: 900 },
+  { amplitude: 5, wavelength: 530 },
+];
+// Another layout's bends: each term's length changed by up to a third and
+// its direction drawn, its amplitude from a share of the same curvature
+// (the tightest radius stays at least 550 m) and within the same 18°.
+function drawnCurve(random) {
+  const terms = originalCurve.map(({ wavelength }) => ({
+    wavelength: Math.round(wavelength * (0.8 + 0.5 * random())),
+    share: 0.15 + 0.35 * random(),
+    sign: random() < 0.5 ? -1 : 1,
+  }));
+  const shares = terms.reduce((sum, t) => sum + t.share, 0);
+  const curvature = (1 / 550) * (0.7 + 0.3 * random());
+  let out = terms.map(({ wavelength, share, sign }) => {
+    const k = (2 * Math.PI) / wavelength;
+    return { amplitude: (sign * curvature * share) / shares / (k * k), wavelength };
+  });
+  const slope = out.reduce(
+    (sum, t) => sum + Math.abs(t.amplitude) * ((2 * Math.PI) / t.wavelength),
+    0
+  );
+  if (slope > 0.32) out = out.map((t) => ({ ...t, amplitude: (t.amplitude * 0.32) / slope }));
+  return out.map((t) => ({ ...t, amplitude: Math.round(t.amplitude * 100) / 100 }));
+}
+export const roadCurve = Object.freeze(
+  (roadSeed ? drawnCurve(seededRandom(roadSeed, 1)) : originalCurve).map((t) => Object.freeze(t))
+);
 const curveTerms = roadCurve.map(({ amplitude, wavelength }) => ({
   a: amplitude,
   k: (2 * Math.PI) / wavelength,
@@ -89,8 +115,10 @@ export function guardrailsAt(x) {
 
 // Obstacles repeat every roadPeriod metres. z is the lateral offset from the
 // road centre; ±0.81 m from a lane centre is a wheel track.
-export const roadPeriod = 120;
-export const obstacles = [
+// Obstacles repeat every `roadPeriod` metres: 120 m in the original layout,
+// 600 m in a drawn one, so the same bump comes round far less often.
+export const roadPeriod = roadSeed ? 600 : 120;
+const originalObstacles = [
   // Centre lane.
   { x: 12, z: 0.81, l: 1.3, w: 0.66, h: 0.065 },
   { x: 24, z: -0.81, l: 1.3, w: 0.66, h: 0.065 },
@@ -112,6 +140,42 @@ export const obstacles = [
   { x: 66, z: 2.79, l: 1.4, w: 0.72, h: -0.076 },
   { x: 112, z: 4.41, l: 1.3, w: 0.66, h: -0.07 },
 ];
+// Another layout's obstacles, over 600 m: seven to twelve potholes of
+// different sizes anywhere in the lanes, and now and then (one layout in
+// two) a speed bump across the road.
+function drawnObstacles(random) {
+  const pick = (low, high) => low + (high - low) * random();
+  const round = (v, step) => Math.round(v / step) * step;
+  const list = [],
+    taken = [];
+  const free = (x, gap) => x > 8 && x < roadPeriod - 8 && taken.every((t) => Math.abs(t - x) > gap);
+  if (random() < 0.5) {
+    const x = pick(60, roadPeriod - 60);
+    taken.push(x);
+    list.push(
+      random() < 0.4
+        ? { x: round(x, 0.1), z: 0, l: 6.4, w: 10.8, h: 0.07, table: true }
+        : { x: round(x, 0.1), z: 0, l: 1.5, w: 10.8, h: round(pick(0.06, 0.08), 0.001) }
+    );
+  }
+  const holes = 7 + Math.floor(random() * 6);
+  for (let n = 0, tries = 0; n < holes && tries < 300; tries++) {
+    const x = pick(0, roadPeriod);
+    if (!free(x, 14)) continue;
+    taken.push(x);
+    n++;
+    const lane = roadLanes[Math.floor(random() * roadLanes.length)];
+    list.push({
+      x: round(x, 0.1),
+      z: round(lane + pick(-1.2, 1.2), 0.01),
+      l: round(pick(0.7, 1.6), 0.01),
+      w: round(pick(0.5, 1.05), 0.01),
+      h: -round(pick(0.04, 0.07), 0.001),
+    });
+  }
+  return list.sort((a, b) => a.x - b.x);
+}
+export const obstacles = roadSeed ? drawnObstacles(seededRandom(roadSeed, 2)) : originalObstacles;
 // The original straight test track: centre-lane bumps and holes only, two
 // 3.3 m speed bumps, no curves and no guardrails. Vehicle tests use it to
 // check the car itself, independent of the road layout.
@@ -129,11 +193,27 @@ const smooth = (a, b, x) => {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
 };
+// A pothole's depth (0 to 1) at u, v (along and across, in half-lengths
+// from its centre): an irregular outline of its own, steep broken sides
+// and an uneven floor. The road's shader draws the same shape.
+export const potholePhases = (o) => [o.x * 1.7 + o.z, o.x * 0.61 - o.z * 2.3];
+export function potholeDepth(o, u, v) {
+  const r = Math.hypot(u, v);
+  if (r >= 1.3) return 0;
+  const [p1, p2] = potholePhases(o);
+  const a = Math.atan2(v, u);
+  const edge = 0.9 + 0.16 * Math.sin(3 * a + p1) + 0.09 * Math.sin(5 * a + p2);
+  return (1 - smooth(0.7, 1, r / edge)) * (0.85 + 0.15 * Math.cos(u * 4 + p1));
+}
 function heightOf(list, x, lateral) {
   let height = 0;
   for (const o of list) {
     const dx =
       ((((x - o.x + roadPeriod / 2) % roadPeriod) + roadPeriod) % roadPeriod) - roadPeriod / 2;
+    if (o.h < 0) {
+      height += o.h * potholeDepth(o, dx / (o.l / 2), (lateral - o.z) / (o.w / 2));
+      continue;
+    }
     const u = Math.abs(dx) / (o.l / 2),
       v = Math.abs(lateral - o.z) / (o.w / 2);
     if (u >= 1 || v >= 1) continue;
@@ -228,8 +308,19 @@ float roadHeight(vec2 p) {
   float h = 0.;
   float lateral = p.y - roadCenterZ(p.x);
  ${obstacles
-   .map(
-     (o) => `{
+   .map((o) =>
+     o.h < 0
+       ? `{
+    float u = (mod(p.x - ${f(o.x)} + ${f(roadPeriod / 2)}, ${f(roadPeriod)}) - ${f(roadPeriod / 2)}) / ${f(o.l / 2)};
+    float v = (lateral - (${f(o.z)})) / ${f(o.w / 2)};
+    float r = length(vec2(u, v));
+    if (r < 1.3) {
+      float a = atan(v, u);
+      float edge = .9 + .16 * sin(3. * a + ${f(potholePhases(o)[0])}) + .09 * sin(5. * a + ${f(potholePhases(o)[1])});
+      h += ${f(o.h)} * (1. - smoothstep(.7, 1., r / edge)) * (.85 + .15 * cos(u * 4. + ${f(potholePhases(o)[0])}));
+    }
+  }`
+       : `{
     float u = abs(mod(p.x - ${f(o.x)} + ${f(roadPeriod / 2)}, ${f(roadPeriod)}) - ${f(roadPeriod / 2)}) / ${f(o.l / 2)};
     float v = abs(lateral - (${f(o.z)})) / ${f(o.w / 2)};
     if (u < 1. && v < 1.) h += ${f(o.h)} *

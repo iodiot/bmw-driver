@@ -241,7 +241,11 @@ export function setupCockpitCluster(rig) {
       elapsed += dt;
       if (elapsed < refresh || !simulation) return;
       elapsed = 0;
-      draw(simulation.speed * 3.6, simulation.powertrain.rpm, `D${simulation.powertrain.gear}`);
+      draw(
+        simulation.speed * 3.6,
+        simulation.powertrain.rpm,
+        simulation.gearLabel ?? `D${simulation.powertrain.gear}`
+      );
     },
   };
 }

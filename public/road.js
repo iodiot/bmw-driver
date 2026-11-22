@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { structuresGLSL, structureUniforms } from './road-structures.js';
 import { roadProfileGLSL } from './road-profile.js';
 
 // A small, tileable surface mask is sampled in world space. It stays fixed on
@@ -178,6 +179,7 @@ export function setupRoad(scene) {
       shader.uniforms.gravelMap = { value: gravelTexture };
       shader.uniforms.asphaltHeight = asphaltHeight;
       shader.uniforms.asphaltUvPerMetre = { value: 1 / asphaltTile };
+      Object.assign(shader.uniforms, structureUniforms);
       const visibleProfile =
         'uniform vec2 roadCenter;\n' +
         roadProfileGLSL +
@@ -215,6 +217,7 @@ export function setupRoad(scene) {
       shader.fragmentShader =
         'varying vec2 vRoadXZ;\nuniform float roadWetness;\nuniform sampler2D roadWetnessMap;\nuniform sampler2D grassMap;\nuniform sampler2D gravelMap;\nuniform sampler2D asphaltHeight;\nuniform float asphaltUvPerMetre;\n' +
         visibleProfile +
+        structuresGLSL +
         shader.fragmentShader;
       // Parallax: shift texture lookups along the view direction by the
       // asphalt's height (±3 mm), so stones stand proud and pores sink.
@@ -285,7 +288,7 @@ export function setupRoad(scene) {
         float hasBranch = step(0., branchCentre);
         float branchLat = roadLat - branchCentre;
         float branchLateral = mix(1e3, abs(branchLat), hasBranch);
-        float offRoad = smoothstep(6.05, 6.25, lateral);
+        float offRoad = smoothstep(6.05, 6.25, lateral) * (1. - tunnelFloor(vRoadXZ));
         float track = (1. - smoothstep(1.9, 2.5, branchLateral)) * offRoad;
         float verge = min(smoothstep(7.3, 8.1, lateral), smoothstep(2.2, 3., branchLateral));
         float broadNoise = texture2D(roadWetnessMap, vRoadXZ / 23.).r;
@@ -381,7 +384,20 @@ export function setupRoad(scene) {
         vec3 rubber = mix(vec3(.018), vec3(.72, .48, .045), yellow);
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.78, 0.78, 0.73), paintMask * (1. - raised));
         diffuseColor.rgb = mix(diffuseColor.rgb, rubber, raised * (1. - offRoad));
-        diffuseColor.rgb *= 1. - .5 * smoothstep(.003, .045, -height) * (1. - offRoad);
+        // Potholes: broken, crumbled asphalt at the rim, then the exposed
+        // stone bed, darker the deeper it lies.
+        float holeDepth = smoothstep(.004, .04, -height) * (1. - offRoad);
+        float holeRim = smoothstep(.0008, .004, -height) * (1. - smoothstep(.006, .02, -height)) *
+          (1. - offRoad);
+        if (holeRim + holeDepth > 0.) {
+          vec3 bed = textureGrad(gravelMap, vRoadXZ / .8, groundDx / .8, groundDy / .8).rgb;
+          bed = mix(vec3(dot(bed, vec3(.3, .59, .11))), bed, .5) * vec3(.62, .6, .57);
+          diffuseColor.rgb = mix(diffuseColor.rgb, bed, holeDepth * .9);
+          diffuseColor.rgb *= 1. - .45 * holeDepth;
+          // The rim is broken: lighter crumbs in patches, not a ring.
+          float crumbs = smoothstep(.35, .75, texture2D(roadWetnessMap, vRoadXZ / .6).r);
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 1.18 + .012, holeRim * crumbs);
+        }
       `
       );
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -390,6 +406,11 @@ export function setupRoad(scene) {
         float roadFilm = 0.;
         // Tyres polish their tracks slightly smoother than the rest.
         roughnessFactor = mix(roughnessFactor, .82, wheelTrack * .7);
+        // Loose stones in a pothole's bed are matt; in rain it holds a puddle.
+        roughnessFactor = mix(roughnessFactor, 1., holeDepth);
+        float puddle = smoothstep(.012, .03, -height) * roadWetness * (1. - offRoad);
+        roughnessFactor = mix(roughnessFactor, .03, puddle);
+        diffuseColor.rgb *= 1. - .35 * puddle;
         if (roadWetness > .001) {
           float waterMask = texture2D(roadWetnessMap, vRoadXZ / 32.).r;
           roadFilm = smoothstep(.32, .75, waterMask);
@@ -400,6 +421,28 @@ export function setupRoad(scene) {
         }
       `
       );
+      // Overpasses shade the road from the sun (the shadow map reaches only a
+      // few metres round the car), and inside the tunnel only its lamps light
+      // it, fading in over the first metres from each portal.
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <lights_fragment_begin>',
+          `float tunnelLit = tunnelCover(vRoadXZ);
+          float structureSun = (1. - tunnelLit) * (1. - bridgeShade(vRoadXZ));
+          ` +
+            THREE.ShaderChunk.lights_fragment_begin.replace(
+              'getDirectionalLightInfo( directionalLight, directLight );',
+              'getDirectionalLightInfo( directionalLight, directLight );\ndirectLight.color *= structureSun;'
+            )
+        )
+        .replace(
+          '#include <lights_fragment_end>',
+          // Sky light gives way to the lamps' (headlamps still add theirs).
+          `irradiance = mix(irradiance, tunnelLamps(vRoadXZ) * PI, tunnelLit);
+          iblIrradiance *= 1. - tunnelLit;
+          radiance *= 1. - .85 * tunnelLit;
+          #include <lights_fragment_end>`
+        );
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <lights_physical_fragment>',
         `#include <lights_physical_fragment>
@@ -411,24 +454,32 @@ export function setupRoad(scene) {
       `
       );
     };
-    ground.material.customProgramCacheKey = () => 'continuous-asphalt-roadside-country-road';
+    ground.material.customProgramCacheKey = () =>
+      'continuous-asphalt-roadside-country-road-structures';
     ground.material.needsUpdate = true;
   }
 
+  const wetColour = new THREE.Color(0xa3a9af);
   return {
     setRain(enabled) {
-      roadWetness.value = enabled ? 1 : 0;
+      this.setWetness(enabled ? 1 : 0, true);
+    },
+    // How wet the road is (0 to 1), as rain sets in or the road dries. The
+    // material rebuilds only when the clear coat comes or goes.
+    setWetness(level, rebuild = false) {
+      roadWetness.value = level;
       if (!ground) return;
-      const material = ground.material;
-      material.color.set(enabled ? 0xa3a9af : 0xc8c8c8);
-      material.roughness = enabled ? 0.75 : 1;
-      material.clearcoat = enabled ? 0.55 : 0;
-      material.clearcoatRoughness = enabled ? 0.4 : 0.12;
-      material.envMapIntensity = enabled ? 1.05 : 1;
-      material.bumpScale = enabled ? 0.0018 : 0.003;
+      const material = ground.material,
+        coated = material.clearcoat > 0;
+      material.color.set(0xc8c8c8).lerp(wetColour, level);
+      material.roughness = 1 - 0.25 * level;
+      material.clearcoat = 0.55 * level;
+      material.clearcoatRoughness = 0.12 + 0.28 * level;
+      material.envMapIntensity = 1 + 0.05 * level;
+      material.bumpScale = 0.003 - 0.0012 * level;
       // Water fills the pores: a wet road shows less relief.
-      material.normalScale.setScalar(enabled ? 0.55 : 1);
-      material.needsUpdate = true;
+      material.normalScale.setScalar(1 - 0.45 * level);
+      if (rebuild || coated !== material.clearcoat > 0) material.needsUpdate = true;
     },
     update(x, z) {
       roadCenter.value.set(x, z);

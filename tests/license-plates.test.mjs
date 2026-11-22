@@ -3,13 +3,13 @@ import { test } from 'node:test';
 import { plateLayout, ukrainianPlate } from '../public/license-plates.js';
 
 test('Ukrainian plate keeps the registration, standard size and grouped characters', () => {
-  assert.equal(ukrainianPlate.text, 'AP 1011 CX');
+  assert.equal(ukrainianPlate.text, 'AP 1860 EA');
   assert.equal(ukrainianPlate.width, 0.52);
   assert.equal(ukrainianPlate.height, 0.112);
   const { glyphs, width } = plateLayout(ukrainianPlate.text);
   assert.deepEqual(
     glyphs.map((g) => g.ch),
-    ['A', 'P', '1', '0', '1', '1', 'C', 'X']
+    ['A', 'P', '1', '8', '6', '0', 'E', 'A']
   );
   // Characters fit in the white field right of the 47 mm blue band.
   assert.ok(width > 300 && width < 520 - 47 - 20);

@@ -198,7 +198,7 @@ export function setupInstruments(container) {
     rpmNeedle = $('#rpm-needle'),
     rangeText = $('#range'),
     gearText = $('#gear'),
-    lowBeams = $('#low-beam-indicator'),
+    lowBeamLamp = $('#low-beam-indicator'),
     highBeams = $('#high-beam-indicator'),
     signalLeft = $('#signal-left'),
     signalRight = $('#signal-right'),
@@ -219,7 +219,8 @@ export function setupInstruments(container) {
       warning.reset();
       dsc.setAttribute('visibility', 'hidden');
     },
-    update(dt, simulation, night, driving = true) {
+    // `lowBeams`: the headlamps are lit (at dusk, at night and in the tunnel).
+    update(dt, simulation, lowBeams, driving = true) {
       if (!simulation) return;
       motion.update(dt, simulation.speed, simulation.powertrain.rpm);
       warning.update(dt, driving && simulation.dscActive);
@@ -238,10 +239,10 @@ export function setupInstruments(container) {
       textTime -= dt;
       if (textTime <= 0) {
         textTime = 0.1;
-        const gear = `D${simulation.powertrain.gear}`;
+        const gear = simulation.gearLabel ?? `D${simulation.powertrain.gear}`;
         gearText.textContent = gear;
         rangeText.textContent = `${Math.round(fuel.rangeKm)} km`;
-        lowBeams.setAttribute('visibility', night ? 'visible' : 'hidden');
+        lowBeamLamp.setAttribute('visibility', lowBeams ? 'visible' : 'hidden');
         svg.setAttribute(
           'aria-label',
           `BMW M5 instrument cluster: ${Math.round(motion.speed)} km/h, ${Math.round(simulation.powertrain.rpm)} rpm, gear ${gear}${warning.active ? ', DSC intervening' : ''}`

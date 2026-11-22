@@ -4,7 +4,7 @@ export const weatherCycle = Object.freeze({
   clear: Object.freeze([150, 300]),
   rain: Object.freeze([60, 150]),
   // Seconds over which the rain sets in or eases off.
-  fade: 8,
+  fade: 10,
 });
 
 export function createWeatherCycle(random = Math.random) {

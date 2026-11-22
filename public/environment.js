@@ -27,7 +27,9 @@ export function positionCelestialLight(light, anchor, isNight) {
         : celestialDirections.sun
       : isNight;
   light.target.position.copy(anchor);
-  light.position.copy(anchor).addScaledVector(direction, 10);
+  // Far enough up the light's path to take in an overpass's deck above the
+  // car, even with the sun low.
+  light.position.copy(anchor).addScaledVector(direction, 40);
   light.target.updateMatrixWorld();
 }
 
@@ -231,7 +233,7 @@ export function setupEnvironment(scene, renderer, sun) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  Object.assign(sun.shadow.camera, { left: -5, right: 5, top: 4, bottom: -4, near: 0.1, far: 20 });
+  Object.assign(sun.shadow.camera, { left: -5, right: 5, top: 4, bottom: -4, near: 0.1, far: 60 });
   sun.shadow.bias = -0.0001;
   sun.shadow.normalBias = 0.003;
   sun.intensity = 3;
@@ -285,9 +287,11 @@ export function setupEnvironment(scene, renderer, sun) {
   positionCelestialLight(sun, origin, false);
   return {
     // The scene at a time of day (see time-of-day.js), dry or wet.
+    // `isRain`: true or false, or how far rain has set in (0 to 1).
     setConditions(light, isRain) {
+      const wet = Math.max(0, Math.min(1, Number(isRain)));
       night.value = light.darkness;
-      rain.value = isRain ? 1 : 0;
+      rain.value = wet;
       sunset.value = light.sunset;
       clearDay = light.photo > 0;
       photoTarget = light.photo;
@@ -296,7 +300,7 @@ export function setupEnvironment(scene, renderer, sun) {
       lightDirection = light.sunUp
         ? sky.material.uniforms.sunDirection.value
         : celestialDirections.moon;
-      const key = `${Number(light.night)}-${Number(isRain)}`;
+      const key = `${Number(light.night)}-${Number(wet > 0.5)}`;
       // One cached reflection per dark/light and dry/wet combination; it is
       // refreshed as the sky changes.
       if (key !== currentReflection) {
@@ -313,23 +317,21 @@ export function setupEnvironment(scene, renderer, sun) {
         // (photograph or shader) is output as display values too. Each value is
         // that sky's horizon colour in sRGB, so fogged ground meets it cleanly.
         const mixRGB = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
-        let horizon = isRain
-          ? mixRGB([0.48, 0.54, 0.61], [0.1105, 0.1328, 0.184], light.darkness)
-          : mixRGB([0.78, 0.88, 0.98], [0.13, 0.16, 0.23], light.darkness);
+        let horizon = mixRGB(
+          mixRGB([0.78, 0.88, 0.98], [0.13, 0.16, 0.23], light.darkness),
+          mixRGB([0.48, 0.54, 0.61], [0.1105, 0.1328, 0.184], light.darkness),
+          wet
+        );
         horizon = mixRGB(horizon, [0.86, 0.56, 0.38], light.sunset * 0.45);
         // The photograph's horizon: distant fields and tree lines.
         horizon = mixRGB(horizon, [0.45, 0.46, 0.3], photoSkyMix.value);
         scene.fog.color.setRGB(...horizon, THREE.SRGBColorSpace);
         // Clear daylight sees the fields fade gradually up to the tree line.
-        const clear = (near, far) => [near, far];
-        const [near, far] = isRain
-          ? [42, 145]
-          : clear(
-              80 + 20 * light.darkness * (1 - photoSkyMix.value),
-              900 * photoSkyMix.value + (600 - 340 * light.darkness) * (1 - photoSkyMix.value)
-            );
-        scene.fog.near = near;
-        scene.fog.far = far;
+        const near = 80 + 20 * light.darkness * (1 - photoSkyMix.value),
+          far = 900 * photoSkyMix.value + (600 - 340 * light.darkness) * (1 - photoSkyMix.value);
+        // Rain closes the view in as it sets in.
+        scene.fog.near = near + (42 - near) * wet;
+        scene.fog.far = far + (145 - far) * wet;
       }
     },
     // Plain day or night, as before the time of day.

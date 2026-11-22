@@ -10,7 +10,7 @@ import * as THREE from 'three';
 // shapes rather than with a system font, so the plate looks the same
 // everywhere.
 export const ukrainianPlate = Object.freeze({
-  text: 'AP 1011 CX',
+  text: 'AP 1860 EA',
   width: 0.52,
   height: 0.112,
 });
@@ -20,7 +20,7 @@ const glyphHeight = 64,
   stroke = 11,
   advance = 7.5,
   groupGap = 22;
-const glyphWidths = { A: 47, P: 42, C: 46, X: 46, 0: 45, 1: 27 };
+const glyphWidths = { A: 47, P: 42, C: 46, X: 46, E: 40, 0: 45, 1: 27, 6: 45, 8: 45 };
 // Rounded letters use a superellipse: rounder than a stadium, squarer than an
 // ellipse, matching the plate typeface.
 const roundness = 2.6;
@@ -103,6 +103,48 @@ function glyph(ctx, ch, x, y, w, h, sw) {
     ctx.lineTo(cx, y + sw / 2);
     superellipse(ctx, cx, cy, a, b, -Math.PI / 2, Math.PI / 2, false);
     ctx.lineTo(x + sw / 2, y + bowl - sw / 2);
+    ctx.stroke();
+  } else if (ch === 'E') {
+    // A stem with three arms, the middle one a little shorter.
+    ctx.fillRect(x, y, sw, h);
+    ctx.fillRect(x, y, w, sw);
+    ctx.fillRect(x, y + (h - sw) / 2, w * 0.86, sw);
+    ctx.fillRect(x, y + h - sw, w, sw);
+  } else if (ch === '8') {
+    // Two bowls sharing a stroke, the upper one a little smaller.
+    const top = h * 0.47 + sw / 2;
+    superellipse(ctx, x + w / 2, y + top / 2, (w * 0.88 - sw) / 2, (top - sw) / 2, 0, 2 * Math.PI);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.beginPath();
+    const bottom = h - top + sw;
+    superellipse(
+      ctx,
+      x + w / 2,
+      y + h - bottom / 2,
+      (w - sw) / 2,
+      (bottom - sw) / 2,
+      0,
+      2 * Math.PI
+    );
+    ctx.closePath();
+    ctx.stroke();
+  } else if (ch === '6') {
+    // A closed lower bowl, its left side rising into an arch that ends at
+    // the upper right.
+    const bowl = h * 0.6,
+      a = (w - sw) / 2,
+      cx = x + w / 2,
+      cy = y + h - bowl / 2;
+    superellipse(ctx, cx, cy, a, (bowl - sw) / 2, 0, 2 * Math.PI);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.beginPath();
+    superellipse(ctx, cx, y + h / 2, a, (h - sw) / 2, Math.PI, 2 * Math.PI - 0.62);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + sw / 2, y + h / 2);
+    ctx.lineTo(x + sw / 2, cy);
     ctx.stroke();
   } else if (ch === '1') {
     // Upright stem with a long diagonal flag and no foot.

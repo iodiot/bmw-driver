@@ -4,6 +4,12 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { setupEnvironment } from './environment.js';
 import { setupRoad } from './road.js';
 import { setupRoadside } from './roadside.js';
+import {
+  setupRoadStructures,
+  tunnelCover,
+  bridgeShade,
+  structureUniforms,
+} from './road-structures.js';
 import { DrivingSimulation } from './driving-physics.js';
 import { rigDownloadedCar, addArchLiners, addRearDefroster } from './vehicle-rig.js';
 import { setupBrakeLights } from './brake-lights.js';
@@ -40,7 +46,13 @@ import { setupTyreSmoke } from './tyre-smoke.js';
 import { TurnSignals, highBeamWanted, setupSignalLamps } from './signals.js';
 import { readPad, setupTouchControls } from './touch-controls.js';
 import { setupBodyDirt } from './body-dirt.js';
-import { roadLateral, guardrailsEnabled, surfaceRoughness } from './road-profile.js';
+import {
+  roadLateral,
+  roadCenterZ,
+  roadCenterSlope,
+  guardrailsEnabled,
+  surfaceRoughness,
+} from './road-profile.js';
 
 const $ = (s) => document.querySelector(s);
 const instruments = setupInstruments($('#instruments'));
@@ -106,6 +118,7 @@ const environment = setupEnvironment(scene, renderer, sun),
   road = setupRoad(scene);
 const rain = setupRain(scene);
 const roadside = guardrailsEnabled ? setupRoadside(scene) : null;
+const structures = setupRoadStructures(scene);
 const sparks = setupSparks(scene);
 const dust = setupDust(scene);
 const tyreSmoke = setupTyreSmoke(scene);
@@ -225,14 +238,27 @@ let timeOfDay = dayCycle.start,
   lowBeamsOn = false,
   light = daylight(timeOfDay, rainMode);
 // Discrete changes: rain on or off, night-time lamps and materials.
-let roadRain = null;
+// Rain sets in and eases off over `rainEase` seconds: `rainRamp` runs
+// toward 1 or 0 and `rainLevel` (eased) darkens the sky, closes in the
+// fog and wets the road, while the drops thicken over the same time.
+const rainEase = 10;
+let rainRamp = 0,
+  rainLevel = 0;
+function stepRain(dt) {
+  const target = rainMode ? 1 : 0;
+  if (rainRamp === target) return;
+  rainRamp =
+    target > rainRamp
+      ? Math.min(1, rainRamp + dt / rainEase)
+      : Math.max(0, rainRamp - dt / rainEase);
+  rainLevel = rainRamp * rainRamp * (3 - 2 * rainRamp);
+  road.setWetness(rainLevel);
+  applyDaylight();
+}
 function applyWeather(fade = 0) {
   renderQuality.reset();
-  // Wet asphalt rebuilds the road material: only when the rain changes, not
-  // when the lamps switch at dusk.
-  if (roadRain !== rainMode) road.setRain((roadRain = rainMode));
   rain.setEnabled(rainMode, fade);
-  headlights?.setNight(lowBeamsOn);
+  headlights?.setNight(lowBeamsOn || inTunnel);
   licensePlates?.setNight(nightMode);
   contactShadow?.setNight(nightMode);
   // Compile hidden tyre trails when lighting changes, before the first slide
@@ -248,10 +274,107 @@ function applyWeather(fade = 0) {
   document.body.dataset.rain = String(rainMode);
   document.body.dataset.lowBeams = String(Boolean(lowBeamsOn && headlights));
 }
+// In the tunnel the car's light changes: the sun and sky give way to the
+// tunnel's warm lamps, the low beams come on, and the camera is out of the
+// rain. Applied every frame, over the
+// daylight's values.
+const sunDirection = new THREE.Vector3(),
+  tunnelLampColour = new THREE.Color(1, 0.9, 0.76);
+let inTunnel = false;
+// An overpass's shadow on the car. The car's body takes no shadow-map
+// shadows (on this model its own would streak the paint), so its materials
+// take the sun through `carSunlight` instead, and their sky reflections are
+// turned down with it: on black paint the sky's sheen is most of what shows.
+const carSunlight = { value: 1 },
+  carSkylight = { value: 1 },
+  carReflection = { value: 1 };
+function shadeCarFromSun(root) {
+  const done = new Set();
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (done.has(m) || !(m.isMeshStandardMaterial || m.isMeshPhongMaterial)) continue;
+      done.add(m);
+      const before = m.onBeforeCompile,
+        key = m.customProgramCacheKey;
+      m.onBeforeCompile = (shader, r) => {
+        before?.call(m, shader, r);
+        shader.uniforms.carSunlight = carSunlight;
+        shader.uniforms.carSkylight = carSkylight;
+        shader.uniforms.carReflection = carReflection;
+        // (A material's envMapIntensity does not apply to the scene's
+        // environment, so the sky's reflection is scaled here.)
+        if (m.isMeshStandardMaterial)
+          shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <lights_fragment_end>',
+            `radiance *= carReflection;
+            iblIrradiance *= carReflection;
+            #ifdef USE_CLEARCOAT
+              clearcoatRadiance *= carReflection;
+            #endif
+            #include <lights_fragment_end>`
+          );
+        shader.fragmentShader =
+          'uniform float carSunlight;\nuniform float carSkylight;\nuniform float carReflection;\n' +
+          shader.fragmentShader.replace(
+            '#include <lights_fragment_begin>',
+            THREE.ShaderChunk.lights_fragment_begin
+              .replace(
+                'getDirectionalLightInfo( directionalLight, directLight );',
+                'getDirectionalLightInfo( directionalLight, directLight );\ndirectLight.color *= carSunlight;'
+              )
+              .replace(
+                'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );',
+                'irradiance += carSkylight * getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );'
+              )
+          );
+      };
+      m.customProgramCacheKey = () => `${key ? key.call(m) : ''}|car-sunlight`;
+      m.needsUpdate = true;
+    }
+  });
+}
+let carShade = 0;
+// How far the car's body (at about 1 m) is in an overpass's shadow, over
+// its length, so the shade comes over it gradually.
+function deckShadeOnCar() {
+  const c = Math.cos(sim.heading),
+    s = Math.sin(sim.heading),
+    shift = structureUniforms.structureSunShift.value;
+  let shade = 0;
+  for (const along of [-2, -1, 0, 1, 2])
+    shade += bridgeShade(sim.x + c * along, sim.z - s * along, shift, 1);
+  return shade / 5;
+}
+function applyStructureLight() {
+  const cover = sim ? tunnelCover(sim.x, roadLateral(sim.x, sim.z)) : 0;
+  // An overpass's deck shades the car through the shadow map, as it passes
+  // under; only the tunnel changes the light itself.
+  sun.intensity = light.direct * (1 - cover);
+  ambient.intensity = light.ambient + (0.55 - light.ambient) * cover;
+  ambient.color.setRGB(...light.ambientColour).lerp(tunnelLampColour, cover);
+  fill.intensity = light.fill * (1 - cover);
+  scene.environmentIntensity = (1 - 0.2 * light.darkness) * (1 - 0.8 * cover);
+  const p = camera.position;
+  rain.setShelter(tunnelCover(p.x, roadLateral(p.x, p.z)));
+  if (cover > 0.05 !== inTunnel) {
+    inTunnel = cover > 0.05;
+    headlights?.setNight(lowBeamsOn || inTunnel);
+    document.body.dataset.lowBeams = String(Boolean(headlights && (lowBeamsOn || inTunnel)));
+  }
+  document.body.dataset.tunnel = cover.toFixed(3);
+  const shade = sim ? deckShadeOnCar() * (1 - cover) : 0;
+  // Under the deck the sun is gone, and about half the sky.
+  carShade = shade;
+  carSunlight.value = 1 - shade;
+  carSkylight.value = 1 - 0.5 * shade;
+  carReflection.value = 1 - 0.6 * shade;
+  document.body.dataset.deckShade = carShade.toFixed(3);
+}
 // Continuous changes for the current time and weather.
 function applyDaylight() {
-  light = daylight(timeOfDay, rainMode);
-  environment.setConditions(light, rainMode);
+  light = daylight(timeOfDay, rainLevel);
+  environment.setConditions(light, rainLevel);
   ambient.intensity = light.ambient;
   ambient.color.setRGB(...light.ambientColour);
   sun.intensity = light.direct;
@@ -278,7 +401,7 @@ const dayBar = setupDayBar($('#day-bar'), {
   setTime: setTimeOfDay,
   toggleRain() {
     weather.set(!rainMode);
-    setRain(!rainMode);
+    setRain(!rainMode, rainEase);
   },
   toggleRunning() {
     timeRunning = !timeRunning;
@@ -294,7 +417,7 @@ $('#night').onchange = (e) => {
 };
 $('#rain').onchange = (e) => {
   weather.set(e.target.checked);
-  setRain(e.target.checked);
+  setRain(e.target.checked, rainEase);
 };
 applyWeather();
 applyDaylight();
@@ -339,14 +462,17 @@ function restart(x = 0) {
   signals.reset();
   bodyDirt?.reset();
   minimap.reset();
+  // On the road's centre line at x, heading along it.
   sim.x = x;
+  sim.z = roadCenterZ(x);
+  sim.heading = -Math.atan(roadCenterSlope(x));
   rig.wheels.forEach((w) => {
     w.spin.rotation.z = 0;
     w.mount.rotation.y = 0;
   });
   for (const k of Object.keys(peaks)) peaks[k] = 0;
-  rig.root.position.set(x, 0, 0);
-  rig.root.rotation.set(0, 0, 0);
+  rig.root.position.set(x, 0, sim.z);
+  rig.root.rotation.set(0, sim.heading, 0);
   seatCamera.reset();
   if (cameraView === 'chase') resetView();
   setDriving(true);
@@ -448,7 +574,7 @@ new GLTFLoader().load(
       headlights = setupHeadlights(rig);
       signalLamps = setupSignalLamps(rig);
       rain.setHeadlights(headlights);
-      headlights.setNight(lowBeamsOn);
+      headlights.setNight(lowBeamsOn || inTunnel);
       exhaust = setupExhaust(scene, rig);
       bodyWater = setupBodyWater(rig);
       bodyDirt = setupBodyDirt(rig, [
@@ -494,6 +620,7 @@ new GLTFLoader().load(
           later.push(o);
       });
       for (const o of later) o.visible = true;
+      shadeCarFromSun(rig.root);
       await renderer.compileAsync(scene, camera);
       for (const o of later) o.visible = false;
       applyMirrors();
@@ -511,17 +638,28 @@ new GLTFLoader().load(
           .join(','),
         layout: JSON.stringify(sim.layout.map(({ name, x, y, z, r }) => ({ name, x, y, z, r }))),
       });
-      $('#status').hidden = true;
       resetView();
       document.querySelectorAll('button').forEach((b) => (b.disabled = false));
-      setDriving(new URLSearchParams(location.search).get('paused') !== '1');
+      // ?at=1900 starts that many metres along the road (to look at a
+      // particular place); ?paused=1 holds the car still.
+      const query = new URLSearchParams(location.search);
+      if (Number(query.get('at'))) restart(Number(query.get('at')));
+      setDriving(query.get('paused') !== '1');
+      // The loading screen fades once the scene has drawn in full.
+      // (A hidden tab draws no frames: then on a timer.)
+      const reveal = () => $('#status').classList.add('done');
+      requestAnimationFrame(() => requestAnimationFrame(reveal));
+      setTimeout(reveal, 600);
     } catch (e) {
       $('#status').textContent = 'Unable to prepare model: ' + e.message;
       document.body.dataset.error = e.message;
       console.error(e);
     }
   },
-  undefined,
+  (progress) => {
+    if (progress.total)
+      $('#status').style.setProperty('--progress', String(progress.loaded / progress.total));
+  },
   (e) => {
     $('#status').textContent = 'Unable to load model: ' + e.message;
   }
@@ -559,6 +697,7 @@ renderer.setAnimationLoop(() => {
   }
   if ($('#weather-cycle').checked && !document.hidden && weather.update(dt))
     setRain(weather.raining, weatherCycle.fade);
+  if (!document.hidden) stepRain(dt);
   if (timeRunning && !document.hidden) {
     timeOfDay = wrapHours(timeOfDay + (dt * 24) / (dayCycle.minutesPerDay * 60));
     applyDaylight();
@@ -604,10 +743,15 @@ renderer.setAnimationLoop(() => {
     }
     document.body.dataset.autopilot = String(autopilot);
     sim.step(dt, input, driving, { raining: rainMode });
+    // In reverse the brake key drives backward and the accelerator brakes:
+    // the pedals as the car feels them, for lamps, sound and smoke.
+    const pedals = sim.reversing
+      ? { accelerate: Boolean(input.brake), brake: Boolean(input.accelerate) }
+      : { accelerate: Boolean(input.accelerate), brake: Boolean(input.brake) };
     shiftShake.update(dt, sim.powertrain.gear, {
       enabled: driving && !reducedMotion.matches,
-      accelerate: Boolean(input.accelerate),
-      brake: Boolean(input.brake),
+      accelerate: pedals.accelerate,
+      brake: pedals.brake,
       speed: sim.speed,
     });
     rig.root.position.set(sim.x, 0, sim.z);
@@ -686,7 +830,7 @@ renderer.setAnimationLoop(() => {
       if (driving) {
         const a = w.mount.rotation.y,
           speed =
-            (sim.speed + sim.yawRate * w.z) * Math.cos(a) +
+            (sim.forwardSpeed + sim.yawRate * w.z) * Math.cos(a) +
             (sim.lateralVelocity + sim.yawRate * w.x) * Math.sin(a);
         w.spin.rotation.z = (w.spin.rotation.z - (speed / w.r) * dt) % (2 * Math.PI);
       }
@@ -719,10 +863,10 @@ renderer.setAnimationLoop(() => {
     roadside?.update(sim.x);
     skidMarks.update(dt, sim, {
       enabled: driving,
-      braking: Boolean(input.brake),
+      braking: pedals.brake,
       raining: rainMode,
     });
-    const lights = brakeLights.update(dt, Boolean(input.brake), nightMode);
+    const lights = brakeLights.update(dt, pedals.brake, nightMode);
     // Tail lamps light the road behind at dusk and night, more when braking.
     rearGlow.update(sim, light.darkness, lights.intensity / brakeLights.brake);
     interior.update(sim);
@@ -760,8 +904,8 @@ renderer.setAnimationLoop(() => {
       .toFixed(4);
     const exhaustParticles = exhaust.update(dt, sim, {
       enabled: driving,
-      accelerate: input.accelerate,
-      brake: input.brake,
+      accelerate: pedals.accelerate,
+      brake: pedals.brake,
       night: nightMode,
     });
     document.body.dataset.exhaustParticles = String(exhaustParticles);
@@ -800,14 +944,14 @@ renderer.setAnimationLoop(() => {
       });
     }
   }
-  instruments.update(dt, sim, nightMode, driving);
+  instruments.update(dt, sim, Boolean(headlights?.lit), driving);
   suspensionDisplay.update(dt, sim);
   minimap.update(dt, sim);
   vehicleAudio.update(dt, sim, {
     driving,
-    raining: rainMode,
-    accelerate: Boolean(input.accelerate),
-    brake: Boolean(input.brake),
+    raining: rainLevel,
+    accelerate: Boolean(sim?.reversing ? input.brake : input.accelerate),
+    brake: Boolean(sim?.reversing ? input.accelerate : input.brake),
     distance: cameraView !== 'chase' ? 4 : rig ? camera.position.distanceTo(rig.root.position) : 8,
     inside: cameraViews[cameraView].inside ? 1 : 0,
   });
@@ -822,5 +966,11 @@ renderer.setAnimationLoop(() => {
   document.body.dataset.orbit = String(controls.autoRotate);
   document.body.dataset.cameraAzimuth = controls.getAzimuthalAngle().toFixed(4);
   environment.update(dt, camera, rig?.root.position);
+  // Bridges, the tunnel and signs stand at their places from the first frame.
+  structures.update(
+    sim?.x ?? 0,
+    sunDirection.subVectors(sun.position, sun.target.position).normalize()
+  );
+  applyStructureLight();
   renderer.render(scene, camera);
 });

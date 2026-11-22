@@ -16,6 +16,9 @@ export const suspensionSpecifications = Object.freeze({
   springRate: 36000,
   dampingRate: 2400,
 });
+// Reverse gear: up to 25 km/h, pulling away at about 3 m/s²; selected by
+// pressing the brake again at a standstill, or holding it this long.
+export const reverseGear = Object.freeze({ topSpeed: 25 / 3.6, acceleration: 3.2, engage: 1 });
 export const wheelLayout = [
   { name: 'Steering_Left', x: 1.482, z: 0.8135, r: 0.34675 },
   { name: 'Steering_Right', x: 1.482, z: -0.8135, r: 0.34675 },
@@ -70,6 +73,9 @@ export class DrivingSimulation {
       surfaceGrip: 1,
       surfaceRolling: 0.013,
       surfaceName: 'asphalt',
+      reversing: false,
+      directionHold: 0,
+      directionArmed: false,
     });
     this.powertrain.reset(this.speed);
     this.tyres.reset();
@@ -195,8 +201,90 @@ export class DrivingSimulation {
     this.surfaceRolling = rolling / this.wheels.length;
     this.surfaceName = at ? at(this.x, this.z) : 'asphalt';
   }
-  integrate(dt, input, raining) {
-    if (input.accelerate || input.brake) this.pedalUsed = true;
+  // Reverse, selected as with the M DCT's lever: at a standstill, pressing
+  // the brake again selects R (or keeping it held for a second after
+  // stopping); the accelerator at a standstill selects D again.
+  selectDirection(dt, input) {
+    const pedal = this.reversing
+      ? input.accelerate && !input.brake
+      : input.brake && !input.accelerate;
+    if (this.speed >= 0.15) {
+      this.directionArmed = false;
+      this.directionHold = 0;
+      return;
+    }
+    if (!pedal) {
+      this.directionArmed = true;
+      this.directionHold = 0;
+      return;
+    }
+    this.directionHold += dt;
+    if (this.directionHold >= (this.directionArmed ? 0.12 : reverseGear.engage)) {
+      this.reversing = !this.reversing;
+      this.directionHold = 0;
+      this.directionArmed = false;
+      this.brakePressure = 0;
+      this.powertrain.reset(0);
+    }
+  }
+  // Speed along the car's heading: negative while reversing.
+  get forwardSpeed() {
+    return this.reversing ? -this.speed : this.speed;
+  }
+  // The gear shown on the cluster.
+  get gearLabel() {
+    return this.reversing ? 'R' : `D${this.powertrain.gear}`;
+  }
+  // In reverse the brake pedal (S) drives the car backward, up to walking
+  // pace and a little more, and the accelerator (W) brakes. At these
+  // speeds the tyres do not slide: the car turns about its rear axle, the
+  // opposite way to going forward.
+  driveBackward(dt, input) {
+    const previousSpeed = this.speed,
+      { topSpeed, acceleration: pull } = reverseGear;
+    this.brakePressure = input.accelerate ? Math.min(1, this.brakePressure + dt * 2.5) : 0;
+    this.readSurface();
+    const rolling =
+      this.speed > 0 ? 0.3 + Math.max(0, this.surfaceRolling - surfaces.asphalt.rolling) * 9.81 : 0;
+    const acceleration =
+      (input.brake ? pull * (1 - this.speed / topSpeed) : 0) - 8 * this.brakePressure - rolling;
+    this.speed = clamp(this.speed + acceleration * dt, 0, topSpeed);
+    const lock = (25 * Math.PI) / 180;
+    const steerTarget =
+      Number.isFinite(input.steerAxis) && input.steerAxis !== 0
+        ? clamp(input.steerAxis, -1, 1) * lock
+        : ((input.left ? 1 : 0) - (input.right ? 1 : 0)) * lock;
+    this.steer += (steerTarget - this.steer) * (1 - Math.exp(-6.5 * dt));
+    this.yawRate = (-this.speed * Math.tan(this.steer)) / this.wheelbase;
+    this.lateralVelocity *= Math.exp(-8 * dt);
+    this.lateralAcceleration = -this.speed * this.yawRate;
+    this.slipAngle = 0;
+    this.tractionLoss = 0;
+    this.dscActive = false;
+    this.tyres.yawRate = this.yawRate;
+    this.tyres.lateralVelocity = this.lateralVelocity;
+    // Along the heading, so the body pitches the right way.
+    this.acceleration = -(this.speed - previousSpeed) / dt;
+    if (input.accelerate)
+      this.brakeEnergy +=
+        0.5 * m5Specifications.mass * (previousSpeed * previousSpeed - this.speed * this.speed);
+    this.heading += this.yawRate * dt;
+    this.x +=
+      (-Math.cos(this.heading) * this.speed - Math.sin(this.heading) * this.lateralVelocity) * dt;
+    this.z -=
+      (-Math.sin(this.heading) * this.speed + Math.cos(this.heading) * this.lateralVelocity) * dt;
+    this.distance += this.speed * dt;
+    // The engine turns with the wheels in R (its ratio is close to first's).
+    this.powertrain.rpm = Math.max(800, this.powertrain.rpmForSpeed(this.speed, 1));
+    if (this.surface.guardrails) {
+      // Against a rail the car stops.
+      const backward = this.speed;
+      this.speed = -backward;
+      this.collideWithGuardrails(dt);
+      this.speed = this.speed === -backward ? backward : 0;
+    }
+  }
+  driveForward(dt, input, raining) {
     const previousSpeed = this.speed;
     // A keyboard tap is a light pedal application; holding builds full braking
     // effort in 0.4 s. Releasing the key releases the pedal immediately.
@@ -252,6 +340,12 @@ export class DrivingSimulation {
       (Math.sin(this.heading) * this.speed + Math.cos(this.heading) * this.lateralVelocity) * dt;
     this.distance += Math.hypot(this.speed, this.lateralVelocity) * dt;
     if (this.surface.guardrails) this.collideWithGuardrails(dt);
+  }
+  integrate(dt, input, raining) {
+    if (input.accelerate || input.brake) this.pedalUsed = true;
+    this.selectDirection(dt, input);
+    if (this.reversing) this.driveBackward(dt, input);
+    else this.driveForward(dt, input, raining);
     const c = Math.cos(this.heading),
       s = Math.sin(this.heading);
     const mass = suspensionSpecifications.sprungMass,

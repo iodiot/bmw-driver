@@ -36,22 +36,24 @@ export function dayPhase(hours) {
   return wrapHours(hours) < 12 ? 'Dawn' : 'Dusk';
 }
 
-// Scene conditions for an hour, dry or wet.
+// Scene conditions for an hour, dry or wet: `raining` is true or false, or
+// how far rain has set in (0 to 1), so the sky darkens as it comes.
 export function daylight(hours, raining = false) {
+  const wet = Math.max(0, Math.min(1, Number(raining)));
   const elevation = sunElevation(hours);
   // 0 in daylight, 1 after civil twilight.
   const darkness = 1 - smooth(-6, 3, elevation);
   // Golden light and a glowing horizon while the sun is low.
-  const sunset = Math.exp(-(((elevation - 2) / 7) ** 2)) * (raining ? 0.25 : 1);
+  const sunset = Math.exp(-(((elevation - 2) / 7) ** 2)) * mix(1, 0.25, wet);
   // The photographed sky (its sun stands 43° high) shows once the sun is
   // well up; low sun and night use the procedural sky.
-  const photo = raining ? 0 : smooth(10, 22, elevation);
+  const photo = (1 - wet) * smooth(10, 22, elevation);
   // The direct light is the sun while it is up and the moon at night. Both
   // are faint around the switch, so it is never seen to jump.
   const sunUp = elevation > -4;
   const direct = sunUp
-    ? 3 * smooth(-2, 12, elevation) * (raining ? 0.25 : 1)
-    : 0.35 * smooth(-4, -10, elevation) * (raining ? 0.65 : 1);
+    ? 3 * smooth(-2, 12, elevation) * mix(1, 0.25, wet)
+    : 0.35 * smooth(-4, -10, elevation) * mix(1, 0.65, wet);
   // Skylight fades gradually as the sun sinks, well before it sets: at
   // sunset the fields are already dim under a glowing sky.
   const dim = 1 - smooth(-6, 20, elevation);
@@ -65,13 +67,13 @@ export function daylight(hours, raining = false) {
     sunUp,
     direct,
     directColour,
-    ambient: mix(raining ? 1.05 : 1, raining ? 0.25 : 0.3, dim),
+    ambient: mix(mix(1, 1.05, wet), mix(0.3, 0.25, wet), dim),
     ambientColour: mixColour(
       mixColour([0.86, 0.93, 1], [1, 0.8, 0.68], sunset * 0.5),
       [0.55, 0.66, 0.87],
       darkness
     ),
-    fill: mix(raining ? 0.7 : 1, 0.15, dim),
+    fill: mix(mix(1, 0.7, wet), 0.15, dim),
     // Discrete systems: low beams from early dusk, night-time lamps and
     // materials once it is mostly dark.
     lowBeams: darkness > 0.3,

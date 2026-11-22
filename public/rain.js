@@ -25,6 +25,8 @@ export function setupRain(scene) {
     rainTime: { value: 0 },
     // 0…1: how hard it rains, for rain that sets in and eases off.
     rainAmount: { value: 1 },
+    // 0…1: how far the camera is under cover (in the tunnel), no rain there.
+    shelter: { value: 0 },
     night: { value: 0 },
     cameraVelocity: { value: new THREE.Vector3() },
     vehiclePosition: { value: new THREE.Vector3() },
@@ -113,6 +115,7 @@ export function setupRain(scene) {
     fragmentShader: `
       uniform float night;
       uniform float rainAmount;
+      uniform float shelter;
       uniform vec3 rainColor;
       varying vec2 vUv;
       varying float vVisibility;
@@ -122,7 +125,7 @@ export function setupRain(scene) {
         float crossSection = 1. - smoothstep(.16, .5, abs(vUv.x - .5));
         float ends = smoothstep(0., .12, vUv.y) * (1. - smoothstep(.7, 1., vUv.y));
         float alpha = crossSection * ends * vVisibility * mix(.60, .38 + vBeam * .42, night) *
-          rainAmount;
+          rainAmount * (1. - shelter);
         if (alpha < .001) discard;
         vec3 color = mix(rainColor, vec3(1., .93, .82), vBeam * night * .85);
         gl_FragColor = vec4(color, alpha);
@@ -163,6 +166,7 @@ export function setupRain(scene) {
     fragmentShader: `
       uniform float night;
       uniform float rainAmount;
+      uniform float shelter;
       uniform vec3 rainColor;
       varying vec2 vUv;
       varying float vVisibility;
@@ -171,7 +175,7 @@ export function setupRain(scene) {
       void main() {
         float radius = length((vUv - .5) * 2.);
         float ring = 1. - smoothstep(.04, .15, abs(radius - .72));
-        float alpha = ring * vVisibility * mix(.32, .18 + vBeam * .32, night) * rainAmount;
+        float alpha = ring * vVisibility * mix(.32, .18 + vBeam * .32, night) * rainAmount * (1. - shelter);
         if (alpha < .001) discard;
         gl_FragColor = vec4(mix(rainColor, vec3(1., .93, .82), night * vBeam), alpha);
         #include <colorspace_fragment>
@@ -216,6 +220,9 @@ export function setupRain(scene) {
         group.visible = enabled;
       } else if (enabled && !wasEnabled) uniforms.rainAmount.value = 0;
       wasEnabled = enabled;
+    },
+    setShelter(amount) {
+      uniforms.shelter.value = amount;
     },
     update(dt, camera, state, isNight) {
       if (fadeTime > 0) {

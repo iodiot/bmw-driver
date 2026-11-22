@@ -40,7 +40,7 @@ export function vehicleAudioMix({
       (0.16 + load * 0.46) *
       engine,
     high: Math.sin((high * Math.PI) / 2) * (0.14 + load * 0.48) * engine,
-    rain: raining ? 0.32 + 0.08 * clamp(speed / 55, 0, 1) : 0,
+    rain: Number(raining) * (0.32 + 0.08 * clamp(speed / 55, 0, 1)),
     tyres:
       driving && brake
         ? 0.15 * smooth(2, 15, speed) * smooth(4, 14, -acceleration) * perspective
@@ -105,16 +105,16 @@ export function roadAudioMix({
     0,
     1
   );
-  const squeal = 0.24 * slide * smooth(6, 15, v) * squealable * (wet ? 0.35 : 1);
+  const squeal = 0.24 * slide * smooth(6, 15, v) * squealable * (1 - 0.65 * Number(wet));
   return {
     roll: roll * perspective,
     rollFreq: rollFreq + v * 2.5,
     crunch: crunch * perspective,
     crunchRate: 0.55 + clamp(v / 30, 0, 1),
     swish: swish * perspective,
-    spray: wet ? (0.08 + 0.12 * squealable) * smooth(3, 30, v) * contact * perspective : 0,
+    spray: Number(wet) * (0.08 + 0.12 * squealable) * smooth(3, 30, v) * contact * perspective,
     squeal: squeal * perspective,
-    squealRate: 0.85 + 0.25 * slide - (wet ? 0.1 : 0),
+    squealRate: 0.85 + 0.25 * slide - 0.1 * Number(wet),
     scrape: driving ? 0.42 * smooth(0.2, 10, scrape) * perspective : 0,
     scrapeFreq: 1300 + clamp(scrape / 25, 0, 1) * 1600,
     ...cabinMix(inside),

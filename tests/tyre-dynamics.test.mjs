@@ -93,7 +93,9 @@ test('Straight cruising never wiggles or flashes DSC; wet traction reduces accel
   for (const raining of [false, true]) {
     const sim = simulation();
     sim.tyres.wetness = Number(raining);
-    for (let i = 0; i < 480; i++) sim.step(1 / 60, { brake: true }, true, { raining });
+    // Braking to a standstill (holding on would then select reverse).
+    for (let i = 0; i < 480 && sim.speed > 0; i++)
+      sim.step(1 / 60, { brake: true }, true, { raining });
     stopping.push(sim.distance);
     assert.equal(sim.speed, 0);
     assert.equal(sim.dscActive, false, 'Straight-line ABS braking is not a lateral DSC event');
