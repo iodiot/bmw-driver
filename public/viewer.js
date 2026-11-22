@@ -12,7 +12,12 @@ import {
   structureUniforms,
 } from './road-structures.js';
 import { DrivingSimulation } from './driving-physics.js';
-import { rigDownloadedCar, addArchLiners, addRearDefroster } from './vehicle-rig.js';
+import {
+  rigDownloadedCar,
+  addArchLiners,
+  addRearDefroster,
+  addGillPockets,
+} from './vehicle-rig.js';
 import { setupBrakeLights } from './brake-lights.js';
 import { setupHeadlights } from './headlights.js';
 import { setupExhaust } from './exhaust.js';
@@ -624,6 +629,7 @@ new GLTFLoader().load(
       rig = rigDownloadedCar(g.scene);
       addArchLiners(rig);
       addRearDefroster(rig);
+      addGillPockets(rig);
       refineCarMaterials(rig.root);
       scene.add(rig.root);
       sim = new DrivingSimulation(rig.wheels);

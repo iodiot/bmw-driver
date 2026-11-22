@@ -375,3 +375,34 @@ export function addRearDefroster(rig) {
   rig.body.add(mesh);
   return mesh;
 }
+
+// The vents in the front wings are open on the model: through the chrome
+// frame one saw into the car, the cabin or the sky beyond. Behind each is a
+// shallow black pocket (body space, the right one; the left mirrors it),
+// drawn from inside only, so its walls show through the opening and the
+// paint hides the rest.
+export const gillPocket = Object.freeze({
+  x: Object.freeze([1.03, 1.31]),
+  y: Object.freeze([0.145, 0.215]),
+  // Inner and outer face, from the centre line; the wing is at 0.9–0.92.
+  z: Object.freeze([0.865, 0.895]),
+});
+export function addGillPockets(rig) {
+  const material = new THREE.MeshStandardMaterial({
+    name: 'Wing vent pocket',
+    color: 0x0a0b0d,
+    roughness: 0.8,
+    side: THREE.BackSide,
+  });
+  const { x, y, z } = gillPocket;
+  const geometry = new THREE.BoxGeometry(x[1] - x[0], y[1] - y[0], z[1] - z[0]);
+  const pockets = [];
+  for (const sign of [-1, 1]) {
+    const pocket = new THREE.Mesh(geometry, material);
+    pocket.name = 'Wing vent pocket';
+    pocket.position.set((x[0] + x[1]) / 2, (y[0] + y[1]) / 2, (sign * (z[0] + z[1])) / 2);
+    rig.body.add(pocket);
+    pockets.push(pocket);
+  }
+  return pockets;
+}
