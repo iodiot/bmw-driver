@@ -139,7 +139,10 @@ export class DrivingSimulation {
     if (!deepest) return;
     const { side } = deepest,
       depth = Math.max(0, deepest.depth);
-    this.z -= side * depth;
+    // Pushed out at up to 12 m/s: a rail that begins inside the car (where
+    // the rails open for the country road and close again) or a deep hit
+    // eases the car out over a few frames instead of moving it at once.
+    this.z -= side * Math.min(depth, 12 * dt);
     // World velocity, rail normal (pointing into the rail) and rail tangent.
     const k = railSlope(deepest.x, deepest.rail),
       norm = Math.hypot(1, k);

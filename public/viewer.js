@@ -177,7 +177,14 @@ function resetView() {
     controls.update();
     return;
   }
-  const offset = new THREE.Vector3(4.8, 1.9, 5.6)
+  // ?camera=x,y,z places the chase camera there relative to the car (x
+  // forward, z right, in metres before the lens's scaling), for pictures.
+  const given = (new URLSearchParams(location.search).get('camera') ?? '').split(',').map(Number);
+  const offset = (
+    given.length === 3 && given.every(Number.isFinite)
+      ? new THREE.Vector3(...given)
+      : new THREE.Vector3(4.8, 1.9, 5.6)
+  )
     .multiplyScalar(Math.max(1, 0.9 / camera.aspect) * lensScale)
     .applyAxisAngle(up, heading);
   camera.position.set(x, 0, z).add(offset);
@@ -688,6 +695,9 @@ new GLTFLoader().load(
       // particular place); ?paused=1 holds the car still.
       const query = new URLSearchParams(location.search);
       if (Number(query.get('at'))) restart(Number(query.get('at')));
+      // ?time=17.5 sets the time of day (hours).
+      if (query.has('time') && Number.isFinite(Number(query.get('time'))))
+        setTimeOfDay(Number(query.get('time')));
       setDriving(query.get('paused') !== '1');
       // The loading screen fades once the scene has drawn in full.
       // (A hidden tab draws no frames: then on a timer.)
