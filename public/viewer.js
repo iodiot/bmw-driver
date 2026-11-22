@@ -671,6 +671,29 @@ new GLTFLoader().load(
           for (const m of Array.isArray(o.material) ? o.material : [o.material]) materials.add(m);
         }
       });
+      // The car's still parts as one mesh per material, as the cabin's are
+      // (the glass, which the wipers and rain work on, the cabin and the
+      // wheels stay apart), and only its larger parts cast the sun's
+      // shadow: bolts, badges and calipers made no visible shadow but each
+      // a draw in the shadow pass.
+      // (Before the hidden parts are shown for compiling below: the turn
+      // signals, shown only while lit, must stay apart.)
+      const signalStrips = [];
+      rig.body.traverse((o) => o.name.startsWith('Turn signal') && signalStrips.push(o));
+      const body = mergeStaticMeshes(rig.body, [
+        interior.interior,
+        ...bodyWater.glassMeshes,
+        ...signalStrips,
+      ]);
+      let casters = 0;
+      rig.root.traverse((o) => {
+        if (!o.isMesh || !o.castShadow) return;
+        if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+        if (o.geometry.boundingSphere.radius * o.getWorldScale(new THREE.Vector3()).x < 0.25)
+          o.castShadow = false;
+        else casters++;
+      });
+      document.body.dataset.carMeshes = `${body.before}>${body.after}, ${casters} casting`;
       // Compile and upload what first appears later (the rear-view mirror,
       // turn signals, dust and smoke, the beam patterns) now, so none of it
       // stalls a frame when it first shows.
@@ -684,21 +707,6 @@ new GLTFLoader().load(
           later.push(o);
       });
       for (const o of later) o.visible = true;
-      // The car's still parts as one mesh per material, as the cabin's are
-      // (the glass, which the wipers and rain work on, the cabin and the
-      // wheels stay apart), and only its larger parts cast the sun's
-      // shadow: bolts, badges and calipers made no visible shadow but each
-      // a draw in the shadow pass.
-      const body = mergeStaticMeshes(rig.body, [interior.interior, ...bodyWater.glassMeshes]);
-      let casters = 0;
-      rig.root.traverse((o) => {
-        if (!o.isMesh || !o.castShadow) return;
-        if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
-        if (o.geometry.boundingSphere.radius * o.getWorldScale(new THREE.Vector3()).x < 0.25)
-          o.castShadow = false;
-        else casters++;
-      });
-      document.body.dataset.carMeshes = `${body.before}>${body.after}, ${casters} casting`;
       shadeCarFromSun(rig.root);
       await renderer.compileAsync(scene, camera);
       for (const o of later) o.visible = false;
