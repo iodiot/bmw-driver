@@ -90,7 +90,7 @@ const scene = new THREE.Scene();
 const lowPower = matchMedia('(pointer: coarse)').matches;
 const renderer = new THREE.WebGLRenderer({ antialias: !lowPower });
 renderer.setSize(innerWidth, innerHeight);
-const renderQuality = new RenderQuality(devicePixelRatio, lowPower ? 1_200_000 : undefined);
+const renderQuality = new RenderQuality(devicePixelRatio, lowPower ? 900_000 : undefined);
 renderer.setPixelRatio(renderQuality.resize(innerWidth, innerHeight));
 // Khronos PBR Neutral keeps material colours true (deep black paint, natural
 // grass) without ACES hue shifts or AgX's washed-out blacks.
@@ -125,9 +125,12 @@ scene.add(sun.target);
 const fill = new THREE.HemisphereLight(0xa0caff, 0x243246, 1);
 fill.position.set(-2, 2, -4);
 scene.add(fill);
-const environment = setupEnvironment(scene, renderer, sun),
-  road = setupRoad(scene);
-if (lowPower) sun.shadow.mapSize.set(1024, 1024);
+const environment = setupEnvironment(scene, renderer, sun, { refresh: lowPower ? 5 : 1.5 }),
+  road = setupRoad(scene, { lite: lowPower });
+// Phones: no sun shadow map at all (a pass drawing the car again, and a
+// lookup in every lit pixel); the contact shadow stays under the car, and
+// the road still shades itself under the overpasses.
+if (lowPower) sun.castShadow = false;
 document.body.dataset.lowPower = String(lowPower);
 const rain = setupRain(scene);
 const roadside = guardrailsEnabled ? setupRoadside(scene) : null;
@@ -212,7 +215,7 @@ function applyCameraFov() {
 let rearViewMirror = null;
 function applyMirrors() {
   if (rearViewMirror) rearViewMirror.mirror.visible = cameraView === 'driver';
-  setMirrorInterval((cameraView === 'chase' ? 4 : 2) * (lowPower ? 2 : 1));
+  setMirrorInterval(lowPower ? (cameraView === 'chase' ? 12 : 4) : cameraView === 'chase' ? 4 : 2);
 }
 function setCameraView(view) {
   cameraView = view;

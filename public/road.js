@@ -116,7 +116,8 @@ export function createRoadGeometry() {
   return geometry;
 }
 
-export function setupRoad(scene) {
+// `lite`: for phones, the asphalt without its normal map and parallax.
+export function setupRoad(scene, { lite = false } = {}) {
   const ground = scene.getObjectByName('Asphalt ground');
   const roadCenter = { value: new THREE.Vector2() };
   const roadWetness = { value: 0 };
@@ -158,7 +159,7 @@ export function setupRoad(scene) {
         arm = asphaltTexture('asphalt-arm.jpg', false);
       material.map = asphaltTexture('asphalt.jpg', true);
       material.bumpMap = null;
-      material.normalMap = asphaltTexture('asphalt-normal.jpg', false);
+      material.normalMap = lite ? null : asphaltTexture('asphalt-normal.jpg', false);
       material.normalScale.set(1, 1);
       material.roughnessMap = arm;
       material.aoMap = arm;
@@ -256,7 +257,7 @@ export function setupRoad(scene) {
           // Only near the camera, where the shift is visible.
           mapDx = dFdx(vMapUv);
           mapDy = dFdy(vMapUv);
-          if (eyeDistance < 25. && onAsphalt) {
+          if (eyeDistance < ${lite ? '0.' : '25.'} && onAsphalt) {
             // The height map averages .82: stones above it, pores below.
             float relief = textureGrad(asphaltHeight, vMapUv, mapDx, mapDy).r - .82;
             parallaxShift = vec2(toEye.x, -toEye.z) / max(toEye.y, .25) * relief * .006 *

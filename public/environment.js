@@ -184,7 +184,9 @@ export function createSky(night = { value: 0 }, rain = { value: 0 }, sunset = { 
   return sky;
 }
 
-export function setupEnvironment(scene, renderer, sun) {
+// `refresh`: seconds between captures of the sky's reflection while it
+// changes (longer on phones).
+export function setupEnvironment(scene, renderer, sun, { refresh = 1.5 } = {}) {
   const night = { value: 0 };
   const sunset = { value: 0 };
   const rain = { value: 0 };
@@ -350,7 +352,7 @@ export function setupEnvironment(scene, renderer, sun) {
         scene.environmentRotation.set(0, 0, 0);
       else {
         reflectionAge += dt;
-        if (reflectionAge >= 1.5) {
+        if (reflectionAge >= refresh) {
           // Reuse both the capture cube and the filtered target. Reallocating and
           // disposing GPU textures here caused periodic driver stalls.
           refreshReflection(reflections.get(currentReflection));
