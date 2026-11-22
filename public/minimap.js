@@ -177,13 +177,12 @@ export function setupMinimap(container) {
       ctx.fill();
       ctx.stroke();
       ctx.restore();
-      // Upcoming curve and speed bump.
-      const curve = nextCurve(simulation.x),
-        bump = nextSpeedBump(simulation.x);
+      // The upcoming curve.
+      const curve = nextCurve(simulation.x);
       ctx.font = '600 10px "Helvetica Neue", Arial, sans-serif';
       ctx.textBaseline = 'alphabetic';
       ctx.fillStyle = 'rgba(8,12,16,0.55)';
-      ctx.fillRect(0, h - 30, w, 30);
+      ctx.fillRect(0, h - 18, w, 18);
       ctx.fillStyle = '#eaf2f7';
       ctx.textAlign = 'left';
       ctx.fillText(
@@ -191,13 +190,8 @@ export function setupMinimap(container) {
           ? `${curve.direction === 'left' ? '↰' : '↱'} ${Math.round(curve.distance)} m`
           : '↑ straight',
         7,
-        h - 17
+        h - 6
       );
-      // A layout may have no speed bump at all.
-      if (Number.isFinite(bump)) {
-        ctx.fillStyle = '#ffc846';
-        ctx.fillText(`▬ bump ${Math.round(bump)} m`, 7, h - 5);
-      }
     },
   };
 }

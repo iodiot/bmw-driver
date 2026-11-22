@@ -140,38 +140,52 @@ const originalObstacles = [
   { x: 66, z: 2.79, l: 1.4, w: 0.72, h: -0.076 },
   { x: 112, z: 4.41, l: 1.3, w: 0.66, h: -0.07 },
 ];
-// Another layout's obstacles, over 600 m: seven to twelve potholes of
-// different sizes anywhere in the lanes, and now and then (one layout in
-// two) a speed bump across the road.
+// Another layout's obstacles, over 600 m: three or four speed bumps across
+// the road of different kinds (a narrow rubber strip, a standard hump, a
+// long hump or a table), and fifteen to twenty-two potholes of every size,
+// from a fist-sized hole in a wheel track to a broken patch a metre and a
+// half across, anywhere in the lanes.
 function drawnObstacles(random) {
   const pick = (low, high) => low + (high - low) * random();
   const round = (v, step) => Math.round(v / step) * step;
   const list = [],
-    taken = [];
-  const free = (x, gap) => x > 8 && x < roadPeriod - 8 && taken.every((t) => Math.abs(t - x) > gap);
-  if (random() < 0.5) {
-    const x = pick(60, roadPeriod - 60);
-    taken.push(x);
-    list.push(
-      random() < 0.4
-        ? { x: round(x, 0.1), z: 0, l: 6.4, w: 10.8, h: 0.07, table: true }
-        : { x: round(x, 0.1), z: 0, l: 1.5, w: 10.8, h: round(pick(0.06, 0.08), 0.001) }
-    );
-  }
-  const holes = 7 + Math.floor(random() * 6);
-  for (let n = 0, tries = 0; n < holes && tries < 300; tries++) {
+    bumps = [],
+    holes = [];
+  const clear = (x) => x > 6 && x < roadPeriod - 6;
+  const speedBumps = 3 + Math.floor(random() * 2);
+  const kinds = [
+    () => ({ l: 0.6, h: round(pick(0.035, 0.05), 0.001) }),
+    () => ({ l: round(pick(1.3, 1.8), 0.01), h: round(pick(0.065, 0.085), 0.001) }),
+    () => ({ l: round(pick(3, 4), 0.1), h: round(pick(0.07, 0.09), 0.001) }),
+    () => ({ l: 6.4, h: 0.07, table: true }),
+  ];
+  for (let n = 0, tries = 0; n < speedBumps && tries < 200; tries++) {
     const x = pick(0, roadPeriod);
-    if (!free(x, 14)) continue;
-    taken.push(x);
+    if (!clear(x) || bumps.some((b) => Math.abs(b - x) < 90)) continue;
+    bumps.push(x);
     n++;
-    const lane = roadLanes[Math.floor(random() * roadLanes.length)];
-    list.push({
+    const kind = kinds[Math.floor(random() * kinds.length)]();
+    list.push({ x: round(x, 0.1), z: 0, w: 10.8, ...kind });
+  }
+  const count = 15 + Math.floor(random() * 8);
+  for (let n = 0, tries = 0; n < count && tries < 500; tries++) {
+    const x = pick(0, roadPeriod),
+      lane = roadLanes[Math.floor(random() * roadLanes.length)],
+      z = lane + pick(-1.3, 1.3);
+    if (!clear(x) || bumps.some((b) => Math.abs(b - x) < 6)) continue;
+    if (holes.some((h) => Math.abs(h.x - x) < 7 && Math.abs(h.z - z) < 2.5)) continue;
+    // Mostly small holes, now and then a large broken patch.
+    const size = random() < 0.25 ? pick(1, 1.6) : pick(0.35, 0.9);
+    const hole = {
       x: round(x, 0.1),
-      z: round(lane + pick(-1.2, 1.2), 0.01),
-      l: round(pick(0.7, 1.6), 0.01),
-      w: round(pick(0.5, 1.05), 0.01),
-      h: -round(pick(0.04, 0.07), 0.001),
-    });
+      z: round(z, 0.01),
+      l: round(size * pick(0.8, 1.4), 0.01),
+      w: round(size * pick(0.7, 1.1), 0.01),
+      h: -round(pick(0.035, 0.07) * (0.7 + 0.3 * Math.min(1, size)), 0.001),
+    };
+    holes.push(hole);
+    list.push(hole);
+    n++;
   }
   return list.sort((a, b) => a.x - b.x);
 }
