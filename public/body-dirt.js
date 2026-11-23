@@ -5,7 +5,11 @@ import * as THREE from 'three';
 // and on the tail where the wake lets it settle, with a light film on the
 // roof and bonnet. Wet ground throws dark mud splatter behind the wheels and
 // along the sills. Dirt dulls the clear coat; rain slowly washes it off
-// (dust sooner than mud), and Restart starts with a clean car.
+// (dust sooner than mud), and Restart starts with a clean car. In winter the
+// road's snow and slush cake the car as it drives, snowing or not: a grey
+// film of slush along the sills, clumps of snow behind the wheels and on the
+// tail, and snow packed onto the tyres and the rims' edges; it thaws once
+// winter is over.
 export const dirtSettings = Object.freeze({
   // Build-up per second at 72 km/h with all four wheels on the surface.
   dust: Object.freeze({ dirt: 0.05, gravel: 0.03, grass: 0.012, asphalt: 0 }),
@@ -13,6 +17,10 @@ export const dirtSettings = Object.freeze({
   // Seconds for rain to wash off most of each.
   washDust: 45,
   washMud: 150,
+  // Snow and slush per second at 72 km/h in winter (more off the asphalt),
+  // and seconds to thaw most of it once winter is over.
+  slush: Object.freeze({ asphalt: 0.03, dirt: 0.05, gravel: 0.05, grass: 0.06 }),
+  thaw: 20,
 });
 
 export class BodyDirtState {
@@ -22,9 +30,11 @@ export class BodyDirtState {
   reset() {
     this.dust = 0;
     this.mud = 0;
+    this.slush = 0;
   }
   // surfaces: what each wheel stands on; wetness: how wet the ground is.
-  step(dt, { surfaces = [], speed = 0, wetness = 0, raining = false }) {
+  // winter: how far the season has turned (0–1).
+  step(dt, { surfaces = [], speed = 0, wetness = 0, raining = false, winter = 0 }) {
     const pace = Math.min(1.5, Math.max(0, (speed - 2) / 18));
     let dust = 0,
       mud = 0;
@@ -35,6 +45,10 @@ export class BodyDirtState {
     const wet = Math.min(1, Math.max(0, (wetness - 0.25) / 0.5));
     this.dust += dust * pace * (1 - wet) * (1 - this.dust) * dt;
     this.mud += mud * pace * wet * (1 - this.mud) * dt;
+    let slush = 0;
+    for (const surface of surfaces) slush += (dirtSettings.slush[surface] ?? 0) / surfaces.length;
+    this.slush += slush * pace * winter * (1 - this.slush) * dt;
+    if (winter < 0.5) this.slush *= Math.exp(-dt / dirtSettings.thaw);
     if (raining) {
       this.dust *= Math.exp(-dt / dirtSettings.washDust);
       this.mud *= Math.exp(-dt / dirtSettings.washMud);
@@ -102,6 +116,7 @@ export function addScratchWear(row, x, wear, angle = Math.PI / 2) {
 const dirtFunctions = `
   uniform float bodyDust;
   uniform float bodyMud;
+  uniform float bodySlush;
   uniform vec4 dirtWheels; // front x, rear x, hub height, |z|
   uniform sampler2D scratchMap;
   uniform vec2 scratchRange; // tail x, length
@@ -129,6 +144,7 @@ export function setupBodyDirt(rig, paintMaterials) {
   const uniforms = {
     bodyDust: { value: 0 },
     bodyMud: { value: 0 },
+    bodySlush: { value: 0 },
     dirtWheels: { value: new THREE.Vector4(front, rear, hub, track) },
     scratchMap: { value: null },
     scratchRange: { value: new THREE.Vector2(scratchLayout.from, scratchLayout.length) },
@@ -160,7 +176,7 @@ export function setupBodyDirt(rig, paintMaterials) {
         '#include <roughnessmap_fragment>',
         `#include <roughnessmap_fragment>
         float dirtCover = 0.;
-        if (bodyDust + bodyMud > .002) {
+        if (bodyDust + bodyMud + bodySlush > .002) {
           vec3 dp = vWaterPosition;
           vec3 dn = normalize(vWaterNormal);
           // Low on the body, on rear-facing panels at the tail, and on top.
@@ -200,6 +216,18 @@ export function setupBodyDirt(rig, paintMaterials) {
           diffuseColor.rgb = mix(diffuseColor.rgb, mudColour, mud);
           roughnessFactor = mix(roughnessFactor, .92, max(dust, mud * (1. - bodyWetness * .7)));
           dirtCover = max(dust, mud);
+          // Winter: a grey film of slush down low, white clumps of snow
+          // where the wheels throw it.
+          float slushMask = bodySlush * clamp(1.1 * low + 1.5 * splash + .3 * tail, 0., 1.6);
+          float film = clamp(slushMask, 0., 1.) * low * .5 * (.6 + .4 * coarse);
+          float snowEdge = .76 - .16 * clamp(slushMask, 0., 1.);
+          float clumps = max(
+            smoothstep(snowEdge, snowEdge + .05, grain) * clamp(slushMask * 1.2, 0., 1.),
+            smoothstep(.62, .75, slushMask * (.4 + .45 * coarse + .3 * fine)) * low);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.4, .39, .37), film);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.78, .8, .83), clumps);
+          roughnessFactor = mix(roughnessFactor, .85, max(film, clumps));
+          dirtCover = max(dirtCover, max(film, clumps));
         }
         // Guardrail scratches: a band at the beam's height on the side that
         // touched, fine streaks along the car through the clear coat to grey
@@ -240,11 +268,52 @@ export function setupBodyDirt(rig, paintMaterials) {
     material.customProgramCacheKey = () => `${previousKey()}-dirt`;
     material.needsUpdate = true;
   }
+  // Snow packed onto the tyres and the rims' edges, turning with them.
+  const wheelMaterials = new Set();
+  for (const wheel of rig.wheels)
+    wheel.spin.traverse((o) => {
+      if (o.isMesh) for (const m of [o.material].flat()) wheelMaterials.add(m);
+    });
+  for (const material of wheelMaterials) {
+    if (!material.isMeshStandardMaterial) continue;
+    const previousCompile = material.onBeforeCompile,
+      previousKey = material.customProgramCacheKey;
+    material.onBeforeCompile = (shader, renderer) => {
+      previousCompile?.call(material, shader, renderer);
+      shader.uniforms.bodySlush = uniforms.bodySlush;
+      shader.uniforms.wheelRadius = { value: rig.wheels[0].r };
+      shader.vertexShader =
+        'varying vec3 vWheelPosition;\n' +
+        shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          '#include <begin_vertex>\nvWheelPosition = position;'
+        );
+      shader.fragmentShader =
+        'varying vec3 vWheelPosition;\nuniform float bodySlush;\nuniform float wheelRadius;\n' +
+        dirtFunctions.replace(/uniform[^;]*;/g, '') +
+        shader.fragmentShader.replace(
+          '#include <metalnessmap_fragment>',
+          `#include <metalnessmap_fragment>
+          if (bodySlush > .002) {
+            float rim = length(vWheelPosition.xy) / wheelRadius;
+            float packed = bodySlush * smoothstep(.74, .92, rim) *
+              (.3 + .6 * dirtNoise(vWheelPosition * 14.) + .3 * dirtNoise(vWheelPosition * 45.));
+            float snowOn = smoothstep(.45, .65, packed);
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.8, .82, .86), snowOn);
+            roughnessFactor = mix(roughnessFactor, .9, snowOn);
+            metalnessFactor = mix(metalnessFactor, 0., snowOn);
+          }`
+        );
+    };
+    material.customProgramCacheKey = () =>
+      `${previousKey ? previousKey.call(material) : ''}-wheel-snow`;
+    material.needsUpdate = true;
+  }
   return {
     state,
     reset() {
       state.reset();
-      uniforms.bodyDust.value = uniforms.bodyMud.value = 0;
+      uniforms.bodyDust.value = uniforms.bodyMud.value = uniforms.bodySlush.value = 0;
       wear[0].fill(0);
       wear[1].fill(0);
       uploadScratches();
@@ -258,10 +327,13 @@ export function setupBodyDirt(rig, paintMaterials) {
     get scratches() {
       return wear;
     },
-    update(dt, { surfaces, speed, wetness, raining, running = true }) {
-      if (running) state.step(dt, { surfaces, speed, wetness, raining });
+    update(dt, { surfaces, speed, wetness, raining, winter = 0, running = true }) {
+      if (running) state.step(dt, { surfaces, speed, wetness, raining, winter });
+      // (It thaws standing still too.)
+      else if (winter < 0.5) state.slush *= Math.exp(-dt / dirtSettings.thaw);
       uniforms.bodyDust.value = state.dust;
       uniforms.bodyMud.value = state.mud;
+      uniforms.bodySlush.value = state.slush;
       return state;
     },
   };

@@ -33,6 +33,7 @@ import { setupPowerLines } from './power-lines.js';
 import { setupBusStops } from './bus-stops.js';
 import { FuelTank, atPump, fuelPrice, setupFuelStation } from './fuel-station.js';
 import { setupVillage } from './village.js';
+import { setupFoxes } from './foxes.js';
 import { DriftScore, driftRules } from './drift.js';
 import { seasonUniforms, snowOnScene, stepSeason, winterDriving } from './season.js';
 import { setupToasts } from './toasts.js';
@@ -72,6 +73,7 @@ import { setupTyreSmoke } from './tyre-smoke.js';
 import { TurnSignals, highBeamWanted, setupReversingLamps, setupSignalLamps } from './signals.js';
 import { readPad, setupTouchControls } from './touch-controls.js';
 import { setupBodyDirt } from './body-dirt.js';
+import { openingGroups, setupCarOpenings } from './car-openings.js';
 import {
   roadLateral,
   roadCenterZ,
@@ -253,6 +255,8 @@ const powerLines = setupPowerLines(scene),
   busStops = setupBusStops(scene),
   fuelStation = setupFuelStation(scene),
   village = setupVillage(scene);
+// Foxes in the winter fields.
+const foxes = setupFoxes(scene);
 // The car's tank: it empties as the car drives and fills at a pump, a
 // meter showing the litres and the cost running up meanwhile.
 let fuelTank = new FuelTank(),
@@ -358,6 +362,7 @@ const lookPicker = setupLookPicker(document.body, {
   look,
   graphics,
   onGraphics: (level) => chooseGraphics(level),
+  onOpen: (group) => toggleOpening(group),
   onChange(chosen) {
     look = chosen;
     saveLook(look);
@@ -880,6 +885,21 @@ const actions = {
   KeyA: 'left',
   KeyD: 'right',
 };
+// Doors (O), bonnet (B) and boot (K): only while the car stands (or is
+// paused).
+let carOpenings = null;
+const openingKeys = { KeyO: 'doors', KeyB: 'bonnet', KeyK: 'boot' };
+function showOpenings() {
+  lookPicker.setOpen(
+    Object.fromEntries(openingGroups.map((g) => [g, Boolean(carOpenings?.isOpen(g))]))
+  );
+}
+function toggleOpening(group) {
+  if (!carOpenings || !sim) return;
+  if (!carOpenings.toggle(group, driving ? sim.speed : 0))
+    toasts.show({ label: 'Stop the car', shown: 'to open it' }, 2);
+  showOpenings();
+}
 addEventListener('keydown', (e) => {
   // Driving keys work wherever focus is, except while typing; Space still
   // presses a focused button.
@@ -928,6 +948,11 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyC' && !e.repeat && !e.metaKey && !e.ctrlKey) {
     e.preventDefault();
     setCameraView(nextCameraView(cameraView));
+    return;
+  }
+  if (openingKeys[e.code] && !e.repeat && !e.metaKey && !e.ctrlKey) {
+    e.preventDefault();
+    toggleOpening(openingKeys[e.code]);
     return;
   }
   if (e.code === 'KeyM' && !e.repeat && !e.metaKey && !e.ctrlKey) {
@@ -992,6 +1017,7 @@ new GLTFLoader().load(
       headlights.setNight(lowBeamsOn || inTunnel);
       exhaust = setupExhaust(scene, rig);
       bodyWater = setupBodyWater(rig);
+      carOpenings = setupCarOpenings(rig);
       bodyDirt = setupBodyDirt(rig, [
         ...new Set(
           bodyWater.meshes.map((m) => m.material).filter((m) => m.name === 'M5_F10_Paint')
@@ -1564,8 +1590,10 @@ renderer.setAnimationLoop((time) => {
       speed: sim.speed,
       wetness: sim.tyres.wetness,
       raining: wetWeather(),
+      winter: winterLevel,
       running: driving,
     });
+    document.body.dataset.bodySlush = dirt.slush.toFixed(3);
     document.body.dataset.bodyDust = dirt.dust.toFixed(3);
     document.body.dataset.bodyMud = dirt.mud.toFixed(3);
     document.body.dataset.bodyWetness = bodyWater
@@ -1578,6 +1606,18 @@ renderer.setAnimationLoop((time) => {
         light: Math.min(1.1, 0.25 + 0.5 * light.ambient + 0.12 * light.direct),
       })
       .toFixed(4);
+    const frost = bodyWater.frost.update(dt, {
+      winter: winterLevel,
+      running: driving,
+      speed: sim.speed,
+      snowing: rainMode,
+      blizzard: stormLevel > 0.5,
+    });
+    // Moving off closes the doors, bonnet and boot.
+    const wasOpen = openingGroups.some((g) => carOpenings.isOpen(g));
+    carOpenings.update(dt, driving ? sim.speed : 0);
+    if (wasOpen && !openingGroups.some((g) => carOpenings.isOpen(g))) showOpenings();
+    document.body.dataset.frost = `${frost.screen.toFixed(3)} ${frost.ice.toFixed(3)}`;
     const exhaustParticles = exhaust.update(dt, sim, {
       enabled: driving,
       accelerate: pedals.accelerate,
@@ -1678,5 +1718,6 @@ renderer.setAnimationLoop((time) => {
   const evening = Math.min(1, Math.max(0, (light.darkness - 0.25) / 0.5));
   fuelStation.update(sim?.x ?? 0, evening, sunDirection, sunlight);
   village.update(sim?.x ?? 0, evening, sunDirection, sunlight, winterLevel);
+  foxes.update(driving ? dt : 0, sim?.x ?? 0, sim?.z ?? 0, winterLevel);
   renderer.render(scene, camera);
 });

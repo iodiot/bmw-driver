@@ -36,6 +36,11 @@ const waterFunctions = `
   // by snowLight (the light falling on the car).
   uniform float bodySnow;
   uniform float snowLight;
+  // Frost on the glass on a winter's morning: the windscreen's (cleared by
+  // the defroster from the bottom up) and the other windows'.
+  uniform float screenFrost;
+  uniform float glassFrost;
+  uniform float edgeIce;
   uniform vec3 waterFlow;
   uniform vec3 waterVelocity;
   varying vec3 vWaterPosition;
@@ -46,6 +51,55 @@ const waterFunctions = `
   uniform vec3 windshieldUp;
   uniform vec4 windshieldBounds;
   varying float vWaterWindscreen;
+
+  float frostHash(vec3 p) {
+    return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+  }
+  float frostNoise(vec3 p) {
+    vec3 i = floor(p), f = fract(p);
+    f = f * f * (3. - 2. * f);
+    return mix(
+      mix(mix(frostHash(i), frostHash(i + vec3(1, 0, 0)), f.x),
+          mix(frostHash(i + vec3(0, 1, 0)), frostHash(i + vec3(1, 1, 0)), f.x), f.y),
+      mix(mix(frostHash(i + vec3(0, 0, 1)), frostHash(i + vec3(1, 0, 1)), f.x),
+          mix(frostHash(i + vec3(0, 1, 1)), frostHash(i + vec3(1, 1, 1)), f.x), f.y),
+      f.z);
+  }
+  // Feathery ice crystals (ridged noise at four scales), creeping in from
+  // the glass's edges: frost as far as screenFrost / glassFrost reach
+  // (all of it at 1), and a rim of packed ice (edgeIce) round the edges and
+  // in the corners where the wipers do not reach. x: the brightness, y: the
+  // cover.
+  vec2 glassFrostAt(vec3 p) {
+    if (screenFrost + glassFrost + edgeIce < .002) return vec2(0.);
+    float ridges = 0., amplitude = .5, scale = 9.;
+    for (int i = 0; i < 4; i++) {
+      ridges += amplitude * (1. - abs(2. * frostNoise(p * scale + float(i) * 3.7) - 1.));
+      scale *= 2.4;
+      amplitude *= .5;
+    }
+    float crystals = pow(ridges / .94, 3.);
+    // How far in from the edges (0 at an edge, 1 in the middle), least in
+    // the corners.
+    float inward, reach, spread = 1.;
+    if (vWaterWindscreen > .5) {
+      vec2 uv = (vec2(p.z, dot(p - windshieldOrigin, windshieldUp)) - windshieldBounds.xy) /
+        windshieldBounds.zw;
+      vec2 edge = clamp(min(uv, 1. - uv) * 2., 0., 1.);
+      inward = sqrt(edge.x * edge.y);
+      reach = screenFrost;
+      // (Its outline reaches beyond the glass seen from the seat.)
+      spread = 1.6;
+    } else {
+      inward = clamp(min(p.y - .36, .8 - p.y) / .21, 0., 1.);
+      reach = glassFrost;
+    }
+    float ragged = .22 * (ridges - .5);
+    float frost = smoothstep(-.05, .05, reach * 1.15 * spread - inward + ragged) * min(1., reach * 6.);
+    float ice = smoothstep(-.04, .04, edgeIce * .3 * spread * spread - inward + ragged * .6) * min(1., edgeIce * 5.);
+    float cover = max(frost * (.78 + .22 * crystals), ice * .95);
+    return vec2(mix(.75 + .35 * crystals, .95, ice), cover);
+  }
 
   float remainingWindshieldWater(vec3 p) {
     if (waterGlass < .5 || vWaterWindscreen < .5) return 1.;
@@ -130,6 +184,9 @@ export function setupBodyWater(rig) {
     bodyWetness: { value: 0 },
     bodySnow: { value: 0 },
     snowLight: { value: 1 },
+    screenFrost: { value: 0 },
+    glassFrost: { value: 0 },
+    edgeIce: { value: 0 },
     waterTime: { value: 0 },
     waterWind: { value: 0 },
     waterFlow: { value: state.flow },
@@ -253,6 +310,10 @@ export function setupBodyWater(rig) {
           float flakes = surfaceWater.y * bodySnow;
           outgoingLight = mix(outgoingLight, vec3(.88, .91, .95) * snowLight, flakes * .9);
           diffuseColor.a = mix(diffuseColor.a, 1., flakes * .85);
+          // Frost: a white, crystalline film, all but opaque.
+          vec2 frost = glassFrostAt(vWaterPosition) * vec2(1., vWaterWindow);
+          outgoingLight = mix(outgoingLight, vec3(.88, .92, .97) * snowLight * frost.x, frost.y * .95);
+          diffuseColor.a = mix(diffuseColor.a, 1., frost.y * .95);
           #include <opaque_fragment>
         `
         );
@@ -306,7 +367,8 @@ export function setupBodyWater(rig) {
         vec2 water = bodyWater(vWaterPosition, vWaterNormal) * vWaterWindow;
         water *= remainingWindshieldWater(vWaterPosition);
         float cover = water.y;
-        if (cover < .01) discard;
+        vec2 frost = glassFrostAt(vWaterPosition) * vec2(1., vWaterWindow);
+        if (cover < .01 && frost.y < .01) discard;
         // Which way the bead's surface slopes on screen: the sky's light
         // gathers where it rises upward (below its middle).
         vec2 slope = vec2(dFdx(water.x), dFdy(water.x));
@@ -319,7 +381,10 @@ export function setupBodyWater(rig) {
         // Snowflakes from inside: pale, lit through, nearly opaque.
         colour = mix(colour, vec3(.8, .83, .88) * snowLight * .85, bodySnow);
         alpha = mix(alpha, cover * .85, bodySnow);
-        gl_FragColor = vec4(colour, min(alpha, .8));
+        // Frost from inside: the daylight through it, greyer than outside.
+        colour = mix(colour, vec3(.8, .84, .89) * snowLight * .9 * frost.x, frost.y);
+        alpha = max(alpha, frost.y * .96);
+        gl_FragColor = vec4(colour, min(alpha, .92));
         #include <colorspace_fragment>
       }
     `,
@@ -368,6 +433,32 @@ export function setupBodyWater(rig) {
         );
       }
       return state.wetness;
+    },
+    // Frost and ice on the glass in winter. Standing still (or paused) the
+    // glass frosts over from its edges in a couple of minutes; driving, the
+    // defroster clears the windscreen within half a minute and the heater
+    // the other windows in a minute or so. Driving through falling snow
+    // packs ice round the glass's edges and in the windscreen's corners,
+    // more in a blizzard, which thaws slowly once the snow stops. All of it
+    // melts at once out of winter.
+    frost: {
+      update(dt, { winter = 0, running = false, speed = 0, snowing = false, blizzard = false }) {
+        const cold = winter >= 0.5,
+          standing = !running || Math.abs(speed) < 0.5;
+        const step = (u, rate) => (u.value = THREE.MathUtils.clamp(u.value + rate * dt, 0, 1));
+        step(uniforms.screenFrost, !cold ? -0.25 : standing ? 1 / 120 : -1 / 25);
+        step(uniforms.glassFrost, !cold ? -0.25 : standing ? 1 / 100 : -1 / 60);
+        const ice = cold && snowing && running ? (blizzard ? 1 : 0.6) : 0,
+          u = uniforms.edgeIce;
+        if (!cold) step(u, -0.25);
+        else if (u.value < ice) u.value = Math.min(ice, u.value + dt / 60);
+        else if (running) u.value = Math.max(ice, u.value - dt / 150);
+        return {
+          screen: uniforms.screenFrost.value,
+          glass: uniforms.glassFrost.value,
+          ice: u.value,
+        };
+      },
     },
   };
 }

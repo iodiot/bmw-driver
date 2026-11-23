@@ -6,7 +6,10 @@ import { graphicsLevels, graphicsPresets } from './settings.js';
 // click elsewhere closes it.
 const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
 
-export function setupLookPicker(container, { look, onChange, graphics = 'auto', onGraphics }) {
+export function setupLookPicker(
+  container,
+  { look, onChange, graphics = 'auto', onGraphics, onOpen }
+) {
   const panel = document.createElement('div');
   panel.className = 'look-picker';
   panel.hidden = true;
@@ -45,6 +48,16 @@ export function setupLookPicker(container, { look, onChange, graphics = 'auto', 
         .join('')}
     </div>`
   );
+  // Doors, bonnet and boot, opened while the car stands (O, B and K).
+  panel.insertAdjacentHTML(
+    'beforeend',
+    `<h3>Open</h3>
+    <div class="look-graphics" role="group" aria-label="Open">
+      <button type="button" data-open="doors" title="Doors (O)">Doors</button>
+      <button type="button" data-open="bonnet" title="Bonnet (B)">Bonnet</button>
+      <button type="button" data-open="boot" title="Boot (K)">Boot</button>
+    </div>`
+  );
   container.append(panel);
   const current = { ...look };
   let level = graphics;
@@ -73,6 +86,12 @@ export function setupLookPicker(container, { look, onChange, graphics = 'auto', 
     opener?.setAttribute('aria-expanded', 'false');
   };
   panel.addEventListener('click', (e) => {
+    const part = e.target.closest('button[data-open]');
+    if (part) {
+      onOpen?.(part.dataset.open);
+      part.blur();
+      return;
+    }
     const choice = e.target.closest('button[data-graphics]');
     if (choice) {
       level = choice.dataset.graphics;
@@ -101,6 +120,11 @@ export function setupLookPicker(container, { look, onChange, graphics = 'auto', 
     setGraphics(chosen) {
       level = chosen;
       showGraphics();
+    },
+    // Which of the doors, bonnet and boot are open.
+    setOpen(open) {
+      for (const button of panel.querySelectorAll('[data-open]'))
+        button.setAttribute('aria-pressed', String(Boolean(open[button.dataset.open])));
     },
     close() {
       panel.hidden = true;

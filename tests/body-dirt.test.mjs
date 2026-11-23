@@ -65,3 +65,16 @@ test('Rubbing along a rail parallel to it scratches the whole side', async () =>
   assert.ok(worn(along) > 3.5 * perMetre, 'Almost the whole side');
   assert.ok(worn(angled) < 0.8 * perMetre, 'At an angle only near the corner');
 });
+
+test('winter cakes the car in snow and slush on any road; it thaws after', () => {
+  const state = new BodyDirtState();
+  const surfaces = ['asphalt', 'asphalt', 'asphalt', 'asphalt'];
+  for (let t = 0; t < 30; t += 0.1) state.step(0.1, { surfaces, speed: 25, winter: 1 });
+  assert.ok(state.slush > 0.5, `slush ${state.slush}`);
+  assert.equal(state.dust, 0);
+  const summer = new BodyDirtState();
+  for (let t = 0; t < 30; t += 0.1) summer.step(0.1, { surfaces, speed: 25, winter: 0 });
+  assert.equal(summer.slush, 0);
+  for (let t = 0; t < 60; t += 0.1) state.step(0.1, { surfaces, speed: 0, winter: 0 });
+  assert.ok(state.slush < 0.1, `thawed ${state.slush}`);
+});

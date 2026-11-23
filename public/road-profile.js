@@ -278,13 +278,13 @@ function onForecourt(x, lateral) {
   );
 }
 // The surface at a world point: the carriageway and its asphalt shoulders,
-// the country road's packed dirt, the gravel strips beside the motorway and
+// the country road's asphalt, the gravel strips beside the motorway and
 // grass everywhere else.
 export function surfaceAt(x, z) {
   const lateral = roadLateral(x, z);
   if (Math.abs(lateral) < 6.15) return 'asphalt';
   const branch = branchOffset(x);
-  if (branch !== null && Math.abs(lateral - branch) < roadBranch.halfWidth) return 'dirt';
+  if (branch !== null && Math.abs(lateral - branch) < roadBranch.halfWidth) return 'asphalt';
   if (onForecourt(x, lateral)) return 'asphalt';
   if (Math.abs(lateral) < 7.7) return 'gravel';
   return 'grass';

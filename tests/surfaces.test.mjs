@@ -19,13 +19,13 @@ const place = (sim, x, lateral) => {
   sim.heading = -Math.atan(roadCenterSlope(x));
 };
 
-test('Asphalt, gravel shoulders, the dirt country road and grass', () => {
+test('Asphalt, gravel shoulders, the paved country road and grass', () => {
   const x = 2000;
   assert.equal(surfaceAt(x, roadCenterZ(x) + 3.6), 'asphalt');
   assert.equal(surfaceAt(x, roadCenterZ(x) + 7), 'gravel');
   assert.equal(surfaceAt(x, roadCenterZ(x) - 25), 'grass');
   const bx = roadBranch.start + roadBranch.diverge + 100;
-  assert.equal(surfaceAt(bx, roadCenterZ(bx) + branchOffset(bx)), 'dirt');
+  assert.equal(surfaceAt(bx, roadCenterZ(bx) + branchOffset(bx)), 'asphalt');
   // Loose and soft ground grips less and drags more; wet dirt is mud.
   assert.ok(surfaces.grass.grip < surfaces.dirt.grip && surfaces.dirt.grip < surfaces.asphalt.grip);
   assert.ok(surfaces.dirt.wetGrip < surfaces.asphalt.wetGrip);
