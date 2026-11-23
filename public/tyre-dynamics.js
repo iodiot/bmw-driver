@@ -63,7 +63,14 @@ export class TyreDynamics {
     // axle's finite friction budget, leaving less force available for cornering.
     const longitudinal = this.acceleration * this.mass;
     const frontLongitudinal = input.brake ? longitudinal * (1 - rearFraction) : 0;
-    const rearLongitudinal = input.brake ? longitudinal * rearFraction : Math.max(0, longitudinal);
+    // With DSC off a wheelspinning rear axle uses its grip on driving: all
+    // that the engine asks for, up to the whole budget, so the throttle can
+    // kick the tail out (power oversteer), as on the real rear-drive car.
+    const spin =
+      state.dscOff && throttle ? Math.min(requestedAcceleration * this.mass, mu * rearNormal) : 0;
+    const rearLongitudinal = input.brake
+      ? longitudinal * rearFraction
+      : Math.max(0, longitudinal, spin);
     let frontSupport = 0,
       rearSupport = 0,
       frontCount = 0,
@@ -113,6 +120,11 @@ export class TyreDynamics {
 
     // Approximate DSC yaw correction allows a small slide before recovering it.
     // Its moment represents selective wheel braking; it does not rotate the body directly.
+    // With DSC switched off (state.dscOff) there is none, and the throttle is
+    // not trimmed in a slide: the car can be held in a drift.
+    // (Past about 35° it still catches a slide that is turning into a spin,
+    // as a driver's instinct would, so a drift stays a drift.)
+    const dsc = state.dscOff ? 0 : 1;
     const slipCorrection = 150000 - this.wetness * (input.brake ? 95000 : 115000);
     const support = clamp((frontSupport + rearSupport) / (frontCount + rearCount), 0, 1);
     const correction =
@@ -120,7 +132,9 @@ export class TyreDynamics {
         (8000 * (yawTarget - this.yawRate) + slipCorrection * beta) * this.intervention,
         -18000,
         18000
-      ) * support;
+      ) *
+      support *
+      (state.dscOff ? 2.2 * smooth(0.6, 1.1, Math.abs(beta)) : 1);
     const lateralAcceleration = (frontForce * Math.cos(state.steer) + rearForce) / this.mass;
     this.lateralVelocity += (lateralAcceleration - speed * this.yawRate) * dt * dynamic;
     this.yawRate +=
@@ -136,7 +150,7 @@ export class TyreDynamics {
     // calibration is unaffected; DSC also trims rear-wheel drive during a slide.
     this.acceleration -=
       dynamic * Math.min(1.8, Math.abs(this.lateralVelocity) * this.tractionLoss * 0.4);
-    if (throttle) this.acceleration *= 1 - this.intervention * 0.18;
+    if (throttle) this.acceleration *= 1 - this.intervention * 0.18 * dsc;
     this.lateralAcceleration = lateralAcceleration * dynamic + speed * kinematicYaw * (1 - dynamic);
     this.slipAngle = Math.atan2(this.lateralVelocity, Math.max(speed, 0.5));
     if (speed < 0.5) {
@@ -148,7 +162,7 @@ export class TyreDynamics {
           0;
       this.frontSlip = this.rearSlip = 0;
       this.dscHold = 0;
-    } else if (this.intervention > 0.06) this.dscHold = 0.32;
+    } else if (this.intervention > 0.06 && dsc) this.dscHold = 0.32;
     this.dscHold = Math.max(0, this.dscHold - dt);
     this.dscActive = this.dscHold > 0;
     for (const wheel of state.wheels)

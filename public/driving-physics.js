@@ -65,6 +65,8 @@ export class DrivingSimulation {
       slipAngle: 0,
       tractionLoss: 0,
       dscActive: false,
+      // DSC switched off by the driver (kept through a reset).
+      dscOff: this.dscOff ?? false,
       distance: 0,
       pedalUsed: false,
       brakeEnergy: 0,
@@ -312,9 +314,11 @@ export class DrivingSimulation {
     // firmer down for a bend) until the driver touches a pedal.
     if (Number.isFinite(input.cruiseSpeed) && !this.pedalUsed)
       acceleration = clamp((input.cruiseSpeed - this.speed) * 0.5, -2.5, 1.8);
+    // With DSC off the driver has more lock at speed, to throw the car into
+    // a slide and catch it.
     const limit = Math.min(
       (25 * Math.PI) / 180,
-      Math.atan((8.5 * this.wheelbase) / (this.speed * this.speed + 1))
+      Math.atan(((this.dscOff ? 30 : 8.5) * this.wheelbase) / (this.speed * this.speed + 1))
     );
     // Keys steer to the speed-dependent lock; lane keeping may request a
     // continuous angle instead, within the same limit.

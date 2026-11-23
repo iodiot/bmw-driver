@@ -242,7 +242,9 @@ export function setupInstruments(container) {
       if (!simulation) return;
       motion.update(dt, simulation.speed, simulation.powertrain.rpm);
       warning.update(dt, driving && simulation.dscActive);
-      dsc.setAttribute('visibility', warning.visible ? 'visible' : 'hidden');
+      // Lit steadily with DSC switched off, as on the car.
+      dsc.setAttribute('visibility', warning.visible || simulation.dscOff ? 'visible' : 'hidden');
+      container.dataset.dscOff = String(Boolean(simulation.dscOff));
       container.dataset.dscActive = String(warning.active);
       container.dataset.dscVisible = String(warning.visible);
       speedNeedle.style.transform = `rotate(${gaugeAngle(motion.speed, speedometerMaximum).toFixed(2)}deg)`;

@@ -33,6 +33,7 @@ import { setupPowerLines } from './power-lines.js';
 import { setupBusStops } from './bus-stops.js';
 import { FuelTank, atPump, fuelPrice, setupFuelStation } from './fuel-station.js';
 import { setupVillage } from './village.js';
+import { DriftScore, driftRules } from './drift.js';
 import { setupToasts } from './toasts.js';
 import { setupGrassBlades } from './grass-blades.js';
 import { setupBrakes } from './brakes.js';
@@ -242,6 +243,29 @@ const powerLines = setupPowerLines(scene),
 // meter showing the litres and the cost running up meanwhile.
 let fuelTank = new FuelTank(),
   fuelDistance = 0;
+// Drift points (with DSC off, T): a meter while a drift lasts.
+const drift = new DriftScore();
+const driftMeter = document.createElement('div');
+driftMeter.className = 'drift-meter';
+driftMeter.hidden = true;
+driftMeter.innerHTML =
+  '<span class="drift-line"><small>DRIFT</small><b>0</b><em>×1</em></span>' +
+  '<span class="drift-angle"><i></i></span>';
+document.body.append(driftMeter);
+const driftPoints = driftMeter.querySelector('b'),
+  driftMultiplier = driftMeter.querySelector('em'),
+  driftAngle = driftMeter.querySelector('.drift-angle i');
+function showDrift() {
+  driftMeter.hidden = !drift.active;
+  if (!drift.active) return;
+  driftMeter.classList.toggle('fading', drift.below > 0);
+  driftPoints.textContent = drift.total.toLocaleString('uk-UA');
+  driftMultiplier.textContent = `×${drift.multiplier.toFixed(drift.multiplier % 1 ? 1 : 0)}`;
+  // The angle as a bar from the middle, to the side the tail is out.
+  const share = Math.min(1, Math.abs(drift.angle) / driftRules.scoreAngle) * 50;
+  driftAngle.style.width = `${share.toFixed(1)}%`;
+  driftAngle.style.left = drift.angle > 0 ? `${(50 - share).toFixed(1)}%` : '50%';
+}
 const refuelMeter = document.createElement('div');
 refuelMeter.className = 'refuel-meter';
 refuelMeter.hidden = true;
@@ -786,6 +810,8 @@ function restart(x = 0) {
   sim.heading = -Math.atan(roadCenterSlope(x));
   trafficView.reset(x, 0);
   runTimer.reset();
+  drift.reset();
+  showDrift();
   lastCameraX = x;
   rig.wheels.forEach((w) => {
     w.spin.rotation.z = 0;
@@ -830,6 +856,23 @@ addEventListener('keydown', (e) => {
     if (e.code === 'KeyH') highBeamAssistOn = !highBeamAssistOn;
     else if (e.code === 'KeyX') signals.toggleHazard();
     else signals.toggle(e.code === 'KeyQ' ? 'left' : 'right');
+    return;
+  }
+  // T: DSC off and on again, as the car's button (long press) does.
+  if (e.code === 'KeyT' && !e.repeat && !e.metaKey && !e.ctrlKey) {
+    e.preventDefault();
+    if (sim) {
+      sim.dscOff = !sim.dscOff;
+      document.body.dataset.dscOff = String(sim.dscOff);
+      toasts.show(
+        {
+          label: sim.dscOff ? 'DSC OFF' : 'DSC ON',
+          shown: sim.dscOff ? 'drift away' : 'stability control on',
+          tone: sim.dscOff ? 'fine' : '',
+        },
+        2.5
+      );
+    }
     return;
   }
   if (e.code === 'KeyG' && !e.metaKey && !e.ctrlKey) {
@@ -1225,6 +1268,32 @@ renderer.setAnimationLoop((time) => {
       const hit = collideWithTraffic(sim, traffic);
       if (hit && (!sim.railContact || hit.strength > sim.railContact.strength))
         sim.railContact = hit;
+      // Drift points while driving by hand.
+      const drifted = drift.update(dt, {
+        angle: (sim.slipAngle * 180) / Math.PI,
+        speed: sim.speed * 3.6,
+        manual: !autopilot && !sim.reversing,
+        crashed: Boolean(hit && hit.strength > 0.2) || (sim.railContact?.strength ?? 0) > 0.35,
+      });
+      if (drifted?.kind === 'drift')
+        toasts.show({
+          label: 'Drift',
+          shown: `${drifted.points.toLocaleString('uk-UA')} · ×${drifted.multiplier}`,
+          note: drifted.record
+            ? drifted.best
+              ? `record · was ${drifted.best.toLocaleString('uk-UA')}`
+              : 'record'
+            : `best ${drift.best.toLocaleString('uk-UA')}`,
+          tone: drifted.record ? 'record' : '',
+        });
+      else if (drifted?.kind === 'wipeout' && drifted.points >= 50)
+        toasts.show({
+          label: 'Wipeout',
+          shown: `−${drifted.points.toLocaleString('uk-UA')}`,
+          note: 'the drift is lost',
+          tone: 'fine',
+        });
+      showDrift();
       // Fuel: burnt as the car goes, filled while it stands at a pump.
       fuelTank.burn(sim.distance - fuelDistance);
       const filled = fuelTank.step(dt, atPump(sim.x, sim.z, sim.speed));
