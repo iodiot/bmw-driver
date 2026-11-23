@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { roadCenterZ, roadCenterSlope, roadHeight } from './road-profile.js';
 import { tunnelCover, bridgeShade, structureUniforms } from './road-structures.js';
-import { Traffic, rideOver, vehicleTypes } from './traffic.js';
+import { OncomingTraffic, Traffic, rideOver, vehicleTypes } from './traffic.js';
 import { roadSeed, seededRandom } from './road-seed.js';
 
 // The traffic's vehicles, drawn: each type a few instanced meshes (paint,
@@ -556,7 +556,8 @@ function shadowTexture() {
   return new THREE.CanvasTexture(c);
 }
 
-export function setupTraffic(scene, { count } = {}) {
+// `oncoming`: how many come the other way (on the route's dual carriageway).
+export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
   // The same traffic for the same road (?road=N), for repeatable pictures.
   const traffic = new Traffic({ count, random: seededRandom(roadSeed || 1, 9) });
   const materials = {
@@ -614,7 +615,10 @@ export function setupTraffic(scene, { count } = {}) {
   const group = new THREE.Group();
   group.name = 'Traffic';
   scene.add(group);
-  const capacity = (traffic.count || 16) + 2;
+  const opposite = oncoming
+    ? new OncomingTraffic({ count: oncoming, random: seededRandom(roadSeed || 1, 10) })
+    : null;
+  const capacity = (traffic.count || 16) + oncoming + 2;
   // Sun shadows: the bodies again, flattened onto the road along the sun's
   // direction (a projection set as the meshes' own matrix, after each
   // vehicle's instance matrix). Drawn translucent and dark, each pixel once:
@@ -700,6 +704,84 @@ export function setupTraffic(scene, { count } = {}) {
   shadow.renderOrder = 1;
   shadow.name = 'Traffic shadows';
   group.add(shadow);
+  // Their lamps' light on the road when they are lit (after dark and in
+  // the tunnel): a warm fan ahead of each from its headlamps and a red glow
+  // behind from its tail lamps, soft additive patches as the car's own
+  // tail-lamp glow is (see rear-glow.js), two draws for all of them.
+  const lampPool = (name, colour, opacity, draw) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 64;
+    draw(canvas.getContext('2d'), 128, 64);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const pool = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({
+        name,
+        color: colour,
+        map: texture,
+        transparent: true,
+        opacity,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -3,
+        polygonOffsetUnits: -3,
+        toneMapped: false,
+        fog: false,
+        // (The tail glow's is mirrored.)
+        side: THREE.DoubleSide,
+      }),
+      capacity
+    );
+    pool.frustumCulled = false;
+    pool.count = 0;
+    pool.renderOrder = 3;
+    pool.name = name;
+    group.add(pool);
+    return pool;
+  };
+  // Ahead: brightest a few metres in front, spreading and fading out (the
+  // texture's left edge at the bumper).
+  const headPool = lampPool(
+    'Traffic headlamp light',
+    new THREE.Color(1, 0.93, 0.8),
+    0.55,
+    (g, w, h) => {
+      const image = g.createImageData(w, h);
+      for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++) {
+          const along = x / w,
+            across = (y / h - 0.5) * 2;
+          const spread = 0.35 + 0.65 * along;
+          const a =
+            Math.exp(-(((along - 0.3) / 0.32) ** 2)) *
+            Math.exp(-((across / spread) ** 2) * 2.2) *
+            Math.min(1, along * 12) *
+            Math.min(1, (1 - along) * 4);
+          const i = (y * w + x) * 4;
+          image.data[i] = image.data[i + 1] = image.data[i + 2] = 255;
+          image.data[i + 3] = Math.round(255 * a);
+        }
+      g.putImageData(image, 0, 0);
+    }
+  );
+  const tailPool = lampPool(
+    'Traffic tail-lamp light',
+    new THREE.Color(1, 0.06, 0.03),
+    0.4,
+    (g, w, h) => {
+      const glow = g.createRadialGradient(0, h / 2, 2, 0, h / 2, w);
+      glow.addColorStop(0, 'rgba(255,255,255,1)');
+      glow.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = glow;
+      g.fillRect(0, 0, w, h);
+    }
+  );
+  const poolAt = new THREE.Vector3(),
+    poolSize = new THREE.Vector3(),
+    flatTurn = new THREE.Quaternion();
 
   const rideRange = 220;
   const matrix = new THREE.Matrix4(),
@@ -728,8 +810,10 @@ export function setupTraffic(scene, { count } = {}) {
   return {
     traffic,
     group,
+    oncoming: opposite,
     reset(x, lateral) {
       traffic.reset(x, lateral);
+      opposite?.reset(x);
     },
     // Draws the vehicles; `night` 0–1 lights their lamps, `playerCover`
     // how far the car is under the tunnel's roof (the scene is dimmed for
@@ -753,8 +837,10 @@ export function setupTraffic(scene, { count } = {}) {
         }
       }
       const counts = Object.fromEntries(Object.keys(meshes).map((t) => [t, 0]));
-      let shadows = 0;
-      for (const v of traffic.vehicles) {
+      let shadows = 0,
+        pools = 0;
+      opposite?.update(dt, x);
+      for (const v of opposite ? [...traffic.vehicles, ...opposite.vehicles] : traffic.vehicles) {
         const index = counts[v.type]++;
         const z = roadCenterZ(v.x) + v.lat;
         const heading =
@@ -812,6 +898,24 @@ export function setupTraffic(scene, { count } = {}) {
         rotation.setFromEuler(euler);
         matrix.compose(position, rotation, new THREE.Vector3(v.length + 0.7, 1, v.width + 0.6));
         shadow.setMatrixAt(shadows++, matrix);
+        // Lamps lit: their light on the road ahead and behind.
+        if (lamps > 0.5) {
+          flatTurn.setFromEuler(euler);
+          const c = Math.cos(heading),
+            s = Math.sin(heading);
+          const reach = v.lorry ? 16 : 13,
+            front = v.length / 2;
+          poolAt.set(v.x + c * (front + reach / 2), 0.02, position.z - s * (front + reach / 2));
+          poolSize.set(reach, 1, v.width + 2.6);
+          matrix.compose(poolAt, flatTurn, poolSize);
+          headPool.setMatrixAt(pools, matrix);
+          // (Behind: the texture turned to face back.)
+          poolAt.set(v.x - c * (front + 1.6), 0.02, position.z + s * (front + 1.6));
+          poolSize.set(-3.2, 1, v.width + 1.2);
+          matrix.compose(poolAt, flatTurn, poolSize);
+          tailPool.setMatrixAt(pools, matrix);
+          pools++;
+        }
       }
       for (const [type, list] of Object.entries(meshes))
         for (const { mesh, flat } of list) {
@@ -825,6 +929,8 @@ export function setupTraffic(scene, { count } = {}) {
         }
       shadow.count = shadows;
       shadow.instanceMatrix.needsUpdate = true;
+      headPool.count = tailPool.count = pools;
+      headPool.instanceMatrix.needsUpdate = tailPool.instanceMatrix.needsUpdate = true;
     },
   };
 }

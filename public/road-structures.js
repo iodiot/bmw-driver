@@ -1,7 +1,15 @@
 import * as THREE from 'three';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import { fuelStationPlace, roadBranch, roadCenterZ, roadCenterSlope } from './road-profile.js';
+import {
+  fuelStationPlace,
+  medianBarrier,
+  oncoming,
+  roadBranch,
+  roadCenterZ,
+  roadCenterSlope,
+} from './road-profile.js';
 import { roadSeed, seededRandom } from './road-seed.js';
+import { route } from './route.js';
 
 // Structures along the motorway, repeating with the country road every
 // 3 km: two farm-track overpasses, a tunnel under a wooded hill and the
@@ -34,7 +42,11 @@ function placesIn(random) {
     exitAt,
   };
 }
-const places = placesIn(roadSeed ? seededRandom(roadSeed, 3) : null);
+const drawnPlaces = placesIn(roadSeed ? seededRandom(roadSeed, 3) : null);
+// The M-06 has no tunnel: on the route its span is put before every
+// section (nothing lies there), and its meshes and signs are left out.
+export const hasTunnel = !route;
+const places = hasTunnel ? drawnPlaces : { ...drawnPlaces, from: -100, to: -100 };
 // A sign a little ahead of or behind a bridge rather than under it.
 const clearOfBridges = (at) => {
   const near = places.bridges.find((b) => Math.abs(b - at) < 40);
@@ -71,11 +83,17 @@ export const structureLayout = Object.freeze({
   // white on green for the motorway's directions, white on blue for
   // information.
   signs: Object.freeze([
-    Object.freeze({ at: clearOfBridges(places.from - 340), kind: 'tunnel' }),
-    Object.freeze({ at: clearOfBridges(places.from - 120), kind: 'limit', value: 100 }),
-    Object.freeze({ at: clearOfBridges(places.to + 100), kind: 'limit', value: 120 }),
+    ...(hasTunnel
+      ? [
+          Object.freeze({ at: clearOfBridges(places.from - 340), kind: 'tunnel' }),
+          Object.freeze({ at: clearOfBridges(places.from - 120), kind: 'limit', value: 100 }),
+          Object.freeze({ at: clearOfBridges(places.to + 100), kind: 'limit', value: 120 }),
+        ]
+      : []),
     Object.freeze({
-      at: clearOfBridges(Math.min(places.to + 190, places.exitAt - 80)),
+      at: clearOfBridges(
+        Math.min((hasTunnel ? places.to : drawnPlaces.to) + 190, places.exitAt - 80)
+      ),
       kind: 'distances',
     }),
     Object.freeze({
@@ -392,6 +410,8 @@ function arrow(g, x, y, angle, length = 70, width = 16) {
 // Kilometres to Kyiv at x metres along the road: counting down as you
 // drive, and (the road being endless) starting again from 70 km at 12.
 export function kyivDistance(x) {
+  // (On the route: the real distance left.)
+  if (route) return Math.round(route.toGo(x) / 1000);
   return 12 + Math.floor((((36 - x / 1000) % 58) + 58) % 58);
 }
 // Each sign's face: its size in metres, canvas size and how to draw it
@@ -470,8 +490,12 @@ const signFaces = {
       roundedPanel(g, 4, 4, w - 8, h - 8, 22, motorwayGreen, '#ffffff', 8);
       routeShield(g, 36, 30);
       const kyiv = Number.isFinite(at) ? kyivDistance(at) : 48;
+      const stoyanka = route?.places.find((p) => p.name === 'Стоянка');
       const rows = [
-        ['Стоянка', kyiv - 14],
+        [
+          'Стоянка',
+          stoyanka && Number.isFinite(at) ? Math.round((stoyanka.at - at) / 1000) : kyiv - 14,
+        ],
         ['Київ', kyiv],
         ['Бориспіль', kyiv + 38],
       ].filter(([, km]) => km > 0);
@@ -678,14 +702,16 @@ function buildBridge(materials) {
       position: [side * (width / 2 - 0.225), top + 0.2, 0],
     });
     // A pier at each side of the motorway: a cap beam on three columns.
+    // (On the route the left one stands in the median.)
+    const pier = side < 0 && oncoming ? medianBarrier : side * piers;
     concrete.push({
       geometry: boxInMetres(width - 1, 0.8, 1.4),
-      position: [0, clearance - 0.4, side * piers],
+      position: [0, clearance - 0.4, pier],
     });
     for (const x of [-3.2, 0, 3.2])
       concrete.push({
         geometry: new THREE.CylinderGeometry(0.45, 0.5, clearance - 0.8, 16),
-        position: [x, (clearance - 0.8) / 2, side * piers],
+        position: [x, (clearance - 0.8) / 2, pier],
       });
     // The bank seat the deck's end rests on, at the top of the slope below.
     concrete.push({
@@ -1368,8 +1394,10 @@ export function setupRoadStructures(scene, fields = {}) {
   );
   lining.name = 'Tunnel lining';
   const lampSpacing = 6;
-  const lampCount =
-    Math.ceil((structureLayout.tunnel.to - structureLayout.tunnel.from) / lampSpacing) * 2;
+  const lampCount = Math.max(
+    2,
+    Math.ceil((structureLayout.tunnel.to - structureLayout.tunnel.from) / lampSpacing) * 2
+  );
   const lamps = new THREE.InstancedMesh(
     new THREE.BoxGeometry(1.3, 0.12, 0.32),
     new THREE.MeshBasicMaterial({
@@ -1400,6 +1428,7 @@ export function setupRoadStructures(scene, fields = {}) {
   );
   cladding.name = 'Tunnel portal cladding';
   group.add(lining, lamps, hill, portals, cladding);
+  if (!hasTunnel) for (const m of [lining, lamps, hill, portals, cladding]) m.visible = false;
   let tunnelAt = NaN;
   function placeTunnel(start) {
     const { from, to } = structureLayout.tunnel;
@@ -1483,7 +1512,7 @@ export function setupRoadStructures(scene, fields = {}) {
       }
       const { from } = structureLayout.tunnel;
       const start = nearestOccurrence(x, from);
-      if (start !== tunnelAt) placeTunnel(start);
+      if (hasTunnel && start !== tunnelAt) placeTunnel(start);
       for (const s of signs) {
         const at = nearestOccurrence(x, s.spec.at);
         if (at !== s.at) {

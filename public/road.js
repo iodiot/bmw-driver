@@ -248,6 +248,11 @@ export function setupRoad(scene, { lite = false } = {}) {
         float hasBranch = step(0., branchCentre);
         float branchLat = roadLat - branchCentre;
         float branchLateral = mix(1e3, abs(branchLat), hasBranch);
+        // Beyond the median the oncoming carriageway mirrors ours (on the
+        // route; elsewhere this changes nothing).
+        float rawLat = roadLat;
+        roadLat = carriageLat(roadLat);
+        lateral = abs(roadLat);
         float pavedBranch = hasBranch * (1. - smoothstep(2.05, 2.3,
           branchLateral + .3 * (texture2D(roadWetnessMap, vRoadXZ / 3.1).r - .5)));
         float offRoad = smoothstep(6.05, 6.25, lateral) * (1. - tunnelFloor(vRoadXZ)) *
@@ -418,7 +423,7 @@ export function setupRoad(scene, { lite = false } = {}) {
         float edgePaint = 1.0 - smoothstep(0.075 - roadAAZ, 0.075 + roadAAZ, edgeDistance);
         // Where the country road leaves or joins, the right edge line is
         // broken into short dashes across its mouth.
-        float mouth = hasBranch * step(0., roadLat) * (1. - step(5.9, branchCentre - 2.2));
+        float mouth = hasBranch * step(0., rawLat) * (1. - step(5.9, branchCentre - 2.2));
         float exitDash = 1. - smoothstep(1. - roadAAX, 1. + roadAAX, abs(mod(vRoadXZ.x + 2., 4.) - 2.));
         edgePaint *= mix(1., exitDash, mouth);
 

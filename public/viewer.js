@@ -35,6 +35,9 @@ import { FuelTank, atPump, fuelPrice, setupFuelStation } from './fuel-station.js
 import { setupVillage } from './village.js';
 import { setupFoxes } from './foxes.js';
 import { collideWithSolids } from './obstacles.js';
+import { route } from './route.js';
+import { setupRouteSigns } from './route-signs.js';
+import { setupRouteCard } from './route-card.js';
 import { DriftScore, driftRules } from './drift.js';
 import { seasonUniforms, snowOnScene, stepSeason, winterDriving } from './season.js';
 import { setupToasts } from './toasts.js';
@@ -63,6 +66,7 @@ import { setupLightning } from './lightning.js';
 import { daylight, dayCycle, wrapHours } from './time-of-day.js';
 import { setupDayBar } from './day-bar.js';
 import { setupRearGlow } from './rear-glow.js';
+import { setupSignalGlow } from './signal-glow.js';
 import { setupInterior } from './interior.js';
 import { mergeStaticMeshes } from './merge-static.js';
 import { setAmbientLight } from './door-trim.js';
@@ -246,7 +250,11 @@ function applyGraphics(level) {
 }
 applyGraphics(graphics);
 // Cars, vans and lorries on the motorway (see traffic.js).
-const trafficView = setupTraffic(scene, { count: lowPower ? 10 : 16 }),
+const trafficView = setupTraffic(scene, {
+    count: lowPower ? 10 : 16,
+    // The other way, on the route's dual carriageway.
+    oncoming: route ? (lowPower ? 6 : 10) : 0,
+  }),
   traffic = trafficView.traffic;
 // Timed runs and speed cameras, announced in short notices.
 const toasts = setupToasts(document.body),
@@ -258,6 +266,10 @@ const powerLines = setupPowerLines(scene),
   village = setupVillage(scene);
 // Foxes in the winter fields.
 const foxes = setupFoxes(scene);
+// On the route, the real places' names by the road.
+const routeSignsView = route ? setupRouteSigns(scene, route) : null;
+// And how far it still is to Kyiv, at the top right.
+const routeCard = route ? setupRouteCard(document.body, route) : null;
 // The car's tank: it empties as the car drives and fills at a pump, a
 // meter showing the litres and the cost running up meanwhile.
 let fuelTank = new FuelTank(),
@@ -388,6 +400,7 @@ let rig,
   licensePlates,
   contactShadow,
   rearGlow,
+  signalGlow,
   interior,
   cockpitCluster,
   centreDisplay,
@@ -835,8 +848,47 @@ function setDriving(value) {
   $('#pause').setAttribute('aria-pressed', String(driving));
 }
 $('#pause').onclick = () => setDriving(!driving);
+// The drive from Zhytomyr to Kyiv: timed while driving; arriving shows the
+// time (and the best, kept in the browser), and past Kyiv's edge the drive
+// starts again from Zhytomyr.
+let routeTime = 0,
+  arrived = false;
+const routeBestKey = 'bmw-driver:route-m06';
+const routeClock = (seconds) => {
+  const h = Math.floor(seconds / 3600),
+    m = Math.floor((seconds % 3600) / 60),
+    sec = Math.floor(seconds % 60);
+  return `${h ? `${h}:` : ''}${String(m).padStart(h ? 2 : 1, '0')}:${String(sec).padStart(2, '0')}`;
+};
+function arriveOnRoute(dt) {
+  if (driving && !arrived) routeTime += dt;
+  if (!arrived && sim.x >= route.length) {
+    arrived = true;
+    let best = Infinity;
+    try {
+      best = Number(localStorage.getItem(routeBestKey)) || Infinity;
+      if (routeTime < best) localStorage.setItem(routeBestKey, String(routeTime));
+    } catch {
+      // Not kept.
+    }
+    toasts.show(
+      {
+        label: route.to,
+        shown: `${Math.round(route.length / 1000)} km in ${routeClock(routeTime)}${
+          routeTime < best ? ' · best' : ` · best ${routeClock(best)}`
+        }`,
+        tone: 'fine',
+      },
+      8
+    );
+  }
+  if (sim.x > route.length + 800) restart();
+}
+
 function restart(x = 0) {
   if (!sim) return;
+  routeTime = 0;
+  arrived = false;
   sim.reset();
   fuelTank = new FuelTank();
   fuelDistance = 0;
@@ -1048,6 +1100,7 @@ new GLTFLoader().load(
       contactShadow = setupContactShadow(scene, sim.layout);
       contactShadow.setNight(nightMode);
       rearGlow = setupRearGlow(scene);
+      signalGlow = setupSignalGlow(scene);
       reverseGlow = setupRearGlow(scene, {
         colour: new THREE.Color(0.95, 0.93, 0.88),
         idle: 0,
@@ -1503,11 +1556,13 @@ renderer.setAnimationLoop((time) => {
     const relay = signals.step(dt, sim.steer, { autoCancel: !autopilot });
     if (relay) vehicleAudio.tick(relay === 'on');
     signalLamps.update(signals);
-    instruments.setLamps({
+    const flashing = {
       left: signals.lit && signals.flashes('left'),
       right: signals.lit && signals.flashes('right'),
-      high: headlights.high,
-    });
+    };
+    instruments.setLamps({ ...flashing, high: headlights.high });
+    // And their amber light on the road beside the car, in the dark.
+    signalGlow.update(dt, sim, light.darkness, flashing);
     document.body.dataset.signal = signals.hazard ? 'hazard' : (signals.side ?? 'none');
     document.body.dataset.highBeam = String(headlights.high);
     for (let i = 0; i < rig.wheels.length; i++) {
@@ -1576,7 +1631,13 @@ renderer.setAnimationLoop((time) => {
     setAmbientLight(Math.max(0, (light.darkness - 0.35) / 0.4));
     // The cabin's screens are redrawn only while seen from the driver's seat.
     const inCabin = cameraView === 'driver';
-    cockpitCluster.update(dt, sim, nightMode, inCabin);
+    cockpitCluster.update(
+      dt,
+      sim,
+      nightMode,
+      inCabin,
+      route ? { to: route.to, km: route.toGo(sim.x) / 1000 } : null
+    );
     centreDisplay.update(dt, sim, {
       hours: timeOfDay,
       weather: shownWeather(),
@@ -1673,9 +1734,17 @@ renderer.setAnimationLoop((time) => {
     }
   }
   if (sim) fuelDistance = sim.distance;
-  instruments.update(dt, sim, Boolean(headlights?.lit), driving, fuelTank);
+  const nav = route && sim ? { to: route.to, km: route.toGo(sim.x) / 1000 } : null;
+  if (route && sim) arriveOnRoute(dt);
+  instruments.update(dt, sim, Boolean(headlights?.lit), driving, fuelTank, nav);
   suspensionDisplay.update(dt, sim);
-  minimap.update(dt, sim, traffic.vehicles);
+  minimap.update(
+    dt,
+    sim,
+    trafficView.oncoming
+      ? [...traffic.vehicles, ...trafficView.oncoming.vehicles]
+      : traffic.vehicles
+  );
   vehicleAudio.update(dt, sim, {
     driving,
     raining: rainLevel * (1 - cameraShelter) * (1 - winterLevel),
@@ -1733,5 +1802,7 @@ renderer.setAnimationLoop((time) => {
   fuelStation.update(sim?.x ?? 0, evening, sunDirection, sunlight);
   village.update(sim?.x ?? 0, evening, sunDirection, sunlight, winterLevel, dt);
   foxes.update(driving ? dt : 0, sim?.x ?? 0, sim?.z ?? 0, winterLevel);
+  routeSignsView?.update(sim?.x ?? 0);
+  if (sim) routeCard?.update(dt, sim.x);
   renderer.render(scene, camera);
 });

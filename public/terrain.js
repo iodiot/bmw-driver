@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { roadSeed, seededRandom } from './road-seed.js';
+import { route, routeGLSL } from './route.js';
 
 // Rolling country: the land rises and falls along the road in long, gentle
 // hills, the motorway climbing and dropping with it at up to 4–5%, as
@@ -46,6 +47,8 @@ export const hills = Object.freeze(
 const wrap = (x) => ((x % elevationPeriod) + elevationPeriod) % elevationPeriod;
 // Height of the land (m) at x along the road.
 export function roadElevation(x) {
+  // (On the route: the real land's height.)
+  if (route) return route.height(x);
   const u = wrap(x);
   let h = 0;
   for (const { amplitude, harmonic, phase } of hills)
@@ -54,6 +57,7 @@ export function roadElevation(x) {
 }
 // Its slope dh/dx: the grade along the x axis.
 export function roadGrade(x) {
+  if (route) return route.grade(x);
   const u = wrap(x);
   let g = 0;
   for (const { amplitude, harmonic, phase } of hills)
@@ -66,9 +70,16 @@ const f = (n) => Number(n).toFixed(7);
 export const terrainGLSL = `
 #ifndef TERRAIN_LIFT
 #define TERRAIN_LIFT
+${
+  route
+    ? `${routeGLSL}
 float terrainLift(float x) {
+  return routeAt(x).y;
+}`
+    : `float terrainLift(float x) {
   float u = mod(x, ${f(elevationPeriod)});
   return ${hills.map((h) => `${f(h.amplitude)} * sin(${f(k(h.harmonic))} * u + ${f(h.phase)})`).join(' + ')};
+}`
 }
 #endif
 `;
@@ -81,6 +92,40 @@ let installed = false;
 export function installTerrainLift() {
   if (installed) return;
   installed = true;
+  // On the route every material reads the land from the route's texture:
+  // three.js's own get it with their standard uniforms.
+  if (route)
+    for (const shader of Object.values(THREE.ShaderLib))
+      shader.uniforms.routeMap = { value: route.texture };
+  // Culling: three.js tests each object's bounds where they are before the
+  // lift, so on a rise or a dip a sign or a pole could be judged out of view
+  // and vanish in front of the car. The bounds are lifted as the shader
+  // lifts the vertices (and widened by the grade across a large one), except
+  // for whatever is drawn unlifted (the car, its own shader effects).
+  const lifted = new THREE.Sphere();
+  let liftNext = true;
+  const drawnUnlifted = (m) =>
+    Boolean(m) &&
+    ((m.defines && 'NO_TERRAIN_LIFT' in m.defines) ||
+      (m.isShaderMaterial && !/project_vertex|worldpos_vertex|terrainLift/.test(m.vertexShader)));
+  const frustum = THREE.Frustum.prototype,
+    intersectsObject = frustum.intersectsObject,
+    intersectsSphere = frustum.intersectsSphere;
+  frustum.intersectsObject = function (object) {
+    liftNext = ![object.material].flat().some(drawnUnlifted);
+    try {
+      return intersectsObject.call(this, object);
+    } finally {
+      liftNext = true;
+    }
+  };
+  frustum.intersectsSphere = function (sphere) {
+    if (!liftNext) return intersectsSphere.call(this, sphere);
+    lifted.center.copy(sphere.center);
+    lifted.center.y += roadElevation(sphere.center.x);
+    lifted.radius = sphere.radius * (1 + maxGrade);
+    return intersectsSphere.call(this, lifted);
+  };
   const chunks = THREE.ShaderChunk;
   chunks.common = chunks.common + '\n' + terrainGLSL;
   const projected = 'mvPosition = modelViewMatrix * mvPosition;';

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { navDistance } from './instruments.js';
 
 // The instrument cluster inside the car. The model shows it as a small,
 // blurred picture; it is replaced by a sharp display drawn here, in the
@@ -218,7 +219,7 @@ export function setupCockpitCluster(rig) {
     body.add(ring, sleeve);
   }
   let elapsed = Infinity;
-  function draw(speedKmh, rpm, gear) {
+  function draw(speedKmh, rpm, gear, nav = null) {
     ctx.drawImage(dials, 0, 0);
     drawNeedle(ctx, ...left, r, dialAngle(speedKmh, speedMax));
     drawNeedle(ctx, ...right, r, dialAngle(rpm / 1000, rpmMax));
@@ -231,6 +232,12 @@ export function setupCockpitCluster(rig) {
     ctx.font = `600 ${Math.round(r * 0.1)}px "Helvetica Neue", Arial, sans-serif`;
     ctx.fillText('M DCT', width / 2, height * 0.5 + r * 0.26);
     ctx.fillText(`${Math.round(speedKmh)}`, width / 2, height * 0.5 - r * 0.32);
+    // On the route: where it leads and how far, in the info display's blue.
+    if (nav) {
+      ctx.fillStyle = '#6fb6ff';
+      ctx.font = `600 ${Math.round(r * 0.12)}px "Helvetica Neue", Arial, sans-serif`;
+      ctx.fillText(`${nav.to} ${navDistance(nav.km)} km`, width / 2, height * 0.5 + r * 0.46);
+    }
     texture.needsUpdate = true;
   }
   draw(0, 0, 'D1');
@@ -238,7 +245,7 @@ export function setupCockpitCluster(rig) {
     mesh,
     // `visible`: seen from the driver's seat; from outside the canvas is
     // neither redrawn nor uploaded.
-    update(dt, simulation, night = false, visible = true) {
+    update(dt, simulation, night = false, visible = true, nav = null) {
       material.color.setScalar(night ? 0.62 : 0.85);
       elapsed += dt;
       if (elapsed < refresh || !simulation || !visible) return;
@@ -246,7 +253,8 @@ export function setupCockpitCluster(rig) {
       draw(
         simulation.speed * 3.6,
         simulation.powertrain.rpm,
-        simulation.gearLabel ?? `D${simulation.powertrain.gear}`
+        simulation.gearLabel ?? `D${simulation.powertrain.gear}`,
+        nav
       );
     },
   };

@@ -1,5 +1,11 @@
 import * as THREE from 'three';
-import { roadCenterZ, guardrailOffset, guardrailsAt } from './road-profile.js';
+import {
+  roadCenterZ,
+  guardrailOffset,
+  guardrailsAt,
+  oncoming,
+  oncomingCentre,
+} from './road-profile.js';
 
 // Roadside furniture. The guardrails follow the curving road on a fixed post
 // grid around the car, so posts never slide along the road. The right rail
@@ -250,6 +256,10 @@ function postGeometry() {
 // main road.
 export const railLines = Object.freeze([
   { name: 'left', side: -1, lateral: () => -guardrailOffset },
+  // On the route, the oncoming carriageway's outer rail, facing it.
+  ...(oncoming
+    ? [{ name: 'oncoming', side: -1, lateral: () => oncomingCentre - guardrailOffset }]
+    : []),
   {
     name: 'right',
     side: 1,

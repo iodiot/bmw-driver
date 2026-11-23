@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Kit } from './build-kit.js';
-import { roadCenterZ, roadCenterSlope } from './road-profile.js';
+import { oncoming, roadCenterZ, roadCenterSlope } from './road-profile.js';
 import { structureLayout } from './road-structures.js';
 
 // Foxes in the winter fields: red foxes trotting about on their own errands,
@@ -16,10 +16,16 @@ export const foxRules = Object.freeze({
   // Where they roam: lateral bands either side of the road (clear of the
   // motorway, the country road and the village), and how far ahead of the
   // car one turns up.
-  bands: Object.freeze([Object.freeze([-45, -10]), Object.freeze([10, 30])]),
+  // (On the route the left band lies beyond the oncoming carriageway.)
+  bands: Object.freeze([
+    Object.freeze(oncoming ? [-60, -26] : [-45, -10]),
+    Object.freeze([10, 30]),
+  ]),
   // Never nearer the road's centre line than this (the guardrails and the
   // gravel strips end within 8 m), nor nearer the country road.
   verge: 8.5,
+  // Nor on the oncoming carriageway, on the route.
+  oncoming: oncoming ? [-24, -6] : null,
   countryRoad: 34,
   ahead: Object.freeze([70, 260]),
   behind: 160,
@@ -244,6 +250,10 @@ export function setupFoxes(scene) {
         fox.x += Math.cos(fox.heading) * speed * dt;
         fox.lat -= Math.sin(fox.heading) * speed * dt;
         // It turns back at the verge (and short of the country road).
+        if (foxRules.oncoming && fox.lat > foxRules.oncoming[0] && fox.lat < foxRules.oncoming[1]) {
+          fox.lat = foxRules.oncoming[0];
+          fox.heading = -fox.heading;
+        }
         const sideOf = Math.sign(fox.lat) || -1;
         if (Math.abs(fox.lat) < foxRules.verge || (sideOf > 0 && fox.lat > foxRules.countryRoad)) {
           fox.lat =

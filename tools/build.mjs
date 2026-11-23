@@ -92,6 +92,26 @@ html = html.replace(
 </body>`
 );
 await writeFile(new URL('index.html', output), html);
+// The drive from Zhytomyr to Kyiv on its own link, to send to friends:
+// the same page one folder down (route.js picks the route from the path),
+// its files found through <base>, with its own title and link preview.
+const routeTitle = 'BMW M5 F10 · Житомир → Київ';
+const routeAbout =
+  '116,8 км трасою М-06: справжні повороти, висоти й села, а скільки до Києва — на приладовій панелі.';
+const routeHtml = html
+  .replace('<meta charset="utf-8" />', '<meta charset="utf-8" />\n    <base href="../" />')
+  .replace(
+    /<title>[^<]*<\/title>/,
+    `<title>${routeTitle}</title>
+    <meta name="description" content="${routeAbout}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="${routeTitle}" />
+    <meta property="og:description" content="${routeAbout}" />
+    <meta name="twitter:card" content="summary" />`
+  );
+if (!routeHtml.includes('<base href="../" />')) throw new Error('No <head> to put <base> in');
+await mkdir(new URL('kyiv/', output), { recursive: true });
+await writeFile(new URL('kyiv/index.html', output), routeHtml);
 await writeFile(
   new URL('build.json', output),
   JSON.stringify({

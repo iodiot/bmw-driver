@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { routeUniforms } from './route.js';
 import { terrainGLSL } from './terrain.js';
 
 // Dust thrown up by the rear wheels off the asphalt: soft billows that stay
@@ -31,7 +32,7 @@ export function dustRate(surface, speed, wetness = 0) {
 // alpha per particle, a colour each, dimmed by `light` at night. Shared by
 // wheel dust and tyre smoke.
 export function puffMaterial() {
-  const uniforms = { pixelScale: { value: 800 }, light: { value: 1 } };
+  const uniforms = { ...routeUniforms, pixelScale: { value: 800 }, light: { value: 1 } };
   const material = new THREE.ShaderMaterial({
     uniforms,
     transparent: true,

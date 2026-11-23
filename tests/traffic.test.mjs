@@ -189,3 +189,31 @@ test('a pothole under one side rolls the car toward it', () => {
   }
   assert.ok(roll < -0.003, `roll ${roll}`);
 });
+
+test('oncoming traffic comes the other way in its own lanes and keeps its gaps', async () => {
+  const { OncomingTraffic, oncomingLayout } = await import('../public/traffic.js');
+  const lanes = [-11, -14.6, -18.2];
+  const traffic = new OncomingTraffic({ count: 10, random: seeded(7), lanes });
+  traffic.reset(0);
+  assert.equal(traffic.vehicles.length, 10);
+  let x = 0;
+  for (let t = 0; t < 120; t += 0.05) {
+    x += 30 * 0.05;
+    const before = traffic.vehicles.map((v) => [v.id, v.x]);
+    traffic.update(0.05, x);
+    for (const [id, was] of before) {
+      const v = traffic.vehicles.find((o) => o.id === id);
+      if (v) assert.ok(v.x < was, 'drives toward −x');
+    }
+    for (const v of traffic.vehicles) {
+      assert.ok(lanes.includes(v.lat));
+      assert.equal(v.yaw, Math.PI);
+      for (const o of traffic.vehicles)
+        if (o !== v && o.lane === v.lane)
+          assert.ok(Math.abs(o.x - v.x) > (o.length + v.length) / 2, 'no overlap in a lane');
+    }
+  }
+  // Still round the car after two minutes, the passed ones turned up ahead.
+  assert.ok(traffic.vehicles.length >= 8);
+  assert.ok(traffic.vehicles.every((v) => v.x > x - oncomingLayout.behind));
+});

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { routeUniforms } from './route.js';
 import { roadProfileGLSL } from './road-profile.js';
 
 function rainGeometry(count) {
@@ -22,6 +23,7 @@ export function setupRain(scene) {
   const unlitPattern = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
   unlitPattern.needsUpdate = true;
   const uniforms = {
+    ...routeUniforms,
     rainTime: { value: 0 },
     // 0…1: snow instead of rain (winter); `wind` drives it sideways in a
     // blizzard.

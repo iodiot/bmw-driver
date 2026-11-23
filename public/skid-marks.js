@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { routeUniforms } from './route.js';
 import { roadHeight, roadProfileGLSL } from './road-profile.js';
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
@@ -35,6 +36,7 @@ export function setupSkidMarks(scene, layout, capacity = 8192) {
   }
   geometry.instanceCount = 0;
   const uniforms = {
+    ...routeUniforms,
     markClock: { value: 0 },
     wetRoad: { value: 0 },
     vehicleXZ: { value: new THREE.Vector2() },

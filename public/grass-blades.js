@@ -100,7 +100,7 @@ export function setupGrassBlades(scene, { grassMap, noiseMap }) {
         root.y = roadCenterZ(root.x) + roadLat;
         float branch = branchOffset(root.x);
         float trackLat = branch < 0. ? 1e3 : abs(roadLat - branch);
-        float grows = smoothstep(${f(clearRoad[0])}, ${f(clearRoad[1])}, abs(roadLat)) *
+        float grows = smoothstep(${f(clearRoad[0])}, ${f(clearRoad[1])}, abs(carriageLat(roadLat))) *
           smoothstep(${f(clearTrack[0])}, ${f(clearTrack[1])}, trackLat);
         float away = length(root - cameraPosition.xz);
         grows *= 1. - smoothstep(${f(radius * 0.55)}, ${f(radius)}, away);

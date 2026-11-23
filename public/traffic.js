@@ -1,5 +1,5 @@
 import { roadGrade } from './terrain.js';
-import { roadLanes, roadCenterZ, roadCenterSlope } from './road-profile.js';
+import { oncomingLanes, roadLanes, roadCenterZ, roadCenterSlope } from './road-profile.js';
 import { bumpSpeed } from './lane-keeping.js';
 import { structureLayout, nearestOccurrence } from './road-structures.js';
 
@@ -468,6 +468,100 @@ export function rideOver(v, dt, heightAt) {
       ride[key] += ride[rate] * h;
     }
   return ride;
+}
+
+// The oncoming carriageway's traffic, on the route: vehicles coming the
+// other way in its three lanes, lorries mostly in the outer (slow) one,
+// each at its own pace and easing back behind a slower one ahead rather
+// than changing lanes. Those that have passed the car turn up again far
+// ahead of it, out of sight.
+export const oncomingLayout = Object.freeze({
+  // Where a vehicle turns up (ahead of the car) and how far behind it goes.
+  ahead: Object.freeze([500, 950]),
+  behind: 250,
+  // The gap a faster one keeps behind a slower one in its lane.
+  gap: 35,
+});
+export class OncomingTraffic {
+  // `lanes`: the oncoming lanes' centres, fast lane first.
+  constructor({ count = 10, random = Math.random, lanes = oncomingLanes } = {}) {
+    this.count = count;
+    this.random = random;
+    this.lanes = lanes;
+    this.vehicles = [];
+    this.serial = 100000;
+  }
+  reset(x = 0) {
+    this.vehicles = [];
+    for (let tries = 0; this.vehicles.length < this.count && tries < 200; tries++)
+      this.place(x - oncomingLayout.behind + this.random() * 1150);
+  }
+  place(at) {
+    const type = pick(
+      Object.entries(vehicleTypes).map(([name, t]) => [name, t.weight]),
+      this.random
+    );
+    const spec = vehicleTypes[type];
+    const index =
+      spec.lorry && this.random() < 0.8
+        ? 2
+        : spec.lanes[Math.floor(this.random() * spec.lanes.length)];
+    const lat = this.lanes[index];
+    const clear = this.vehicles.every(
+      (o) =>
+        o.lane !== index || Math.abs(o.x - at) > (o.length + spec.length) / 2 + oncomingLayout.gap
+    );
+    if (!clear) return null;
+    const [low, high] = spec.speed;
+    const desired = low + (high - low) * this.random();
+    const vehicle = {
+      id: this.serial++,
+      type,
+      lorry: spec.lorry,
+      length: spec.length,
+      width: spec.width,
+      x: at,
+      lat,
+      lane: index,
+      speed: desired,
+      desired,
+      accel: 0,
+      latSpeed: 0,
+      // Turned round: it drives toward −x.
+      yaw: Math.PI,
+      crash: null,
+      change: null,
+      signal: 0,
+      clock: this.random() * 0.7,
+      oncoming: true,
+      colour: spec.lorry
+        ? pick(cabPaints, this.random)
+        : pick(type === 'van' ? vanPaints : paints, this.random),
+      trailer: spec.lorry ? pick(trailerPaints, this.random) : null,
+    };
+    this.vehicles.push(vehicle);
+    return vehicle;
+  }
+  // Moves them along by dt with the car at x.
+  update(dt, x) {
+    for (const v of this.vehicles) {
+      // The one ahead of it in its lane (at smaller x).
+      let ahead = null;
+      for (const o of this.vehicles)
+        if (o !== v && o.lane === v.lane && o.x < v.x && (!ahead || o.x > ahead.x)) ahead = o;
+      const gap = ahead ? v.x - ahead.x - (v.length + ahead.length) / 2 : Infinity;
+      const target = gap < oncomingLayout.gap ? Math.min(v.desired, ahead.speed) : v.desired;
+      const before = v.speed;
+      v.speed += Math.max(-4, Math.min(1.2, target - v.speed)) * dt;
+      v.accel = dt > 0 ? (v.speed - before) / dt : 0;
+      v.x -= v.speed * dt;
+    }
+    // Those well behind the car come again far ahead of it.
+    const [low, high] = oncomingLayout.ahead;
+    this.vehicles = this.vehicles.filter((v) => v.x > x - oncomingLayout.behind);
+    for (let tries = 0; this.vehicles.length < this.count && tries < 6; tries++)
+      this.place(x + low + this.random() * (high - low));
+  }
 }
 
 export const playerBox = Object.freeze({ halfLength: 2.45, halfWidth: 0.95 });

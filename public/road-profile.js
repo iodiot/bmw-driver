@@ -1,5 +1,6 @@
 import { roadSeed, seededRandom } from './road-seed.js';
 import { roadGrade, terrainGLSL } from './terrain.js';
+import { route } from './route.js';
 // Shared road geometry for the visible asphalt, roadside, physics and effects.
 //
 // The road follows a curving centre line z = roadCenterZ(x). All road
@@ -45,9 +46,12 @@ const curveTerms = roadCurve.map(({ amplitude, wavelength }) => ({
 }));
 // Each term is a(1 - cos kx): the road starts straight and centred at x = 0.
 export function roadCenterZ(x) {
+  // (On the route: the real road's bends.)
+  if (route) return route.centreZ(x);
   return curveTerms.reduce((z, { a, k }) => z + a * (1 - Math.cos(k * x)), 0);
 }
 export function roadCenterSlope(x) {
+  if (route) return route.centreSlope(x);
   return curveTerms.reduce((s, { a, k }) => s + a * k * Math.sin(k * x), 0);
 }
 export function roadLateral(x, z) {
@@ -62,6 +66,22 @@ export const roadEdge = 5.4;
 export const guardrailOffset = 7.3;
 export const guardrailFace = guardrailOffset - 0.045;
 export const railFaceGap = guardrailOffset - guardrailFace;
+// On the route the motorway is a dual carriageway, as the M-06 is: beyond
+// the left guardrail, now the median barrier, the oncoming carriageway is
+// our own's mirror image (three lanes, its edge lines, shoulders and gravel,
+// and an outer guardrail), centred `oncomingCentre` from ours.
+export const oncoming = Boolean(route);
+export const medianBarrier = -guardrailOffset;
+export const oncomingCentre = 2 * medianBarrier;
+// A lateral offset as the carriageway it lies on sees it: beyond the
+// median, mirrored onto ours.
+export function carriageLateral(lateral) {
+  return oncoming && lateral < medianBarrier ? oncomingCentre - lateral : lateral;
+}
+// The oncoming lanes' centres (their slow lane farthest out).
+export const oncomingLanes = Object.freeze(
+  oncoming ? roadLanes.map((lane) => oncomingCentre - lane) : []
+);
 
 // A country road branching off. Every `period` metres it leaves the right
 // lane, swings out to run `separation` metres from the road centre behind a
@@ -108,6 +128,8 @@ export function nextBranch(x) {
 // opens where the country road leaves and rejoins.
 export function guardrailsAt(x) {
   const rails = [{ lateral: -guardrailOffset, traffic: 0 }];
+  // (And the oncoming carriageway's outer one.)
+  if (oncoming) rails.push({ lateral: oncomingCentre - guardrailOffset, traffic: 0 });
   const branch = branchOffset(x);
   if (branch === null || branch - roadBranch.halfWidth > roadBranch.railFrom)
     rails.push({ lateral: guardrailOffset, traffic: 0 });
@@ -191,7 +213,9 @@ function drawnObstacles(random) {
   }
   return list.sort((a, b) => a.x - b.x);
 }
-export const obstacles = roadSeed ? drawnObstacles(seededRandom(roadSeed, 2)) : originalObstacles;
+const anyObstacles = roadSeed ? drawnObstacles(seededRandom(roadSeed, 2)) : originalObstacles;
+// The M-06 has no speed bumps: on the route only the potholes are left.
+export const obstacles = route ? anyObstacles.filter((o) => o.h < 0) : anyObstacles;
 // The original straight test track: centre-lane bumps and holes only, two
 // 3.3 m speed bumps, no curves and no guardrails. Vehicle tests use it to
 // check the car itself, independent of the road layout.
@@ -281,12 +305,13 @@ function onForecourt(x, lateral) {
 // the country road's asphalt, the gravel strips beside the motorway and
 // grass everywhere else.
 export function surfaceAt(x, z) {
-  const lateral = roadLateral(x, z);
-  if (Math.abs(lateral) < 6.15) return 'asphalt';
+  const lateral = roadLateral(x, z),
+    carriage = Math.abs(carriageLateral(lateral));
+  if (carriage < 6.15) return 'asphalt';
   const branch = branchOffset(x);
   if (branch !== null && Math.abs(lateral - branch) < roadBranch.halfWidth) return 'asphalt';
   if (onForecourt(x, lateral)) return 'asphalt';
-  if (Math.abs(lateral) < 7.7) return 'gravel';
+  if (carriage < 7.7) return 'gravel';
   return 'grass';
 }
 // Bumps off the asphalt: smooth undulations a couple of centimetres high and
@@ -336,7 +361,11 @@ const f = (n) => Number(n).toFixed(6);
 export const roadProfileGLSL = `
 ${terrainGLSL}
 float roadCenterZ(float x) {
-  return ${curveTerms.map(({ a, k }) => `${f(a)} * (1. - cos(${f(k)} * x))`).join(' + ')};
+  return ${route ? 'routeAt(x).x' : curveTerms.map(({ a, k }) => `${f(a)} * (1. - cos(${f(k)} * x))`).join(' + ')};
+}
+// A lateral offset as its carriageway sees it (see carriageLateral).
+float carriageLat(float lateral) {
+  return ${oncoming ? `lateral < ${f(medianBarrier)} ? ${f(oncomingCentre)} - lateral : lateral` : 'lateral'};
 }
 // Branch centre offset from the road centre; negative where there is none.
 float branchOffset(float x) {

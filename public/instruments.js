@@ -61,6 +61,11 @@ function arc(cx, cy, radius, start, end) {
 // dial, on a semi-transparent panel over the scene.
 export const speedometerMaximum = 330;
 export const speedometerLabels = Array.from({ length: 12 }, (_, i) => i * 30);
+// Kilometres to go as shown: whole ones, tenths for the last ten.
+export function navDistance(km) {
+  return km >= 10 ? String(Math.round(km)) : km.toFixed(1);
+}
+
 // Simplified fuel model for the range display: an 80 L tank
 // starting at three quarters, about 14 L/100 km when driven hard.
 export function fuelState(distanceMetres) {
@@ -180,6 +185,7 @@ export function setupInstruments(container) {
         <path d="M16,0 H23 V14 H16Z" fill="#e54b53"/>
       </g>
       <text x="464" y="187" class="m-mark">M</text>
+      <text id="nav" x="465" y="214" class="info-text" visibility="hidden"></text>
       <text id="gear" x="310" y="214" class="gear-display">D1</text>
       <text x="310" y="234" class="transmission-label">M DCT</text>
       <g id="low-beam-indicator" transform="translate(318 120) scale(-1 1)" class="low-beam-indicator" visibility="hidden">
@@ -214,6 +220,7 @@ export function setupInstruments(container) {
     speedNeedle = $('#speed-needle'),
     rpmNeedle = $('#rpm-needle'),
     rangeText = $('#range'),
+    navText = $('#nav'),
     gearText = $('#gear'),
     lowBeamLamp = $('#low-beam-indicator'),
     highBeams = $('#high-beam-indicator'),
@@ -238,7 +245,8 @@ export function setupInstruments(container) {
     },
     // `lowBeams`: the headlamps are lit (at dusk, at night and in the tunnel).
     // `fuel`: the tank (see fuel-station.js), for the range.
-    update(dt, simulation, lowBeams, driving = true, fuel = null) {
+    // `nav`: where the road leads and how far ({ to, km }), on the route.
+    update(dt, simulation, lowBeams, driving = true, fuel = null, nav = null) {
       if (!simulation) return;
       motion.update(dt, simulation.speed, simulation.powertrain.rpm);
       warning.update(dt, driving && simulation.dscActive);
@@ -256,6 +264,8 @@ export function setupInstruments(container) {
         const gear = simulation.gearLabel ?? `D${simulation.powertrain.gear}`;
         gearText.textContent = gear;
         rangeText.textContent = `${Math.round(range)} km`;
+        navText.setAttribute('visibility', nav ? 'visible' : 'hidden');
+        if (nav) navText.textContent = `${nav.to} ${navDistance(nav.km)} km`;
         lowBeamLamp.setAttribute('visibility', lowBeams ? 'visible' : 'hidden');
         svg.setAttribute(
           'aria-label',

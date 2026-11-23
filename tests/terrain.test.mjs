@@ -48,6 +48,37 @@ test('Standard shaders are lifted by the land, the car is not', () => {
   assert.ok('NO_TERRAIN_LIFT' in body.customDepthMaterial.defines);
 });
 
+test('Culling sees things where the land lifts them, the car where it is', () => {
+  installTerrainLift();
+  // A frustum looking along +x from 10 m above the land at x = 0, its view
+  // 2 m tall at 20 m: a sign on the land there is in view only if lifted.
+  const camera = new THREE.PerspectiveCamera(6, 1, 0.1, 100);
+  const x = 20,
+    ground = roadElevation(x);
+  camera.position.set(0, ground + 1, 0);
+  camera.lookAt(x, ground + 1, 0);
+  camera.updateMatrixWorld();
+  const frustum = new THREE.Frustum().setFromProjectionMatrix(
+    new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+  );
+  const sign = new THREE.Mesh(
+    new THREE.BoxGeometry(0.2, 0.2, 0.2),
+    new THREE.MeshStandardMaterial()
+  );
+  sign.position.set(x, 1, 0);
+  sign.updateMatrixWorld();
+  if (Math.abs(ground) > 2) assert.ok(frustum.intersectsObject(sign), 'the lifted sign is in view');
+  // The car is placed at its height already: tested where it is.
+  const car = new THREE.Mesh(
+    new THREE.BoxGeometry(0.2, 0.2, 0.2),
+    new THREE.MeshStandardMaterial()
+  );
+  keepUnlifted(car);
+  car.position.set(x, ground + 1, 0);
+  car.updateMatrixWorld();
+  assert.ok(frustum.intersectsObject(car), 'the car is in view');
+});
+
 test('A climb slows a coasting car, a descent speeds it up', () => {
   const coast = (grade) => {
     const sim = new DrivingSimulation(undefined, {

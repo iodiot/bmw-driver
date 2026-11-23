@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { roadCenterZ, roadCenterSlope } from './road-profile.js';
+import { oncoming, roadCenterZ, roadCenterSlope } from './road-profile.js';
 import { structureLayout } from './road-structures.js';
 import { shadowMaterial, shadowOpacity, sunProjection } from './sun-shadows.js';
 
@@ -10,7 +10,8 @@ import { shadowMaterial, shadowOpacity, sunProjection } from './sun-shadows.js';
 // each overpass and the tunnel's cutting (and comes back after), ending at
 // a pole each time.
 export const powerLineLayout = Object.freeze({
-  lateral: -22,
+  // (Beyond the oncoming carriageway on the route.)
+  lateral: oncoming ? -34 : -22,
   spacing: 62,
   // Pole height above ground, the crossarm's height and half its length.
   height: 9.2,

@@ -8,9 +8,12 @@ import {
   branchOffset,
   fuelStationPlace,
   roadBranch,
+  oncoming,
+  oncomingCentre,
 } from './road-profile.js';
 import { structureLayout, nearestOccurrence } from './road-structures.js';
 import { elevationPeriod, roadElevation, roadGrade } from './terrain.js';
+import { route } from './route.js';
 
 // Road-ahead schematic in the top left corner, like a navigation display.
 // Up is the road's direction at the car; the road ahead is drawn with its
@@ -267,6 +270,18 @@ export function setupMinimap(container) {
       track();
       // The motorway: a dark casing, the light see-through asphalt, its
       // edge lines and the lane dashes, fixed to the road so they run.
+      // (On the route the oncoming carriageway beside it, a little dimmer,
+      // past the median.)
+      if (oncoming) {
+        band(
+          oncomingCentre - roadEdge - 1.4,
+          oncomingCentre + roadEdge + 1.4,
+          'rgba(6,10,16,0.45)'
+        );
+        band(oncomingCentre - roadEdge, oncomingCentre + roadEdge, 'rgba(206,216,226,0.28)');
+        strip(oncomingCentre - roadEdge + 0.3, 0.35, 'rgba(255,255,255,0.6)');
+        strip(oncomingCentre + roadEdge - 0.3, 0.35, 'rgba(255,255,255,0.6)');
+      }
       band(-roadEdge - 1.4, roadEdge + 1.4, 'rgba(6,10,16,0.5)');
       band(-roadEdge, roadEdge, 'rgba(226,234,242,0.42)');
       strip(-roadEdge + 0.3, 0.35, 'rgba(255,255,255,0.85)');
@@ -283,12 +298,12 @@ export function setupMinimap(container) {
           ctx.lineCap = 'butt';
           ctx.stroke();
         }
-      // A bar across the road at x, `half` metres either side, `metres` deep.
-      const across = (x, half, metres, fill, outline) => {
-        const [ax, ay] = P(x - metres / 2, -half),
-          [bx, by] = P(x - metres / 2, half),
-          [cx2, cy2] = P(x + metres / 2, half),
-          [dx, dy] = P(x + metres / 2, -half);
+      // A bar across the road at x from lateral `a` to `b`, `metres` deep.
+      const bar = (x, a, b, metres, fill, outline) => {
+        const [ax, ay] = P(x - metres / 2, a),
+          [bx, by] = P(x - metres / 2, b),
+          [cx2, cy2] = P(x + metres / 2, b),
+          [dx, dy] = P(x + metres / 2, a);
         ctx.beginPath();
         ctx.moveTo(ax, ay);
         ctx.lineTo(bx, by);
@@ -303,13 +318,26 @@ export function setupMinimap(container) {
           ctx.stroke();
         }
       };
-      // Speed bumps across the road.
+      // The same, `half` metres either side of the centre line.
+      const across = (x, half, metres, fill, outline) => bar(x, -half, half, metres, fill, outline);
+      // Speed bumps across the road: a thin strip striped yellow and black,
+      // as they are painted.
       const first = Math.floor(from / roadPeriod) * roadPeriod;
       for (let base = first; base < to; base += roadPeriod)
         for (const o of obstacles) {
           const x = base + o.x;
-          if (o.w < 5 || x < from || x > to) continue;
-          across(x, roadEdge, 3, 'rgba(255,196,60,0.95)');
+          if (o.w < 5 || o.h < 0 || x < from || x > to) continue;
+          const stripes = 8;
+          for (let i = 0; i < stripes; i++) {
+            const a = -roadEdge + ((2 * roadEdge) / stripes) * i;
+            bar(
+              x,
+              a,
+              a + (2 * roadEdge) / stripes,
+              1.6,
+              i % 2 ? 'rgba(20,22,26,0.95)' : 'rgba(255,206,64,0.98)'
+            );
+          }
         }
       // The tunnel: the road under the hill, dark, its portals marked.
       const { tunnel, bridges, period } = structureLayout;
@@ -323,13 +351,20 @@ export function setupMinimap(container) {
         for (const x of [base, base + (tunnel.to - tunnel.from)])
           if (x >= from && x <= to) across(x, roadEdge + 3.5, 6, 'rgba(214,202,178,0.95)');
       }
-      // Bridges: a deck across the road.
+      // Bridges: an overpass over the road (both carriageways on the route),
+      // its shadow on the asphalt, a concrete deck and a railing along each
+      // edge.
       const decks = [];
+      const bridgeFrom = oncoming ? oncomingCentre - roadEdge - 4 : -roadEdge - 4,
+        bridgeTo = roadEdge + 4;
       for (const u of bridges)
         for (let x = nearestOccurrence(from, u) - period; x < to; x += period) {
           if (x < from || x > to) continue;
           decks.push(x);
-          across(x, roadEdge + 9, 10, 'rgba(236,240,244,0.92)', 'rgba(10,14,18,0.6)');
+          bar(x - 2, bridgeFrom, bridgeTo, 12, 'rgba(0,0,0,0.28)');
+          bar(x, bridgeFrom, bridgeTo, 9, 'rgba(146,156,168,0.82)');
+          for (const edge of [-4.4, 4.4])
+            bar(x + edge, bridgeFrom, bridgeTo, 0.7, 'rgba(242,246,250,0.95)');
         }
       // The fuel station beside the country road: a green pump sign.
       const station = nearestOccurrence(simulation.x, fuelStationPlace.at);
@@ -357,9 +392,22 @@ export function setupMinimap(container) {
           [, cy2] = P(v.x + v.length / 2, v.lat);
         const wide = Math.max(1.6, bx - ax),
           tall = Math.max(1.6, ay - cy2);
-        ctx.fillStyle = v.lorry ? 'rgba(255,196,96,0.95)' : 'rgba(22,30,42,0.88)';
-        roundRect(ax, cy2, wide, tall, Math.min(1.5, wide / 3));
-        ctx.fill();
+        if (v.lorry) {
+          // A lorry: a long light trailer and a dark cab at its front (the
+          // end toward its way).
+          ctx.fillStyle = 'rgba(214,224,234,0.95)';
+          roundRect(ax, cy2, wide, tall, Math.min(1.2, wide / 4));
+          ctx.fill();
+          const cab = Math.max(1.4, tall * 0.2),
+            ahead = !v.oncoming;
+          ctx.fillStyle = 'rgba(28,40,56,0.95)';
+          roundRect(ax, ahead ? cy2 : cy2 + tall - cab, wide, cab, Math.min(1.2, wide / 4));
+          ctx.fill();
+        } else {
+          ctx.fillStyle = 'rgba(22,30,42,0.88)';
+          roundRect(ax, cy2, wide, tall, Math.min(1.5, wide / 3));
+          ctx.fill();
+        }
       }
       // The car at its place in the lane, tilted by its angle to the road,
       // glowing blue.
@@ -461,12 +509,24 @@ export function setupMinimap(container) {
         pw = w - 16,
         py = 40,
         ph = infoH - py - 6;
-      const [low, high] = landRange;
+      // (On the route the land is not the same every section: scaled to the
+      // stretch shown, at least 14 m tall.)
+      let [low, high] = landRange;
+      if (route) {
+        low = Infinity;
+        high = -Infinity;
+        for (let x = from; x <= to; x += 40) {
+          const h = roadElevation(x);
+          low = Math.min(low, h);
+          high = Math.max(high, h);
+        }
+        const middle = (low + high) / 2,
+          half = Math.max(7, (high - low) / 2 + 1);
+        low = middle - half;
+        high = middle + half;
+      }
       const along = (x) => px + ((x - from) / (to - from)) * pw;
       const up = (x) => py + ph - ((roadElevation(x) - low) / (high - low)) * ph;
-      // Tunnels as dark spans and bridges as ticks on it.
-      ctx.fillStyle = 'rgba(10,14,20,0.6)';
-      for (const [a, b] of tunnels) ctx.fillRect(along(a), py, along(b) - along(a), ph);
       ctx.beginPath();
       ctx.moveTo(px, py + ph);
       for (let x = from; x <= to; x += 20) ctx.lineTo(along(x), up(x));
@@ -483,6 +543,39 @@ export function setupMinimap(container) {
       ctx.lineWidth = 1.4;
       ctx.strokeStyle = 'rgba(200,236,180,0.9)';
       ctx.stroke();
+      // A tunnel: its hill over the road, the road dashed through it and its
+      // name when there is room.
+      for (const [a, b] of tunnels) {
+        const xa = along(a),
+          xb = along(b),
+          top = Math.max(py + 2, Math.min(up(a), up(b)) - 10);
+        ctx.beginPath();
+        ctx.moveTo(xa - 4, up(a));
+        ctx.bezierCurveTo(xa + (xb - xa) * 0.2, top, xb - (xb - xa) * 0.2, top, xb + 4, up(b));
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(52,78,48,0.9)';
+        ctx.fill();
+        ctx.setLineDash([3, 2]);
+        ctx.beginPath();
+        for (let x = a; x <= b; x += 20)
+          x === a ? ctx.moveTo(along(x), up(x)) : ctx.lineTo(along(x), up(x));
+        ctx.strokeStyle = 'rgba(236,240,244,0.8)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        for (const x of [a, b]) {
+          ctx.beginPath();
+          ctx.arc(along(x), up(x), 2.2, Math.PI, 0);
+          ctx.fillStyle = 'rgba(8,10,14,0.9)';
+          ctx.fill();
+        }
+        if (xb - xa > 34) {
+          ctx.font = font(700, 7);
+          ctx.textAlign = 'center';
+          ctx.fillStyle = 'rgba(230,238,244,0.85)';
+          ctx.fillText('TUNNEL', (xa + xb) / 2, top + 7);
+        }
+      }
       ctx.strokeStyle = 'rgba(240,244,248,0.85)';
       ctx.lineWidth = 1.5;
       for (const x of decks) {
