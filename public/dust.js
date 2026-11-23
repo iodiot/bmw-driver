@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { terrainGLSL } from './terrain.js';
 
 // Dust thrown up by the rear wheels off the asphalt: soft billows that stay
 // behind the car, grow, rise a little and thin out. Dry dirt raises the most,
@@ -43,8 +44,12 @@ export function puffMaterial() {
       varying float vAlpha;
       varying vec3 vColor;
       varying float vSeed;
+      ${terrainGLSL}
       void main() {
-        vec4 view = modelViewMatrix * vec4(position, 1.);
+        // Heights are above the land; lifted by it here (see terrain.js).
+        vec4 world = modelMatrix * vec4(position, 1.);
+        world.y += terrainLift(world.x);
+        vec4 view = viewMatrix * world;
         gl_Position = projectionMatrix * view;
         gl_PointSize = size * pixelScale / max(-view.z, .1);
         vAlpha = alpha;

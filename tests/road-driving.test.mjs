@@ -17,7 +17,16 @@ import {
 } from '../public/road-profile.js';
 import { laneKeepingSteer, nearestLane, curveSpeed } from '../public/lane-keeping.js';
 import { sparkRate, sparkColour } from '../public/sparks.js';
-import { nextCurve, nextSpeedBump, toMinimap } from '../public/minimap.js';
+import {
+  altitudeAt,
+  baseAltitude,
+  gradeLabel,
+  drawnLateral,
+  nextCurve,
+  nextSpeedBump,
+  toMinimap,
+} from '../public/minimap.js';
+import { roadElevation } from '../public/terrain.js';
 
 test('The road opens with a bend, then winds through varied bends', () => {
   assert.equal(roadCenterZ(0), 0);
@@ -140,6 +149,20 @@ test('The minimap shows the road ahead, the next curve and the next speed bump',
   assert.ok(curve && curve.distance > 0 && ['left', 'right'].includes(curve.direction));
   assert.equal(nextSpeedBump(0), 36);
   assert.equal(nextSpeedBump(40), 50);
+  // True on the road; the country road comes closer.
+  assert.equal(drawnLateral(3.6), 3.6);
+  assert.ok(drawnLateral(42) < 30 && drawnLateral(-42) === -drawnLateral(42));
+  // Perspective: the road narrows with distance.
+  const near = toMinimap(sim, sim.x, roadCenterZ(sim.x) + 5, 120, 140)[0] - cx,
+    far =
+      toMinimap(sim, sim.x + 800, roadCenterZ(sim.x + 800) + 5, 120, 140)[0] -
+      toMinimap(sim, sim.x + 800, roadCenterZ(sim.x + 800), 120, 140)[0];
+  assert.ok(far < near / 5);
+  // Height above sea level and the grade as shown.
+  assert.equal(altitudeAt(300), baseAltitude + roadElevation(300));
+  assert.equal(gradeLabel(0.002).text, 'level');
+  assert.deepEqual([gradeLabel(0.031).arrow, gradeLabel(0.031).text], ['↗', '3.1%']);
+  assert.equal(gradeLabel(-0.04).arrow, '↘');
 });
 
 test('The branch road splits from the right lane, runs beside the road and merges back', () => {

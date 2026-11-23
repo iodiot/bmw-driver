@@ -1,3 +1,4 @@
+import { roadGrade } from './terrain.js';
 import { roadLanes, roadCenterZ, roadCenterSlope } from './road-profile.js';
 import { bumpSpeed } from './lane-keeping.js';
 import { structureLayout, nearestOccurrence } from './road-structures.js';
@@ -21,6 +22,49 @@ export const vehicleTypes = Object.freeze({
   van: { length: 5.93, width: 2.0, speed: [25, 30], lanes: [1, 2], weight: 2, lorry: false },
   lorry: { length: 16.5, width: 2.55, speed: [21.5, 24.5], lanes: [1, 2], weight: 3, lorry: true },
 });
+// Roof heights (m), for the shadows they cast.
+export const vehicleHeights = Object.freeze({
+  hatch: 1.48,
+  sedan: 1.47,
+  suv: 1.72,
+  van: 2.45,
+  lorry: 3.95,
+});
+
+// How much of a set of points (x, y, z) lies in the traffic's sun shadow,
+// 0 to 1: a point is shaded when, following the way to the sun from it (its
+// horizontal part over its height is `shift`, x and z), the line passes
+// through a vehicle's body. Bodies are boxes on the road at their place,
+// along the road's direction there.
+export function trafficShade(vehicles, points, shift) {
+  if (!points.length) return 0;
+  let shaded = 0;
+  for (const [px, py, pz] of points) {
+    let hit = false;
+    for (const v of vehicles) {
+      if (hit) break;
+      const top = vehicleHeights[v.type] ?? 1.5;
+      if (top <= py || Math.abs(v.x - px) > v.length / 2 + (top - py) * Math.abs(shift.x) + 1)
+        continue;
+      const heading = -Math.atan(roadCenterSlope(v.x)) + (v.yaw ?? 0),
+        c = Math.cos(heading),
+        s = Math.sin(heading),
+        cz = roadCenterZ(v.x) + v.lat;
+      // Up the way to the sun, from the point's height to the roof.
+      for (let i = 0; i <= 6 && !hit; i++) {
+        const t = ((top - py) * i) / 6;
+        const dx = px + shift.x * t - v.x,
+          dz = pz + shift.y * t - cz;
+        const along = dx * c - dz * s,
+          across = dx * s + dz * c;
+        hit = Math.abs(along) <= v.length / 2 && Math.abs(across) <= v.width / 2;
+      }
+    }
+    if (hit) shaded++;
+  }
+  return shaded / points.length;
+}
+
 // Intelligent driver model: comfortable acceleration and braking (m/s²),
 // time gap (s) and standstill gap (m).
 const drivers = {
@@ -215,7 +259,11 @@ export class Traffic {
         if (other && (!leader || other.gap < leader.gap)) leader = other;
       }
       const desired = this.limitAt(v);
-      v.accel = Traffic.acceleration(v.speed, desired, leader, v.lorry);
+      // Hills: a laden lorry slows on a climb and runs on downhill; cars
+      // mostly make up for them.
+      v.accel =
+        Traffic.acceleration(v.speed, desired, leader, v.lorry) -
+        9.81 * roadGrade(v.x) * (v.lorry ? 0.75 : 0.2);
       // Hit by the car: thrown off line, it brakes to a stop with its
       // hazard lights on, waits, then drives on.
       if (v.crash) {

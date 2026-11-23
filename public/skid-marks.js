@@ -73,7 +73,7 @@ export function setupSkidMarks(scene, layout, capacity = 8192) {
         vec2 sideways = vec2(-direction.y, direction.x);
         vec2 p = mix(markStart, markEnd, uv.y) + sideways * (uv.x - .5) * markWidth;
         float localHeight = roadHeight(p) * (1. - smoothstep(45., 60., length(p - vehicleXZ)));
-        vec3 worldPosition = vec3(p.x, localHeight - .002, p.y);
+        vec3 worldPosition = vec3(p.x, localHeight - .002 + terrainLift(p.x), p.y);
         gl_Position = projectionMatrix * viewMatrix * vec4(worldPosition, 1.);
         vSurface = p;
       }

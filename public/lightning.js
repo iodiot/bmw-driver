@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { roadElevation } from './terrain.js';
 
 // Lightning in a thunderstorm. Strikes come every few seconds at random,
 // from a few hundred metres to a few kilometres away. Each lights the sky
@@ -189,7 +190,7 @@ export function setupLightning(scene, { random = Math.random, onThunder = () => 
       // The cloud base about 900 m up (at most 27° above the horizon).
       const height = Math.min(50, (900 * reach) / distance),
         core = Math.max(0.16, (2.5 * reach) / distance);
-      foot = (-camera.position.y * reach) / distance;
+      foot = ((roadElevation(camera.position.x) - camera.position.y) * reach) / distance;
       for (const m of [coreMesh, glowMesh]) m.geometry.dispose();
       coreMesh.geometry = boltGeometry(runs, height, core);
       glowMesh.geometry = boltGeometry(runs, height, core * 9);

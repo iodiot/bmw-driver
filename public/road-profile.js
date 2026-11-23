@@ -1,4 +1,5 @@
 import { roadSeed, seededRandom } from './road-seed.js';
+import { roadGrade, terrainGLSL } from './terrain.js';
 // Shared road geometry for the visible asphalt, roadside, physics and effects.
 //
 // The road follows a curving centre line z = roadCenterZ(x). All road
@@ -289,6 +290,8 @@ export const road = Object.freeze({
   height: roadSurfaceHeight,
   guardrails: guardrailsEnabled,
   surfaceAt,
+  // The hills' grade along x (see terrain.js).
+  grade: roadGrade,
 });
 // The road with its guardrails regardless of the switch, for rail tests.
 export const guardedRoad = Object.freeze({
@@ -308,6 +311,7 @@ export function guardrailSlope(x, lateral, h = 0.5) {
 }
 const f = (n) => Number(n).toFixed(6);
 export const roadProfileGLSL = `
+${terrainGLSL}
 float roadCenterZ(float x) {
   return ${curveTerms.map(({ a, k }) => `${f(a)} * (1. - cos(${f(k)} * x))`).join(' + ')};
 }

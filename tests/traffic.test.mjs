@@ -140,3 +140,21 @@ test('A horn moves the car ahead over to the right, or hurries it', async () => 
   assert.equal(traffic.honk(0, roadLanes[1] + 0), ahead);
   assert.equal(traffic.honk(-200, roadLanes[1]), null, 'Too far to hear');
 });
+
+test("A lorry's shadow falls on the car beside it, not on one in front", async () => {
+  const { trafficShade, vehicleTypes } = await import('../public/traffic.js');
+  const { roadCenterZ } = await import('../public/road-profile.js');
+  const x = 5000;
+  const lorry = { type: 'lorry', x, lat: 0, yaw: 0, ...vehicleTypes.lorry };
+  // The sun low in the -z direction: shadows fall toward +z.
+  const shift = { x: 0, y: -1.2 };
+  const beside = [[x, 1.05, roadCenterZ(x) + 3.6]],
+    ahead = [[x + 30, 1.05, roadCenterZ(x + 30) + 3.6]],
+    sunnySide = [[x, 1.05, roadCenterZ(x) - 3.6]];
+  assert.equal(trafficShade([lorry], beside, shift), 1);
+  assert.equal(trafficShade([lorry], ahead, shift), 0);
+  assert.equal(trafficShade([lorry], sunnySide, shift), 0);
+  // A low hatchback casts no shadow up to a lorry's windows.
+  const hatch = { type: 'hatch', x, lat: 0, yaw: 0, ...vehicleTypes.hatch };
+  assert.equal(trafficShade([hatch], [[x, 1.6, roadCenterZ(x) + 2.5]], shift), 0);
+});

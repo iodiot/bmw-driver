@@ -92,8 +92,10 @@ export function setupRain(scene) {
                          fract(rainSeed.y - rainTime * fallSpeed / 16.) * 16.,
                          cameraPosition.z + offset.y);
         vec3 velocity = vec3(.7, -fallSpeed, .22) - cameraVelocity;
-        vec4 head = viewMatrix * vec4(drop, 1.);
-        vec4 tail = viewMatrix * vec4(drop - velocity * .020, 1.);
+        // Heights above the land, drawn lifted by it (see terrain.js).
+        vec3 dropWorld = drop + vec3(0., terrainLift(drop.x), 0.);
+        vec4 head = viewMatrix * vec4(dropWorld, 1.);
+        vec4 tail = viewMatrix * vec4(dropWorld - velocity * .020, 1.);
         vec2 axis = normalize(tail.xy - head.xy + vec2(.00001));
         vec2 sideways = vec2(axis.y, -axis.x);
         vec4 viewPosition = mix(head, tail, uv.y);
@@ -105,10 +107,10 @@ export function setupRain(scene) {
         roof += bodyLean.x + bodyLean.y * local.x - bodyLean.z * local.y;
         float sheltered = abs(local.x) < 2.45 && abs(local.y) < .9 && drop.y < roof ? 1. : 0.;
         vVisibility = (1. - smoothstep(18., 24., length(offset))) *
-                      smoothstep(.8, 1.8, distance(drop, cameraPosition)) *
+                      smoothstep(.8, 1.8, distance(dropWorld, cameraPosition)) *
                       smoothstep(0., .15, drop.y - roadHeight(drop.xz)) *
                       (1. - smoothstep(14., 16., drop.y)) * (1. - sheltered);
-        vBeam = headlightVisibility(drop);
+        vBeam = headlightVisibility(dropWorld);
         vUv = uv;
       }
     `,
@@ -153,7 +155,7 @@ export function setupRain(scene) {
         vec2 offset = mod(hit - cameraPosition.xz + 18., 36.) - 18.;
         vec2 centre = cameraPosition.xz + offset;
         vec2 horizontal = centre + vec2(position.x, -position.y) * (.06 + age * .36);
-        vec3 worldPosition = vec3(horizontal.x, roadHeight(horizontal) + .008, horizontal.y);
+        vec3 worldPosition = vec3(horizontal.x, roadHeight(horizontal) + .008 + terrainLift(horizontal.x), horizontal.y);
         gl_Position = projectionMatrix * viewMatrix * vec4(worldPosition, 1.);
         vec2 local = localToCar(centre);
         float sheltered = abs(local.x) < 2.5 && abs(local.y) < 1. ? 1. : 0.;

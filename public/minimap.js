@@ -6,33 +6,70 @@ import {
   roadPeriod,
   obstacles,
   branchOffset,
-  guardrailsEnabled,
 } from './road-profile.js';
-import { railLines } from './roadside.js';
 import { structureLayout, nearestOccurrence } from './road-structures.js';
+import { elevationPeriod, roadElevation, roadGrade } from './terrain.js';
 
 // Road-ahead schematic in the top left corner, like a navigation display.
 // Up is the road's direction at the car; the road ahead is drawn with its
 // sideways deviation from that direction magnified, so gentle curves and the
-// car's place in its lane read at a glance. Below: the next curve and speed
-// bump, with distances.
+// car's place in its lane read at a glance, with the next curve's distance.
+// Below it: the height above sea level and the grade, and the land's profile
+// from a little behind the car to the end of the map.
+// Seen in perspective, as a navigation display shows it: from above and
+// behind the car, the road narrowing toward the horizon. Its curves are
+// bent `curveGain` times the road's real deviation, so they read from afar;
+// things far beside the road come in closer (`sideGain`).
 export const minimapView = Object.freeze({
   ahead: 1500,
-  behind: 120,
-  forwardMetresPerPixel: 14,
-  lateralMetresPerPixel: 1.25,
+  behind: 40,
+  // The eye: this far behind the car (m), and how high over the land the
+  // horizon and the car sit on the map (shares of its height).
+  eyeBack: 70,
+  horizon: 0.1,
+  carAt: 0.8,
+  // The asphalt's width at the car, as a share of the map's width.
+  roadShare: 0.16,
+  curveGain: 3,
+  sideGain: 0.45,
 });
+// Perspective projection: a point `forward` metres ahead and `lateral`
+// metres to the side to map pixels, with its scale (pixels per metre).
+export function project(forward, lateral, width, height) {
+  const { eyeBack, horizon, carAt, roadShare } = minimapView;
+  const depth = Math.max(1, forward + eyeBack);
+  const focal = (roadShare * width * eyeBack) / (2 * roadEdge);
+  const lift = ((carAt - horizon) * height * eyeBack) / focal;
+  return [
+    width / 2 + (focal * lateral) / depth,
+    horizon * height + (focal * lift) / depth,
+    focal / depth,
+  ];
+}
+// A lateral offset from the road's centre as drawn: true on the road,
+// closer beyond it.
+export function drawnLateral(lateral) {
+  const a = Math.abs(lateral);
+  return (
+    Math.sign(lateral) *
+    (a <= roadEdge + 2 ? a : roadEdge + 2 + (a - roadEdge - 2) * minimapView.sideGain)
+  );
+}
+// The road's centre at x, its sideways deviation from the car's heading
+// along the road (magnified), in metres.
+function centreDeviation(simulation, x) {
+  const forward = x - simulation.x,
+    tangent = roadCenterZ(simulation.x) + roadCenterSlope(simulation.x) * forward;
+  return (roadCenterZ(x) - tangent) * minimapView.curveGain;
+}
 // Curvature (1/m) above which a stretch counts as a curve: radius < 3 km.
 const curveThreshold = 1 / 3000;
 
-// World point to schematic pixels.
+// World point to map pixels.
 export function toMinimap(simulation, x, z, width, height) {
-  const forward = x - simulation.x,
-    tangent = roadCenterZ(simulation.x) + roadCenterSlope(simulation.x) * forward;
-  return [
-    width / 2 + (z - tangent) / minimapView.lateralMetresPerPixel,
-    height * 0.8 - forward / minimapView.forwardMetresPerPixel,
-  ];
+  const lateral = centreDeviation(simulation, x) + drawnLateral(z - roadCenterZ(x));
+  const [px, py] = project(x - simulation.x, lateral, width, height);
+  return [px, py];
 }
 
 function roadHeadingAt(x) {
@@ -63,6 +100,35 @@ export function nextSpeedBump(x) {
   return best;
 }
 
+// Height above sea level (m): the forest-steppe south-west of Kyiv lies
+// some 170 m up, and the hills rise and fall about it.
+export const baseAltitude = 170;
+export const altitudeAt = (x) => baseAltitude + roadElevation(x);
+// The land's lowest and highest over a section, so the profile's scale
+// stays put as the car drives.
+const landRange = (() => {
+  let low = Infinity,
+    high = -Infinity;
+  for (let x = 0; x < elevationPeriod; x += 10) {
+    const h = roadElevation(x);
+    low = Math.min(low, h);
+    high = Math.max(high, h);
+  }
+  return [low - 1, high + 1];
+})();
+
+// The grade as shown: an arrow up or down, or level, and a colour.
+export function gradeLabel(grade) {
+  const percent = Math.abs(grade) * 100;
+  if (percent < 0.5) return { arrow: '→', text: 'level', colour: '#dfe8ee' };
+  return grade > 0
+    ? { arrow: '↗', text: `${percent.toFixed(1)}%`, colour: '#ffc56b' }
+    : { arrow: '↘', text: `${percent.toFixed(1)}%`, colour: '#7fd7ff' };
+}
+
+const font = (weight, size) =>
+  `${weight} ${size}px -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif`;
+
 export function setupMinimap(container) {
   const canvas = document.createElement('canvas');
   container.appendChild(canvas);
@@ -78,6 +144,10 @@ export function setupMinimap(container) {
   }
   resize();
   addEventListener('resize', resize);
+  const roundRect = (x, y, w, h, r) => {
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, r);
+  };
   return {
     reset() {
       trail.length = 0;
@@ -96,155 +166,304 @@ export function setupMinimap(container) {
       elapsed = 1 / 20;
       const w = container.clientWidth,
         h = container.clientHeight,
-        { ahead, behind, lateralMetresPerPixel } = minimapView;
-      const at = (x, z) => toMinimap(simulation, x, z, w, h);
+        { ahead, behind } = minimapView;
+      // A full panel has the land's profile under the map; a small one (a
+      // phone's) one line of figures.
+      const full = h >= 190;
+      const infoH = full ? 78 : 18,
+        mapH = h - infoH;
       ctx.clearRect(0, 0, w, h);
+      // The figures and the profile on top, the map under them.
+      ctx.save();
+      ctx.translate(0, infoH);
+      ctx.beginPath();
+      ctx.rect(0, 0, w, mapH);
+      ctx.clip();
       const from = simulation.x - behind,
         to = simulation.x + ahead;
-      // A line at a lateral offset: a constant, or a function of x that is
-      // null where the line is absent (the branch and its rails).
-      const line = (offset, width, colour, dash = []) => {
+      // A point `lateral` metres (as drawn) off the road's centre at x.
+      const P = (x, lateral) =>
+        project(x - simulation.x, centreDeviation(simulation, x) + lateral, w, mapH);
+      // Samples along the road: close together near the car, farther apart
+      // far off.
+      const samples = [];
+      for (let x = from; x <= to; x += 3 + 0.03 * Math.max(0, x - simulation.x)) samples.push(x);
+      samples.push(to);
+      // A band along the road between two lateral offsets (as drawn).
+      const band = (a, b, colour, start = from, end = to) => {
+        const xs = samples.filter((x) => x >= start && x <= end);
+        if (xs.length < 2) return;
         ctx.beginPath();
-        let drawing = false;
-        for (let x = from; x <= to; x += 15) {
+        xs.forEach((x, i) => {
+          const [px, py] = P(x, a);
+          if (i) ctx.lineTo(px, py);
+          else ctx.moveTo(px, py);
+        });
+        for (let i = xs.length - 1; i >= 0; i--) {
+          const [px, py] = P(xs[i], b);
+          ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fillStyle = colour;
+        ctx.fill();
+      };
+      // A line along the road at a lateral offset (or a function of x, null
+      // where absent), its width in metres so it narrows with distance.
+      const strip = (offset, metres, colour, minimum = 0.6) => {
+        let previous = null;
+        for (const x of samples) {
           const lateral = typeof offset === 'function' ? offset(x) : offset;
           if (lateral === null) {
-            drawing = false;
+            previous = null;
             continue;
           }
-          const [px, py] = at(x, roadCenterZ(x) + lateral);
-          if (drawing) ctx.lineTo(px, py);
-          else ctx.moveTo(px, py);
-          drawing = true;
+          const point = P(x, drawnLateral(lateral));
+          if (previous) {
+            ctx.beginPath();
+            ctx.moveTo(previous[0], previous[1]);
+            ctx.lineTo(point[0], point[1]);
+            ctx.lineWidth = Math.max(minimum, metres * point[2]);
+            ctx.strokeStyle = colour;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+          }
+          previous = point;
         }
-        ctx.lineWidth = width;
-        ctx.strokeStyle = colour;
-        ctx.setLineDash(dash);
-        ctx.stroke();
-        ctx.setLineDash([]);
       };
-      line(0, (2 * roadEdge) / lateralMetresPerPixel, 'rgba(205,215,225,0.32)');
-      for (const lane of roadLanes.slice(0, -1))
-        line(lane + 1.8, 0.8, 'rgba(255,255,255,0.45)', [3, 4]);
+      // The fields: stripes across every 50 m, fixed to the land, so they
+      // run toward the car as it drives.
+      for (let x = Math.ceil(from / 50) * 50; x <= to; x += 50) {
+        const [, py, scale] = P(x, 0);
+        ctx.fillStyle = `rgba(190,220,170,${Math.min(0.16, scale * 0.05)})`;
+        ctx.fillRect(0, py, w, Math.max(0.6, scale * 4));
+      }
       // The country road: an unpaved track.
-      line(branchOffset, 3 / lateralMetresPerPixel, 'rgba(196,160,104,0.5)');
-      if (guardrailsEnabled)
-        for (const rail of railLines) line(rail.lateral, 1.2, 'rgba(190,205,215,0.8)');
+      strip(branchOffset, 2.6, 'rgba(220,184,124,0.6)', 0.7);
+      // The motorway: a dark casing, the light see-through asphalt, its
+      // edge lines and the lane dashes, fixed to the road so they run.
+      band(-roadEdge - 1.4, roadEdge + 1.4, 'rgba(6,10,16,0.5)');
+      band(-roadEdge, roadEdge, 'rgba(226,234,242,0.42)');
+      strip(-roadEdge + 0.3, 0.35, 'rgba(255,255,255,0.85)');
+      strip(roadEdge - 0.3, 0.35, 'rgba(255,255,255,0.85)');
+      for (let x = Math.ceil(from / 12) * 12; x < to; x += 12)
+        for (const lane of roadLanes.slice(0, -1)) {
+          const [ax, ay, scale] = P(x, lane + 1.8),
+            [bx, by] = P(x + 6, lane + 1.8);
+          ctx.beginPath();
+          ctx.moveTo(ax, ay);
+          ctx.lineTo(bx, by);
+          ctx.lineWidth = Math.max(0.5, 0.25 * scale);
+          ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+          ctx.lineCap = 'butt';
+          ctx.stroke();
+        }
+      // A bar across the road at x, `half` metres either side, `metres` deep.
+      const across = (x, half, metres, fill, outline) => {
+        const [ax, ay] = P(x - metres / 2, -half),
+          [bx, by] = P(x - metres / 2, half),
+          [cx2, cy2] = P(x + metres / 2, half),
+          [dx, dy] = P(x + metres / 2, -half);
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.lineTo(cx2, cy2);
+        ctx.lineTo(dx, dy);
+        ctx.closePath();
+        ctx.fillStyle = fill;
+        ctx.fill();
+        if (outline) {
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = outline;
+          ctx.stroke();
+        }
+      };
       // Speed bumps across the road.
       const first = Math.floor(from / roadPeriod) * roadPeriod;
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = 'rgba(255,200,70,0.95)';
       for (let base = first; base < to; base += roadPeriod)
         for (const o of obstacles) {
           const x = base + o.x;
           if (o.w < 5 || x < from || x > to) continue;
-          const z = roadCenterZ(x);
-          const [ax, ay] = at(x, z - roadEdge),
-            [bx, by] = at(x, z + roadEdge);
-          ctx.beginPath();
-          ctx.moveTo(ax, ay);
-          ctx.lineTo(bx, by);
-          ctx.stroke();
+          across(x, roadEdge, 3, 'rgba(255,196,60,0.95)');
         }
-      // Tunnels: the road under the hill as a dark roofed stretch, its
-      // portals marked.
-      const { tunnel, bridges, bridge, period } = structureLayout;
+      // The tunnel: the road under the hill, dark, its portals marked.
+      const { tunnel, bridges, period } = structureLayout;
+      const tunnels = [];
       for (let base = nearestOccurrence(from, tunnel.from) - period; base < to; base += period) {
         const a = Math.max(from, base),
           b = Math.min(to, base + (tunnel.to - tunnel.from));
         if (b <= a) continue;
-        const roof = (x) => (x >= a && x <= b ? 0 : null);
-        line(roof, (2 * tunnel.halfWidth + 3) / lateralMetresPerPixel, 'rgba(18,22,28,0.82)');
-        line(roof, (2 * roadEdge) / lateralMetresPerPixel, 'rgba(120,128,140,0.35)');
-        for (const x of [base, base + (tunnel.to - tunnel.from)]) {
-          if (x < from || x > to) continue;
-          const z = roadCenterZ(x);
-          const [ax, ay] = at(x, z - tunnel.halfWidth - 3),
-            [bx, by] = at(x, z + tunnel.halfWidth + 3);
-          ctx.beginPath();
-          ctx.moveTo(ax, ay);
-          ctx.lineTo(bx, by);
-          ctx.lineWidth = 2.5;
-          ctx.strokeStyle = 'rgba(200,190,170,0.95)';
-          ctx.stroke();
-        }
+        tunnels.push([a, b]);
+        band(-roadEdge - 2.5, roadEdge + 2.5, 'rgba(8,11,16,0.82)', a, b);
+        for (const x of [base, base + (tunnel.to - tunnel.from)])
+          if (x >= from && x <= to) across(x, roadEdge + 3.5, 6, 'rgba(214,202,178,0.95)');
       }
-      // Bridges: a deck across the road, from embankment to embankment.
+      // Bridges: a deck across the road.
+      const decks = [];
       for (const u of bridges)
         for (let x = nearestOccurrence(from, u) - period; x < to; x += period) {
           if (x < from || x > to) continue;
-          const z = roadCenterZ(x);
-          const [ax, ay] = at(x, z - bridge.halfSpan),
-            [bx, by] = at(x, z + bridge.halfSpan);
-          ctx.beginPath();
-          ctx.moveTo(ax, ay);
-          ctx.lineTo(bx, by);
-          ctx.lineCap = 'round';
-          ctx.lineWidth = 5;
-          ctx.strokeStyle = 'rgba(10,14,18,0.6)';
-          ctx.stroke();
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = 'rgba(226,230,234,0.95)';
-          ctx.stroke();
-          ctx.lineCap = 'butt';
+          decks.push(x);
+          across(x, roadEdge + 9, 10, 'rgba(236,240,244,0.92)', 'rgba(10,14,18,0.6)');
         }
-      // The traffic, each vehicle a small block in its lane.
+      // The traffic, each vehicle a block of its size in its lane.
       for (const v of vehicles) {
         if (v.x < from || v.x > to) continue;
-        const [vx, vy] = at(v.x, roadCenterZ(v.x) + v.lat);
-        const tall = Math.max(3, v.length / minimapView.forwardMetresPerPixel + 2),
-          wide = Math.max(2.5, v.width / lateralMetresPerPixel - 0.4);
-        ctx.fillStyle = v.lorry ? 'rgba(255,214,140,0.95)' : 'rgba(236,240,244,0.9)';
-        ctx.fillRect(vx - wide / 2, vy - tall / 2, wide, tall);
+        const half = v.width / 2;
+        const [ax, ay] = P(v.x - v.length / 2, v.lat - half),
+          [bx] = P(v.x - v.length / 2, v.lat + half),
+          [, cy2] = P(v.x + v.length / 2, v.lat);
+        const wide = Math.max(1.6, bx - ax),
+          tall = Math.max(1.6, ay - cy2);
+        ctx.fillStyle = v.lorry ? 'rgba(255,196,96,0.95)' : 'rgba(22,30,42,0.88)';
+        roundRect(ax, cy2, wide, tall, Math.min(1.5, wide / 3));
+        ctx.fill();
       }
-      // Recent path.
-      if (trail.length > 1) {
-        ctx.beginPath();
-        trail.forEach(([x, z], i) => {
-          const [px, py] = at(x, z);
-          if (i) ctx.lineTo(px, py);
-          else ctx.moveTo(px, py);
-        });
-        ctx.lineWidth = 1.5;
-        ctx.strokeStyle = 'rgba(120,190,255,0.75)';
-        ctx.stroke();
-      }
-      // The car at its place in the lane, tilted by its angle to the road.
-      const [cx, cy] = at(simulation.x, simulation.z);
+      // The car at its place in the lane, tilted by its angle to the road,
+      // glowing blue.
+      const [cx, cy, carScale] = P(
+        simulation.x,
+        drawnLateral(simulation.z - roadCenterZ(simulation.x))
+      );
       const tilt = Math.max(
         -0.8,
-        Math.min(0.8, -(simulation.heading - roadHeadingAt(simulation.x)) * 6)
+        Math.min(0.8, -(simulation.heading - roadHeadingAt(simulation.x)) * 3)
       );
+      const size = Math.max(0.8, Math.min(1.4, carScale / 2.2));
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(tilt);
+      ctx.scale(size, size);
+      ctx.beginPath();
+      ctx.arc(0, 0, 10, 0, Math.PI * 2);
+      const halo = ctx.createRadialGradient(0, 0, 1, 0, 0, 10);
+      halo.addColorStop(0, 'rgba(90,170,255,0.6)');
+      halo.addColorStop(1, 'rgba(90,170,255,0)');
+      ctx.fillStyle = halo;
+      ctx.fill();
       ctx.beginPath();
       ctx.moveTo(0, -7);
-      ctx.lineTo(4.5, 5);
-      ctx.lineTo(0, 2.5);
-      ctx.lineTo(-4.5, 5);
+      ctx.lineTo(4.6, 5);
+      ctx.lineTo(0, 2.6);
+      ctx.lineTo(-4.6, 5);
       ctx.closePath();
       ctx.fillStyle = '#ffffff';
-      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(30,110,220,0.95)';
+      ctx.lineWidth = 1.4;
       ctx.fill();
       ctx.stroke();
       ctx.restore();
-      // The upcoming curve.
-      const curve = nextCurve(simulation.x);
-      ctx.font = '600 10px "Helvetica Neue", Arial, sans-serif';
+      // The distance fades out at the top.
+      const fade = ctx.createLinearGradient(0, 0, 0, mapH * 0.3);
+      fade.addColorStop(0, 'rgba(0,0,0,1)');
+      fade.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.fillStyle = fade;
+      ctx.fillRect(0, 0, w, mapH * 0.3);
+      ctx.globalCompositeOperation = 'source-over';
+      // The upcoming curve, in a small label at the map's foot (left out
+      // on a phone's small map).
+      const curve = full ? nextCurve(simulation.x) : null;
+      const curveText = curve
+        ? `${curve.direction === 'left' ? '↰' : '↱'} ${Math.round(curve.distance)} m`
+        : '↑ straight';
+      if (full) {
+        ctx.font = font(650, 10);
+        const chipW = ctx.measureText(curveText).width + 12;
+        roundRect(6, mapH - 22, chipW, 16, 7);
+        ctx.fillStyle = 'rgba(8,12,18,0.72)';
+        ctx.fill();
+        ctx.fillStyle = '#eaf2f7';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(curveText, 12, mapH - 14);
+      }
+      ctx.restore();
+      // Above the map: the height and grade, and the land's profile.
+      const altitude = Math.round(altitudeAt(simulation.x));
+      const grade = gradeLabel(roadGrade(simulation.x) * Math.cos(simulation.heading));
+      ctx.fillStyle = 'rgba(255,255,255,0.1)';
+      ctx.fillRect(0, infoH - 1, w, 1);
+      if (!full) {
+        ctx.font = font(650, 9.5);
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#eef4f8';
+        ctx.fillText(`${altitude} m`, 6, 9.5);
+        ctx.textAlign = 'right';
+        ctx.fillStyle = grade.colour;
+        ctx.fillText(grade.arrow, w - 6, 9.5);
+        return;
+      }
       ctx.textBaseline = 'alphabetic';
-      ctx.fillStyle = 'rgba(8,12,16,0.55)';
-      ctx.fillRect(0, h - 18, w, 18);
-      ctx.fillStyle = '#eaf2f7';
       ctx.textAlign = 'left';
-      ctx.fillText(
-        curve
-          ? `${curve.direction === 'left' ? '↰' : '↱'} ${Math.round(curve.distance)} m`
-          : '↑ straight',
-        7,
-        h - 6
-      );
+      ctx.font = font(600, 8);
+      ctx.fillStyle = 'rgba(220,232,240,0.55)';
+      ctx.fillText('ALTITUDE', 10, 14);
+      ctx.textAlign = 'right';
+      ctx.fillText('GRADE', w - 10, 14);
+      ctx.textAlign = 'left';
+      ctx.font = font(700, 17);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(String(altitude), 10, 33);
+      const numberW = ctx.measureText(String(altitude)).width;
+      ctx.font = font(600, 10);
+      ctx.fillStyle = 'rgba(230,238,244,0.75)';
+      ctx.fillText('m', 12 + numberW, 33);
+      ctx.textAlign = 'right';
+      ctx.font = font(700, 13);
+      ctx.fillStyle = grade.colour;
+      ctx.fillText(`${grade.arrow} ${grade.text}`, w - 10, 32);
+      // The profile: from `behind` metres back to the end of the map.
+      const px = 8,
+        pw = w - 16,
+        py = 40,
+        ph = infoH - py - 6;
+      const [low, high] = landRange;
+      const along = (x) => px + ((x - from) / (to - from)) * pw;
+      const up = (x) => py + ph - ((roadElevation(x) - low) / (high - low)) * ph;
+      // Tunnels as dark spans and bridges as ticks on it.
+      ctx.fillStyle = 'rgba(10,14,20,0.6)';
+      for (const [a, b] of tunnels) ctx.fillRect(along(a), py, along(b) - along(a), ph);
+      ctx.beginPath();
+      ctx.moveTo(px, py + ph);
+      for (let x = from; x <= to; x += 20) ctx.lineTo(along(x), up(x));
+      ctx.lineTo(px + pw, py + ph);
+      ctx.closePath();
+      const land = ctx.createLinearGradient(0, py, 0, py + ph);
+      land.addColorStop(0, 'rgba(140,196,120,0.55)');
+      land.addColorStop(1, 'rgba(70,96,62,0.1)');
+      ctx.fillStyle = land;
+      ctx.fill();
+      ctx.beginPath();
+      for (let x = from; x <= to; x += 20)
+        x === from ? ctx.moveTo(along(x), up(x)) : ctx.lineTo(along(x), up(x));
+      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = 'rgba(200,236,180,0.9)';
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(240,244,248,0.85)';
+      ctx.lineWidth = 1.5;
+      for (const x of decks) {
+        ctx.beginPath();
+        ctx.moveTo(along(x), up(x) - 5);
+        ctx.lineTo(along(x), up(x) - 1);
+        ctx.stroke();
+      }
+      // The car on it.
+      const carX = along(simulation.x),
+        carY = up(simulation.x);
+      ctx.strokeStyle = 'rgba(110,190,255,0.5)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(carX, py);
+      ctx.lineTo(carX, py + ph);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(carX, carY, 3, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(30,110,220,1)';
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
     },
   };
 }

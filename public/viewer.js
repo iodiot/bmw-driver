@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { setupEnvironment } from './environment.js';
+import { installTerrainLift, keepUnlifted, roadElevation, roadGrade } from './terrain.js';
 import { setupRoad } from './road.js';
 import { setupRoadside } from './roadside.js';
 import {
@@ -25,7 +26,7 @@ import { setupRain } from './rain.js';
 import { setupBodyWater } from './body-water.js';
 import { setupWipers } from './wipers.js';
 import { setupTraffic } from './traffic-view.js';
-import { collideWithTraffic } from './traffic.js';
+import { collideWithTraffic, trafficShade } from './traffic.js';
 import { RunTimer, describeRun } from './runs.js';
 import { setupSpeedCameras, camerasPassed, fineFor } from './speed-cameras.js';
 import { setupPowerLines } from './power-lines.js';
@@ -99,6 +100,21 @@ document.addEventListener('keydown', (e) => {
     settings.querySelector('summary').focus();
   }
 });
+// The hills: three.js's shaders lift everything by the land's height (see
+// terrain.js); installed before anything is drawn.
+installTerrainLift();
+// The car stands on the land at its place, pitched and rolled to its slope
+// (the land rises along x only).
+function placeCarOnLand(root, x, heading) {
+  const grade = roadGrade(x);
+  root.position.y = roadElevation(x);
+  root.rotation.set(
+    -Math.atan(grade * Math.sin(heading)),
+    heading,
+    Math.atan(grade * Math.cos(heading)),
+    'YZX'
+  );
+}
 document.body.dataset.capture = String(new URLSearchParams(location.search).get('capture') === '1');
 const scene = new THREE.Scene();
 // Phones and tablets (a touch screen as the main pointer): fewer pixels, no
@@ -311,7 +327,7 @@ function resetView() {
   if (rig && new URLSearchParams(location.search).get('detail') === 'brakes') {
     const wheel = rig.wheels.find((w) => w.front && w.z > 0);
     const target = new THREE.Vector3(wheel.x, wheel.y, wheel.z).applyAxisAngle(up, heading);
-    target.add(new THREE.Vector3(x, 0, z));
+    target.add(new THREE.Vector3(x, roadElevation(x), z));
     const distance = (1.25 * lensScale) / Math.min(1, camera.aspect);
     const offset = new THREE.Vector3(distance * 0.18, distance * 0.07, distance).applyAxisAngle(
       up,
@@ -332,8 +348,9 @@ function resetView() {
   )
     .multiplyScalar(Math.max(1, 0.9 / camera.aspect) * lensScale)
     .applyAxisAngle(up, heading);
-  camera.position.set(x, 0, z).add(offset);
-  controls.target.set(x, 0.75, z);
+  const ground = roadElevation(x);
+  camera.position.set(x, ground, z).add(offset);
+  controls.target.set(x, ground + 0.75, z);
   controls.update();
 }
 resetView();
@@ -545,6 +562,23 @@ function deckShadeOnCar() {
     shade += bridgeShade(sim.x + c * along, sim.z - s * along, shift, 1);
   return shade / 5;
 }
+// How much of the car's body is in the traffic's sun shadow: points along
+// each side at about window height.
+const carShadePoints = [];
+let trafficShadeLevel = 0,
+  frameDtForShade = 1 / 60;
+function trafficShadeOnCar() {
+  const c = Math.cos(sim.heading),
+    s = Math.sin(sim.heading);
+  carShadePoints.length = 0;
+  for (const along of [-1.9, -0.9, 0, 0.9, 1.9])
+    for (const side of [-0.75, 0.75])
+      carShadePoints.push([sim.x + c * along + s * side, 1.05, sim.z - s * along + c * side]);
+  const near = traffic.vehicles.filter((v) => Math.abs(v.x - sim.x) < 45);
+  return near.length
+    ? trafficShade(near, carShadePoints, structureUniforms.structureSunShift.value)
+    : 0;
+}
 function applyStructureLight() {
   const cover = sim ? tunnelCover(sim.x, roadLateral(sim.x, sim.z)) : 0;
   // An overpass's deck shades the car through the shadow map, as it passes
@@ -571,11 +605,20 @@ function applyStructureLight() {
   }
   document.body.dataset.tunnel = cover.toFixed(3);
   const shade = sim ? deckShadeOnCar() * (1 - cover) : 0;
-  // Under the deck the sun is gone, and about half the sky.
-  carShade = shade;
-  carSunlight.value = 1 - shade;
-  carSkylight.value = 1 - 0.5 * shade;
-  carReflection.value = 1 - 0.6 * shade;
+  // In a lorry's or a car's shadow the sun is gone from that part of the
+  // body, eased so it comes over the car rather than switching.
+  const target = sim && projectedShadows ? trafficShadeOnCar() * (1 - cover) : 0;
+  trafficShadeLevel += (target - trafficShadeLevel) * Math.min(1, frameDtForShade * 10);
+  // Under the deck the sun is gone, and about half the sky; in a lorry's
+  // shadow the sun, and the half of the sky it stands against.
+  carShade = Math.max(shade, trafficShadeLevel);
+  carSunlight.value = 1 - carShade;
+  carSkylight.value = 1 - Math.max(0.5 * shade, 0.5 * trafficShadeLevel);
+  carReflection.value = 1 - Math.max(0.6 * shade, 0.55 * trafficShadeLevel);
+  // Its own shadow fades as it goes into another's, which already darkens
+  // the road there.
+  sun.shadow.intensity = 1 - 0.85 * trafficShadeLevel;
+  document.body.dataset.trafficShade = trafficShadeLevel.toFixed(3);
   document.body.dataset.deckShade = carShade.toFixed(3);
 }
 // In the tunnel the chase camera stays inside its walls and under its
@@ -585,9 +628,10 @@ function keepCameraInTunnel() {
   if (!insideTunnel(p.x)) return;
   const lateral = roadLateral(p.x, p.z),
     limit = 7.1;
-  if (Math.abs(lateral) <= limit && p.y <= 5.8) return;
+  const roof = roadElevation(p.x) + 5.8;
+  if (Math.abs(lateral) <= limit && p.y <= roof) return;
   if (Math.abs(lateral) > limit) p.z = roadCenterZ(p.x) + Math.sign(lateral) * limit;
-  p.y = Math.min(p.y, 5.8);
+  p.y = Math.min(p.y, roof);
   camera.lookAt(controls.target);
 }
 // Continuous changes for the current time and weather.
@@ -720,7 +764,7 @@ function restart(x = 0) {
   });
   for (const k of Object.keys(peaks)) peaks[k] = 0;
   rig.root.position.set(x, 0, sim.z);
-  rig.root.rotation.set(0, sim.heading, 0);
+  placeCarOnLand(rig.root, x, sim.heading);
   seatCamera.reset();
   if (cameraView === 'chase') resetView();
   setDriving(true);
@@ -909,6 +953,9 @@ new GLTFLoader().load(
           later.push(o);
       });
       for (const o of later) o.visible = true;
+      // The car is placed on the land as a whole: its parts are not lifted
+      // (set before the programs are compiled).
+      keepUnlifted(rig.root);
       shadeCarFromSun(rig.root);
       await renderer.compileAsync(scene, camera);
       for (const o of later) o.visible = false;
@@ -1185,9 +1232,10 @@ renderer.setAnimationLoop((time) => {
       brake: pedals.brake,
       speed: sim.speed,
     });
+    const oldY = rig.root.position.y;
     rig.root.position.set(sim.x, 0, sim.z);
-    rig.root.rotation.y = sim.heading;
-    const movement = frameMovement.set(sim.x - oldX, 0, sim.z - oldZ),
+    placeCarOnLand(rig.root, sim.x, sim.heading);
+    const movement = frameMovement.set(sim.x - oldX, rig.root.position.y - oldY, sim.z - oldZ),
       offset = frameCameraOffset.subVectors(camera.position, controls.target);
     const courseHeading = sim.heading + sim.slipAngle * 0.75;
     const headingError = Math.atan2(
@@ -1420,6 +1468,7 @@ renderer.setAnimationLoop((time) => {
     sim?.x ?? 0,
     sunDirection.subVectors(sun.position, sun.target.position).normalize()
   );
+  frameDtForShade = dt;
   applyStructureLight();
   // Sun shadows by day, fainter in rain or fog and gone once the sun is
   // down or under a storm's clouds.

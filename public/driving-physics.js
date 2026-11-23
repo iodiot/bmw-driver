@@ -234,6 +234,10 @@ export class DrivingSimulation {
       this.powertrain.reset(0);
     }
   }
+  // The road's grade in the direction the car faces (rising ahead > 0).
+  gradeAhead() {
+    return (this.surface.grade?.(this.x) ?? 0) * Math.cos(this.heading);
+  }
   // Speed along the car's heading: negative while reversing.
   get forwardSpeed() {
     return this.reversing ? -this.speed : this.speed;
@@ -255,7 +259,12 @@ export class DrivingSimulation {
       this.speed > 0 ? 0.3 + Math.max(0, this.surfaceRolling - surfaces.asphalt.rolling) * 9.81 : 0;
     const acceleration =
       (input.brake ? pull * (1 - this.speed / topSpeed) : 0) - 8 * this.brakePressure - rolling;
-    this.speed = clamp(this.speed + acceleration * dt, 0, topSpeed);
+    this.speed = clamp(
+      this.speed +
+        (acceleration + 9.81 * this.gradeAhead() * (this.speed > 0 || input.brake ? 1 : 0)) * dt,
+      0,
+      topSpeed
+    );
     const lock = (25 * Math.PI) / 180;
     const steerTarget =
       Number.isFinite(input.steerAxis) && input.steerAxis !== 0
@@ -330,6 +339,8 @@ export class DrivingSimulation {
     const extraRolling = this.surfaceRolling - surfaces.asphalt.rolling;
     if (extraRolling > 0 && this.speed > 0)
       this.speed = Math.max(0, this.speed - extraRolling * 9.81 * (1 + this.speed / 40) * dt);
+    // Up a hill gravity holds the car back, down one it runs on.
+    this.speed = clamp(this.speed - 9.81 * this.gradeAhead() * dt, 0, m5Specifications.topSpeed);
     if (input.brake)
       this.brakeEnergy +=
         0.5 * m5Specifications.mass * (previousSpeed * previousSpeed - this.speed * this.speed);
