@@ -8,9 +8,10 @@ import { rearGlowStrength } from './rear-glow.js';
 export const signalGlowLayout = Object.freeze({
   // Car-space: the patch's length along the car and how far out it reaches
   // from the side, and the lamps along it (x, and how strong).
-  length: 6.4,
-  reach: 2.4,
-  side: 0.8,
+  length: 7,
+  reach: 2.8,
+  // From a little under the car's side, so the light grows out from it.
+  side: 0.55,
   lamps: Object.freeze([
     Object.freeze([2.25, 1]),
     Object.freeze([0.9, 0.45]),
@@ -35,11 +36,16 @@ function glowTexture() {
       const along = px / scale - length / 2,
         out = py / scale;
       let glow = 0;
+      // Each lamp's light: brightest just out from the side, round, and
+      // reaching about two metres.
       for (const [x, strength] of lamps)
-        glow += strength * Math.exp(-(((along - x) / 0.9) ** 2) - (out / 0.85) ** 2);
+        glow += strength * Math.exp(-(((along - x) / 1.05) ** 2) - ((out - 0.45) / 0.9) ** 2);
       const u = px / (w - 1),
         v = py / (h - 1);
-      const fade = smooth(u / 0.12) * smooth((1 - u) / 0.12) * smooth((1 - v) / 0.35);
+      // To nothing at every edge: no line where the patch ends, under the
+      // car or beyond it.
+      const fade =
+        smooth(u / 0.2) * smooth((1 - u) / 0.2) * smooth(v / 0.18) * smooth((1 - v) / 0.45);
       const i = (py * w + px) * 4;
       image.data[i] = image.data[i + 1] = image.data[i + 2] = 255;
       image.data[i + 3] = Math.round(255 * Math.min(1, glow * 0.8) * fade);

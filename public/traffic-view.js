@@ -742,42 +742,46 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
     group.add(pool);
     return pool;
   };
-  // Ahead: brightest a few metres in front, spreading and fading out (the
+  // Every pool fades to nothing at each edge of its patch, so no edge of it
+  // shows on the road.
+  const smoothEdge = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
+  const paintPool = (g, w, h, light) => {
+    const image = g.createImageData(w, h);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const along = x / (w - 1),
+          across = (y / (h - 1) - 0.5) * 2;
+        const edges =
+          smoothEdge(along / 0.12) *
+          smoothEdge((1 - along) / 0.35) *
+          smoothEdge((1 - Math.abs(across)) / 0.45);
+        const i = (y * w + x) * 4;
+        image.data[i] = image.data[i + 1] = image.data[i + 2] = 255;
+        image.data[i + 3] = Math.round(255 * Math.min(1, light(along, across)) * edges);
+      }
+    g.putImageData(image, 0, 0);
+  };
+  // Ahead: brightest a few metres in front, widening as it reaches out (the
   // texture's left edge at the bumper).
   const headPool = lampPool(
     'Traffic headlamp light',
     new THREE.Color(1, 0.93, 0.8),
     0.55,
-    (g, w, h) => {
-      const image = g.createImageData(w, h);
-      for (let y = 0; y < h; y++)
-        for (let x = 0; x < w; x++) {
-          const along = x / w,
-            across = (y / h - 0.5) * 2;
-          const spread = 0.35 + 0.65 * along;
-          const a =
-            Math.exp(-(((along - 0.3) / 0.32) ** 2)) *
-            Math.exp(-((across / spread) ** 2) * 2.2) *
-            Math.min(1, along * 12) *
-            Math.min(1, (1 - along) * 4);
-          const i = (y * w + x) * 4;
-          image.data[i] = image.data[i + 1] = image.data[i + 2] = 255;
-          image.data[i + 3] = Math.round(255 * a);
-        }
-      g.putImageData(image, 0, 0);
-    }
+    (g, w, h) =>
+      paintPool(g, w, h, (along, across) => {
+        const spread = 0.3 + 0.6 * along;
+        return (
+          1.1 * Math.exp(-(((along - 0.28) / 0.34) ** 2)) * Math.exp(-((across / spread) ** 2) * 2)
+        );
+      })
   );
+  // Behind: a round red glow from the tail lamps.
   const tailPool = lampPool(
     'Traffic tail-lamp light',
     new THREE.Color(1, 0.06, 0.03),
-    0.4,
-    (g, w, h) => {
-      const glow = g.createRadialGradient(0, h / 2, 2, 0, h / 2, w);
-      glow.addColorStop(0, 'rgba(255,255,255,1)');
-      glow.addColorStop(1, 'rgba(255,255,255,0)');
-      g.fillStyle = glow;
-      g.fillRect(0, 0, w, h);
-    }
+    0.42,
+    (g, w, h) =>
+      paintPool(g, w, h, (along, across) => Math.exp(-((along / 0.45) ** 2) - (across / 0.6) ** 2))
   );
   const poolAt = new THREE.Vector3(),
     poolSize = new THREE.Vector3(),
@@ -911,7 +915,7 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
           headPool.setMatrixAt(pools, matrix);
           // (Behind: the texture turned to face back.)
           poolAt.set(v.x - c * (front + 1.6), 0.02, position.z + s * (front + 1.6));
-          poolSize.set(-3.2, 1, v.width + 1.2);
+          poolSize.set(-3.4, 1, v.width + 1.8);
           matrix.compose(poolAt, flatTurn, poolSize);
           tailPool.setMatrixAt(pools, matrix);
           pools++;

@@ -6,7 +6,8 @@ import * as THREE from 'three';
 // would add their cost to every lit surface in the scene.
 export const rearGlowLayout = Object.freeze({
   // Car-space x of the rear bumper and how far back the glow reaches (m).
-  rear: -2.3,
+  // (A little under the car, so the glow grows out from under the bumper.)
+  rear: -2.1,
   reach: 4.2,
   width: 3.4,
   lampOffset: 0.62,
@@ -49,7 +50,7 @@ export function setupRearGlow(
       const u = px / (w - 1),
         v = py / (h - 1);
       const fade =
-        smooth(u / 0.35) * smooth((1 - u) / 0.04) * smooth(v / 0.25) * smooth((1 - v) / 0.25);
+        smooth(u / 0.35) * smooth((1 - u) / 0.14) * smooth(v / 0.3) * smooth((1 - v) / 0.3);
       const i = (py * w + px) * 4;
       image.data[i] = image.data[i + 1] = image.data[i + 2] = 255;
       image.data[i + 3] = Math.round(255 * Math.min(1, glow * 0.7) * fade);
