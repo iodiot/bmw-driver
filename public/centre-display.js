@@ -79,7 +79,7 @@ export function mapPoint(simulation, x, z, scale, cx, cy) {
   return [cx + right * scale, cy - forward * scale];
 }
 
-function drawScreen(ctx, w, h, simulation, hours, raining) {
+function drawScreen(ctx, w, h, simulation, hours, weather) {
   // Map on the left two thirds, in iDrive's night-blue style.
   const mapW = w * 0.66;
   ctx.fillStyle = '#0c1724';
@@ -164,9 +164,10 @@ function drawScreen(ctx, w, h, simulation, hours, raining) {
   ctx.fillStyle = '#9fb3c6';
   ctx.font = `400 ${Math.round(h * 0.07)}px "Helvetica Neue", Arial, sans-serif`;
   const temperature = Math.round(
-    14 + 9 * Math.sin((Math.PI * (hours - 9)) / 12) - (raining ? 4 : 0)
+    14 + 9 * Math.sin((Math.PI * (hours - 9)) / 12) - ({ rain: 4, storm: 6, fog: 2 }[weather] ?? 0)
   );
-  ctx.fillText(`${temperature} °C  ${raining ? 'Rain' : 'Clear'}`, px, h * 0.53);
+  const label = { rain: 'Rain', storm: 'Storm', fog: 'Fog' }[weather] ?? 'Clear';
+  ctx.fillText(`${temperature} °C  ${label}`, px, h * 0.53);
   ctx.fillStyle = '#e8eef4';
   ctx.fillText('FM 101.5', px, h * 0.72);
   ctx.fillStyle = '#5f7a93';
@@ -239,12 +240,23 @@ export function setupCentreDisplay(rig) {
   let elapsed = Infinity;
   return {
     group,
-    update(dt, simulation, { hours = 13, raining = false, night = false, visible = true } = {}) {
+    // `weather`: 'clear', 'rain', 'storm' or 'fog' (or `raining` for rain).
+    update(
+      dt,
+      simulation,
+      {
+        hours = 13,
+        raining = false,
+        weather = raining ? 'rain' : 'clear',
+        night = false,
+        visible = true,
+      } = {}
+    ) {
       screenMesh.material.color.setScalar(night ? 0.6 : 0.85);
       elapsed += dt;
       if (elapsed < refresh || !simulation || !visible) return;
       elapsed = 0;
-      drawScreen(display.ctx, ...screen.pixels, simulation, hours, raining);
+      drawScreen(display.ctx, ...screen.pixels, simulation, hours, weather);
       display.texture.needsUpdate = true;
     },
   };

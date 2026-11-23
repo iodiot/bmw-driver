@@ -520,6 +520,57 @@ export function setupVehicleAudio({ sound, volume, status }) {
       body.start(now);
       body.stop(now + 0.06);
     },
+    // Thunder from a strike `distance` metres away, `loudness` 0–1: a
+    // sharp crack overhead, then a rumble that rolls on for seconds, deeper
+    // and slower to build the farther the strike.
+    thunder(loudness, distance = 1000) {
+      if (!ready || !sound.checked || !running() || loudness <= 0.01) return;
+      const now = context.currentTime,
+        far = clamp(distance / 4000, 0, 1),
+        length = 3.5 + 3 * far + Math.random() * 2;
+      const voice = (filterType, frequency, q, at) => {
+        const source = context.createBufferSource(),
+          filter = context.createBiquadFilter(),
+          gain = context.createGain();
+        source.buffer = noiseBuffer;
+        source.loop = true;
+        source.playbackRate.value = 0.5 + 0.2 * Math.random();
+        filter.type = filterType;
+        filter.frequency.value = frequency;
+        filter.Q.value = q;
+        gain.gain.setValueAtTime(0.0001, at);
+        source.connect(filter).connect(gain).connect(outside);
+        source.start(at, Math.random() * 1.5);
+        return { source, gain: gain.gain, filter };
+      };
+      // The crack of a near strike.
+      if (distance < 1200) {
+        const crack = voice('highpass', 900, 0.6, now);
+        const peak = loudness * 1.4 * (1 - distance / 1200);
+        crack.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), now + 0.01);
+        crack.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+        crack.source.stop(now + 0.4);
+      }
+      // The rumble: low noise swelling and fading in a few rolls.
+      const rumble = voice('lowpass', 520 - 380 * far, 0.7, now);
+      const body = voice('lowpass', 75, 0.9, now);
+      const rise = 0.06 + 0.5 * far;
+      let at = now + rise;
+      rumble.gain.exponentialRampToValueAtTime(Math.max(0.0002, loudness * 1.6), at);
+      body.gain.exponentialRampToValueAtTime(Math.max(0.0002, loudness * 2.4), at);
+      while (at < now + length * 0.7) {
+        const step = 0.35 + Math.random() * 0.9,
+          level = loudness * (0.5 + 1.1 * Math.random()) * (1 - (at - now) / length);
+        rumble.gain.setTargetAtTime(Math.max(0.0002, level), at, step / 3);
+        body.gain.setTargetAtTime(Math.max(0.0002, level * 1.5), at, step / 3);
+        at += step;
+      }
+      rumble.gain.setTargetAtTime(0.0001, at, length * 0.12);
+      body.gain.setTargetAtTime(0.0001, at, length * 0.15);
+      rumble.filter.frequency.setTargetAtTime(160, now, length * 0.4);
+      rumble.source.stop(now + length + 1.5);
+      body.source.stop(now + length + 1.5);
+    },
     // The sound button: mutes or unmutes. Sound that is on but still waiting
     // for the browser's permission starts instead of muting.
     toggle() {

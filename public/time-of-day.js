@@ -37,27 +37,36 @@ export function dayPhase(hours) {
 }
 
 // Scene conditions for an hour, dry or wet: `raining` is true or false, or
-// how far rain has set in (0 to 1), so the sky darkens as it comes.
-export function daylight(hours, raining = false) {
+// how far rain has set in (0 to 1), so the sky darkens as it comes. `fog`
+// and `storm` (0 to 1) are how far a morning fog or a thunderstorm has set
+// in: fog veils the sun and spreads its light, a storm's clouds darken the
+// day far more than a shower's.
+export function daylight(hours, raining = false, { fog = 0, storm = 0 } = {}) {
   const wet = Math.max(0, Math.min(1, Number(raining)));
+  const misty = clamp(fog, 0, 1),
+    stormy = clamp(storm, 0, 1);
   const elevation = sunElevation(hours);
-  // 0 in daylight, 1 after civil twilight.
-  const darkness = 1 - smooth(-6, 3, elevation);
+  // 0 in daylight, 1 after civil twilight; a storm's clouds bring an early
+  // dusk.
+  const darkness = Math.max(1 - smooth(-6, 3, elevation), 0.35 * stormy);
   // Golden light and a glowing horizon while the sun is low.
-  const sunset = Math.exp(-(((elevation - 2) / 7) ** 2)) * mix(1, 0.25, wet);
+  const sunset = Math.exp(-(((elevation - 2) / 7) ** 2)) * mix(1, 0.25, wet) * mix(1, 0.4, misty);
   // The photographed sky (its sun stands 43° high) shows once the sun is
-  // well up; low sun and night use the procedural sky.
-  const photo = (1 - wet) * smooth(10, 22, elevation);
+  // well up; low sun, fog, rain and night use the procedural sky.
+  const photo = (1 - wet) * (1 - misty) * smooth(10, 22, elevation);
   // The direct light is the sun while it is up and the moon at night. Both
   // are faint around the switch, so it is never seen to jump.
   const sunUp = elevation > -4;
+  const veil = mix(1, 0.25, wet) * mix(1, 0.3, misty) * mix(1, 0.45, stormy);
   const direct = sunUp
-    ? 3 * smooth(-2, 12, elevation) * mix(1, 0.25, wet)
-    : 0.35 * smooth(-4, -10, elevation) * mix(1, 0.65, wet);
+    ? 3 * smooth(-2, 12, elevation) * veil
+    : 0.35 * smooth(-4, -10, elevation) * mix(1, 0.65, wet) * mix(1, 0.4, misty);
   // Skylight fades gradually as the sun sinks, well before it sets: at
   // sunset the fields are already dim under a glowing sky.
   const dim = 1 - smooth(-6, 20, elevation);
-  const directColour = sunUp ? mixColour([1, 1, 1], [1, 0.62, 0.38], sunset) : [0.71, 0.79, 1];
+  const directColour = sunUp
+    ? mixColour(mixColour([1, 1, 1], [1, 0.62, 0.38], sunset), [1, 0.94, 0.86], misty * 0.6)
+    : [0.71, 0.79, 1];
   return {
     hours: wrapHours(hours),
     elevation,
@@ -67,16 +76,23 @@ export function daylight(hours, raining = false) {
     sunUp,
     direct,
     directColour,
-    ambient: mix(mix(1, 1.05, wet), mix(0.3, 0.25, wet), dim),
+    // Fog scatters the sun into the shade, so it is brighter there; a
+    // storm's clouds take it away.
+    ambient:
+      mix(mix(1, 1.05, wet), mix(0.3, 0.25, wet), dim) * mix(1, 1.15, misty) * mix(1, 0.5, stormy),
     ambientColour: mixColour(
-      mixColour([0.86, 0.93, 1], [1, 0.8, 0.68], sunset * 0.5),
-      [0.55, 0.66, 0.87],
-      darkness
+      mixColour(
+        mixColour([0.86, 0.93, 1], [1, 0.8, 0.68], sunset * 0.5),
+        [0.55, 0.66, 0.87],
+        darkness
+      ),
+      [0.93, 0.94, 0.95],
+      misty * 0.5 * (1 - darkness)
     ),
-    fill: mix(mix(1, 0.7, wet), 0.15, dim),
-    // Discrete systems: low beams from early dusk, night-time lamps and
-    // materials once it is mostly dark.
-    lowBeams: darkness > 0.3,
+    fill: mix(mix(1, 0.7, wet), 0.15, dim) * mix(1, 0.5, stormy),
+    // Discrete systems: low beams from early dusk and in fog or a storm,
+    // night-time lamps and materials once it is mostly dark.
+    lowBeams: darkness > 0.3 || misty > 0.4 || stormy > 0.4,
     night: darkness > 0.5,
   };
 }

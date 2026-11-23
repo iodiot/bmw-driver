@@ -66,14 +66,29 @@ const skyColours = {
     [74, 85, 98],
     [96, 108, 122],
   ],
+  storm: [
+    [40, 45, 56],
+    [62, 68, 82],
+  ],
+  fog: [
+    [168, 172, 176],
+    [196, 198, 199],
+  ],
 };
 const mixRgb = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
-export function panelSky(light, raining) {
+// `weather`: 'clear', 'rain', 'storm' or 'fog' (true and false stand for
+// rain and clear).
+export function panelSky(light, weather) {
+  const kind = weather === true ? 'rain' : weather || 'clear';
   return [0, 1].map((i) => {
     let c = mixRgb(skyColours.day[i], skyColours.night[i], light.darkness);
     c = mixRgb(c, skyColours.sunset[i], light.sunset * (1 - light.darkness * 0.5));
-    if (raining)
-      c = mixRgb(c, mixRgb(skyColours.rain[i], skyColours.night[i], light.darkness), 0.6);
+    if (kind !== 'clear')
+      c = mixRgb(
+        c,
+        mixRgb(skyColours[kind][i], skyColours.night[i], light.darkness),
+        kind === 'fog' ? 0.7 : 0.6
+      );
     return `rgb(${c.map((v) => Math.round(v)).join(' ')})`;
   });
 }
@@ -83,7 +98,12 @@ const icons = {
   sunset:
     '<path d="M4.5 12.5a4.5 4.5 0 0 1 9 0M1.5 12.5h15M3 15.5h12M9 3v3M3.4 6.4l1.4 1.4M14.6 6.4l-1.4 1.4"/>',
   night: '<path d="M13.8 11.6A6 6 0 0 1 6.4 4.2a6 6 0 1 0 7.4 7.4z"/>',
+  clear:
+    '<path d="M6 12.5h7.5a2.8 2.8 0 0 0 .3-5.6 3.9 3.9 0 0 0-7.4.6A2.5 2.5 0 0 0 6 12.5z"/><path d="M4.8 6.2a2.6 2.6 0 0 1 3-3.4M3.2 4.3l-1-1M5.6 2.1V1"/>',
   rain: '<path d="M5 10.5h8a3 3 0 0 0 .3-6 4.2 4.2 0 0 0-8.1 1A2.6 2.6 0 0 0 5 10.5zM6 13l-1 2.5M9.5 13l-1 2.5M13 13l-1 2.5"/>',
+  storm:
+    '<path d="M5 10.5h8a3 3 0 0 0 .3-6 4.2 4.2 0 0 0-8.1 1A2.6 2.6 0 0 0 5 10.5z"/><path d="M9.8 10.5 8 13.5h2.4L8.8 17"/>',
+  fog: '<path d="M2.5 6h13M4.5 9h11M2.5 12h12M5 15h9"/>',
   pause: '<path d="M6.5 4.5v9M11.5 4.5v9"/>',
   play: '<path d="M6.5 4.2v9.6L14 9z"/>',
   restart: '<path d="M3.8 9a5.2 5.2 0 1 0 1.6-3.8M3.6 2.8v2.6h2.6"/>',
@@ -94,11 +114,16 @@ const icons = {
     '<path d="M2.5 7h2.8l3.7-3.2v10.4L5.3 11H2.5z"/><path d="M11.8 6.8l4.4 4.4M16.2 6.8l-4.4 4.4"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 18 18" aria-hidden="true">${icons[name]}</svg>`;
+const weatherNames = { clear: 'clear', rain: 'rain', storm: 'thunderstorm', fog: 'fog' };
+const nextKind = (kind) => {
+  const kinds = Object.keys(weatherNames);
+  return kinds[(kinds.indexOf(kind) + 1) % kinds.length];
+};
 const presetLabels = { day: 'Day (13:00)', sunset: 'Sunset (18:54)', night: 'Night (23:00)' };
 
 export function setupDayBar(
   container,
-  { setTime, toggleRain, toggleRunning, restart, toggleSound, nextCamera }
+  { setTime, nextWeather, toggleRunning, restart, toggleSound, nextCamera }
 ) {
   container.innerHTML = `
     <div class="day-graph" title="Time of day: click or drag to change">
@@ -127,7 +152,7 @@ export function setupDayBar(
           )
           .join('')}
       </div>
-      <button type="button" class="day-rain" aria-label="Rain" title="Rain" aria-pressed="false">${icon('rain')}</button>
+      <button type="button" class="day-rain" aria-label="Weather: clear" title="Weather: clear" aria-pressed="false">${icon('clear')}</button>
       <button type="button" class="day-run" aria-label="Pause time" title="Pause time" aria-pressed="false">${icon('pause')}</button>
       <button type="button" class="day-camera" aria-label="Camera: Chase (C)" title="Camera: Chase (C)">${icon('camera')}</button>
       <button type="button" class="day-sound" aria-label="Sound (M)" title="Sound (M)" aria-pressed="true">${icon('sound')}</button>
@@ -149,7 +174,7 @@ export function setupDayBar(
     cameraButton = container.querySelector('.day-camera');
   for (const button of presets)
     button.onclick = () => setTime(dayCycle.presets[button.dataset.preset]);
-  rain.onclick = toggleRain;
+  rain.onclick = nextWeather;
   run.onclick = toggleRunning;
   container.querySelector('.day-restart').onclick = () => restart?.();
   soundButton.onclick = () => toggleSound?.();
@@ -202,10 +227,11 @@ export function setupDayBar(
       soundButton.title = soundButton.ariaLabel =
         state === 'on' ? 'Mute (M)' : state === 'off' ? 'Sound on (M)' : 'Click to start sound';
     },
-    update(light, { running, raining }) {
+    // `weather`: 'clear', 'rain', 'storm' or 'fog'.
+    update(light, { running, weather = 'clear' }) {
       const text = formatClock(light.hours);
       // The DOM changes once a game minute (a few times a second at most).
-      const state = `${text}|${running}|${raining}`;
+      const state = `${text}|${running}|${weather}`;
       if (state === shown) return;
       shown = state;
       const [x, y] = dayGraphPoint(light.hours);
@@ -221,7 +247,7 @@ export function setupDayBar(
       // The phase of day and next sunrise or sunset, for screen readers.
       const next = nextSunEvent(light.hours),
         name = dayPhase(light.hours);
-      const [top, bottom] = panelSky(light, raining);
+      const [top, bottom] = panelSky(light, weather);
       container.style.setProperty('--sky-top', top);
       container.style.setProperty('--sky-bottom', bottom);
       container.style.setProperty('--sky-glow', (light.sunset * (1 - light.darkness)).toFixed(2));
@@ -229,13 +255,19 @@ export function setupDayBar(
       const active = presetFor(light.hours);
       for (const button of presets)
         button.setAttribute('aria-current', String(button.dataset.preset === active));
-      rain.setAttribute('aria-pressed', String(raining));
+      if (rain.dataset.weather !== weather) {
+        rain.dataset.weather = weather;
+        rain.innerHTML = icon(weather);
+        rain.title =
+          rain.ariaLabel = `Weather: ${weatherNames[weather]} (click for ${weatherNames[nextKind(weather)]})`;
+      }
+      rain.setAttribute('aria-pressed', String(weather !== 'clear'));
       run.setAttribute('aria-pressed', String(!running));
       run.innerHTML = icon(running ? 'pause' : 'play');
       run.title = run.ariaLabel = running ? 'Pause time' : 'Resume time';
       container.setAttribute(
         'aria-label',
-        `Time ${text}, ${name.toLowerCase()}, ${next.kind} at ${formatClock(next.at)}${raining ? ', raining' : ''}`
+        `Time ${text}, ${name.toLowerCase()}, ${next.kind} at ${formatClock(next.at)}${weather === 'clear' ? '' : `, ${weatherNames[weather]}`}`
       );
     },
   };

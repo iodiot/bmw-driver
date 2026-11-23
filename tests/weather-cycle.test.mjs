@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as THREE from 'three';
-import { createWeatherCycle, weatherCycle } from '../public/weather-cycle.js';
+import { createWeatherCycle, nextWeather, weatherCycle } from '../public/weather-cycle.js';
 import { setupRain } from '../public/rain.js';
 
 test('Showers come and go by themselves, and a chosen weather lasts a full spell', () => {
@@ -44,4 +44,32 @@ test('Rain sets in and eases off gradually when asked to fade', () => {
   assert.equal(rain.group.visible, false);
   rain.setEnabled(true);
   assert.equal(amount.value, 1, 'Turning rain on directly is immediate');
+});
+
+test('Some showers are storms, and early mornings often bring fog', () => {
+  // (The first draw is the opening dry spell.)
+  const draws = [0.5, 0.1];
+  // A storm: the shower draw falls in the storms' share.
+  let cycle = createWeatherCycle(() => draws.shift() ?? 0.5);
+  cycle.update(1000, 13);
+  assert.equal(cycle.kind, 'storm');
+  assert.equal(cycle.raining, true);
+  // At 6:00 a dry spell gives way to fog instead.
+  cycle = createWeatherCycle(() => 0.1);
+  cycle.update(1000, 6);
+  assert.equal(cycle.kind, 'fog');
+  assert.equal(cycle.raining, false);
+  cycle.update(1000, 6);
+  assert.equal(cycle.kind, 'clear', 'Fog lifts to a dry spell');
+  // Chosen weather steps clear, rain, storm, fog.
+  assert.deepEqual(['clear', 'rain', 'storm', 'fog'].map(nextWeather), [
+    'rain',
+    'storm',
+    'fog',
+    'clear',
+  ]);
+  cycle.set('fog');
+  assert.equal(cycle.kind, 'fog');
+  cycle.set(true);
+  assert.equal(cycle.kind, 'rain');
 });

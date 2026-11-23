@@ -40,6 +40,15 @@ export const photoSkyBelowHorizon = (5.9766 * Math.PI) / 180;
 export const photoSky = { value: null };
 export const photoSkyMix = { value: 0 };
 
+// Fog, a storm and a lightning flash, shared by the sky and its reflection.
+export const skyWeather = {
+  fog: { value: 0 },
+  storm: { value: 0 },
+  flash: { value: 0 },
+  // The fog's colour as displayed (sRGB), which the sky fades to.
+  fogColor: { value: new THREE.Vector3(0.82, 0.83, 0.82) },
+};
+
 export function createSky(night = { value: 0 }, rain = { value: 0 }, sunset = { value: 0 }) {
   const sky = new THREE.Mesh(
     // Far beyond the visible road; the photograph's own fields continue past it.
@@ -54,6 +63,7 @@ export function createSky(night = { value: 0 }, rain = { value: 0 }, sunset = { 
         sunDirection: { value: celestialDirections.sun.clone() },
         sunset,
         moonDirection: { value: celestialDirections.moon },
+        ...skyWeather,
       },
       side: THREE.BackSide,
       depthWrite: false,
@@ -74,6 +84,10 @@ export function createSky(night = { value: 0 }, rain = { value: 0 }, sunset = { 
         uniform vec3 sunDirection;
         uniform float sunset;
         uniform vec3 moonDirection;
+        uniform float fog;
+        uniform float storm;
+        uniform float flash;
+        uniform vec3 fogColor;
         varying vec3 dir;
 
         float hash(vec3 p) {
@@ -171,6 +185,24 @@ export function createSky(night = { value: 0 }, rain = { value: 0 }, sunset = { 
             color = mix(color, moonColor, moonDisc * night * (1. - cloud * .45) * (1. - rain * .35));
           }
           if (photoSkyMix > .001) color = mix(color, photoColor(d), photoSkyMix);
+          // A thunderstorm: low, heavy cloud, darkest overhead, lit from
+          // within by lightning.
+          if (storm > .001) {
+            float heavy = fbm(p * .55 + vec3(0., 0., cloudDrift * 3.));
+            vec3 slate = mix(vec3(.30, .33, .38), vec3(.11, .12, .15), smoothstep(.0, .6, h));
+            slate *= .75 + .5 * heavy;
+            slate = mix(slate, slate * vec3(.35, .38, .48), night);
+            color = mix(color, slate, storm);
+            color += vec3(.8, .84, 1.) * flash * (.6 + 1.4 * heavy) * (.5 + .5 * smoothstep(0., .5, h));
+          }
+          // Morning fog: the sky is the fog, with the sun a pale disc in it.
+          if (fog > .001) {
+            float veil = fog * mix(1., .82, smoothstep(.0, .9, h) * (1. - fog));
+            color = mix(color, fogColor, veil);
+            float toSun = max(dot(d, sunDirection), 0.);
+            color += vec3(1., .96, .88) * (smoothstep(cos(.045), cos(.035), toSun) * .5 +
+                     pow(toSun, 24.) * .25) * fog * (1. - night) * step(0., sunDirection.y);
+          }
           gl_FragColor = sRGBTransferEOTF(vec4(color, 1.));
           #include <colorspace_fragment>
         }
@@ -290,8 +322,13 @@ export function setupEnvironment(scene, renderer, sun, { refresh = 1.5 } = {}) {
   return {
     // The scene at a time of day (see time-of-day.js), dry or wet.
     // `isRain`: true or false, or how far rain has set in (0 to 1).
-    setConditions(light, isRain) {
+    // `weather`: how far fog and a storm have set in (0 to 1), and a
+    // lightning flash's brightness.
+    setConditions(light, isRain, { fog = 0, storm = 0, flash = 0 } = {}) {
       const wet = Math.max(0, Math.min(1, Number(isRain)));
+      skyWeather.fog.value = fog;
+      skyWeather.storm.value = storm;
+      skyWeather.flash.value = flash;
       night.value = light.darkness;
       rain.value = wet;
       sunset.value = light.sunset;
@@ -302,7 +339,7 @@ export function setupEnvironment(scene, renderer, sun, { refresh = 1.5 } = {}) {
       lightDirection = light.sunUp
         ? sky.material.uniforms.sunDirection.value
         : celestialDirections.moon;
-      const key = `${Number(light.night)}-${Number(wet > 0.5)}`;
+      const key = `${Number(light.night)}-${Number(wet > 0.5)}-${Number(fog > 0.5)}${Number(storm > 0.5)}`;
       // One cached reflection per dark/light and dry/wet combination; it is
       // refreshed as the sky changes.
       if (key !== currentReflection) {
@@ -327,13 +364,39 @@ export function setupEnvironment(scene, renderer, sun, { refresh = 1.5 } = {}) {
         horizon = mixRGB(horizon, [0.86, 0.56, 0.38], light.sunset * 0.45);
         // The photograph's horizon: distant fields and tree lines.
         horizon = mixRGB(horizon, [0.45, 0.46, 0.3], photoSkyMix.value);
+        // A storm's horizon is dark under its clouds, and flashes with them.
+        horizon = mixRGB(
+          horizon,
+          mixRGB([0.3, 0.33, 0.38], [0.1, 0.11, 0.14], light.darkness),
+          storm
+        );
+        horizon = horizon.map((v) => v + 0.8 * flash);
+        // Morning fog: light grey, warm in a low sun, dark at night.
+        const mist = mixRGB(
+          mixRGB([0.84, 0.85, 0.84], [0.92, 0.84, 0.74], light.sunset * 0.6),
+          [0.14, 0.15, 0.17],
+          light.darkness
+        );
+        skyWeather.fogColor.value.set(...mist);
+        horizon = mixRGB(horizon, mist, fog);
         scene.fog.color.setRGB(...horizon, THREE.SRGBColorSpace);
         // Clear daylight sees the fields fade gradually up to the tree line.
         const near = 80 + 20 * light.darkness * (1 - photoSkyMix.value),
           far = 900 * photoSkyMix.value + (600 - 340 * light.darkness) * (1 - photoSkyMix.value);
         // Rain closes the view in as it sets in.
-        scene.fog.near = near + (42 - near) * wet;
-        scene.fog.far = far + (145 - far) * wet;
+        let fogNear = near + (42 - near) * wet,
+          fogFar = far + (145 - far) * wet;
+        // A storm's rain closes it further; a morning fog to a hundred metres
+        // or so.
+        fogNear += (24 - fogNear) * storm;
+        fogFar += (115 - fogFar) * storm;
+        // (three.js eases linear fog in with a smoothstep; starting it behind
+        // the camera makes it thicken with distance as real fog does, about
+        // half gone at 30 m and nothing seen past 70.)
+        fogNear += (-10 - fogNear) * fog;
+        fogFar += (68 - fogFar) * fog;
+        scene.fog.near = fogNear;
+        scene.fog.far = fogFar;
       }
     },
     // Plain day or night, as before the time of day.

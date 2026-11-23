@@ -211,8 +211,9 @@ export function setupRain(scene) {
     },
     // Turns rain on or off at once, or over `fade` seconds: the drops thin
     // out or thicken while the rest of the weather has already changed.
-    setEnabled(enabled, fade = 0) {
-      target = enabled ? 1 : 0;
+    // `amount` above 1 is a downpour.
+    setEnabled(enabled, fade = 0, amount = 1) {
+      target = enabled ? amount : 0;
       fadeTime = fade;
       if (enabled) group.visible = true;
       if (fade <= 0) {

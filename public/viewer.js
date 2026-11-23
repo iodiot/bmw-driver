@@ -45,7 +45,8 @@ import { laneKeepingSteer, nearestLane, curveSpeed, bumpSpeed } from './lane-kee
 import { setupSparks } from './sparks.js';
 import { setupMinimap } from './minimap.js';
 import { setMirrorInterval, setupMirrors, setupRearViewMirror } from './mirrors.js';
-import { createWeatherCycle, weatherCycle } from './weather-cycle.js';
+import { createWeatherCycle, isWet, nextWeather, weatherCycle } from './weather-cycle.js';
+import { setupLightning } from './lightning.js';
 import { daylight, dayCycle, wrapHours } from './time-of-day.js';
 import { setupDayBar } from './day-bar.js';
 import { setupRearGlow } from './rear-glow.js';
@@ -197,6 +198,8 @@ let rig,
   centreDisplay,
   nightMode = false,
   rainMode = false,
+  // 'clear', 'rain', 'storm' or 'fog'; rainMode is true in rain and storm.
+  weatherKind = 'clear',
   driving = false,
   telemetryTime = 0;
 const peaks = { compression: 0, extension: 0, roll: 0, pitch: 0, ground: 0 };
@@ -289,33 +292,51 @@ $('#wireframe').onchange = (e) => {
 };
 // Rain comes and goes by itself unless the driver turns that off.
 const weather = createWeatherCycle();
+const lightning = setupLightning(scene, {
+  onThunder: (loudness, distance) => vehicleAudio.thunder(loudness, distance),
+});
 // Time of day: it runs a full day in dayCycle.minutesPerDay real minutes and
 // sets the sky, light and fog continuously; lamps switch at dusk and dawn.
 let timeOfDay = dayCycle.start,
   timeRunning = true,
   lowBeamsOn = false,
   light = daylight(timeOfDay, rainMode);
-// Discrete changes: rain on or off, night-time lamps and materials.
-// Rain sets in and eases off over `rainEase` seconds: `rainRamp` runs
-// toward 1 or 0 and `rainLevel` (eased) darkens the sky, closes in the
-// fog and wets the road, while the drops thicken over the same time.
+// Discrete changes: the weather, night-time lamps and materials.
+// Weather sets in and clears over `rainEase` seconds: each ramp runs toward
+// 1 or 0 and its level (eased) changes the sky, light and fog: rain darkens
+// the sky, closes in the fog and wets the road while the drops thicken; a
+// storm darkens it further; a morning fog veils everything past a hundred
+// metres.
 const rainEase = 10;
 let rainRamp = 0,
-  rainLevel = 0;
-function stepRain(dt) {
-  const target = rainMode ? 1 : 0;
-  if (rainRamp === target) return;
-  rainRamp =
-    target > rainRamp
-      ? Math.min(1, rainRamp + dt / rainEase)
-      : Math.max(0, rainRamp - dt / rainEase);
-  rainLevel = rainRamp * rainRamp * (3 - 2 * rainRamp);
+  rainLevel = 0,
+  fogRamp = 0,
+  fogLevel = 0,
+  stormRamp = 0,
+  stormLevel = 0,
+  lightningFlash = 0;
+const easeLevel = (r) => r * r * (3 - 2 * r);
+const rampToward = (value, target, dt) =>
+  target > value
+    ? Math.min(target, value + dt / rainEase)
+    : Math.max(target, value - dt / rainEase);
+function stepWeather(dt) {
+  const rain = rampToward(rainRamp, rainMode ? 1 : 0, dt),
+    fog = rampToward(fogRamp, weatherKind === 'fog' ? 1 : 0, dt),
+    storm = rampToward(stormRamp, weatherKind === 'storm' ? 1 : 0, dt);
+  if (rain === rainRamp && fog === fogRamp && storm === stormRamp) return;
+  rainRamp = rain;
+  fogRamp = fog;
+  stormRamp = storm;
+  rainLevel = easeLevel(rain);
+  fogLevel = easeLevel(fog);
+  stormLevel = easeLevel(storm);
   road.setWetness(rainLevel);
   applyDaylight();
 }
 function applyWeather(fade = 0) {
   renderQuality.reset();
-  rain.setEnabled(rainMode, fade);
+  rain.setEnabled(rainMode, fade, weatherKind === 'storm' ? 1.45 : 1);
   headlights?.setNight(lowBeamsOn || inTunnel);
   licensePlates?.setNight(nightMode);
   contactShadow?.setNight(nightMode);
@@ -330,6 +351,7 @@ function applyWeather(fade = 0) {
   $('#rain').checked = rainMode;
   document.body.dataset.night = String(nightMode);
   document.body.dataset.rain = String(rainMode);
+  document.body.dataset.weather = weatherKind;
   document.body.dataset.lowBeams = String(Boolean(lowBeamsOn && headlights));
 }
 // The headlamps' lights are out of the scene by day (see headlights.js). Once
@@ -349,7 +371,8 @@ function warmNightPrograms() {
 // rain. Applied every frame, over the
 // daylight's values.
 const sunDirection = new THREE.Vector3(),
-  tunnelLampColour = new THREE.Color(1, 0.9, 0.76);
+  tunnelLampColour = new THREE.Color(1, 0.9, 0.76),
+  lightningColour = new THREE.Color(0.78, 0.84, 1);
 let inTunnel = false,
   // How far the camera is in the tunnel: no rain seen or heard there.
   cameraShelter = 0;
@@ -423,9 +446,14 @@ function applyStructureLight() {
   // An overpass's deck shades the car through the shadow map, as it passes
   // under; only the tunnel changes the light itself.
   sun.intensity = light.direct * (1 - cover);
-  ambient.intensity = light.ambient + (0.55 - light.ambient) * cover;
-  ambient.color.setRGB(...light.ambientColour).lerp(tunnelLampColour, cover);
-  fill.intensity = light.fill * (1 - cover);
+  // A lightning flash lights everything out in the open, cold and blue.
+  const strike = lightningFlash * (1 - cover);
+  ambient.intensity = light.ambient + (0.55 - light.ambient) * cover + 3.2 * strike;
+  ambient.color
+    .setRGB(...light.ambientColour)
+    .lerp(tunnelLampColour, cover)
+    .lerp(lightningColour, Math.min(1, strike * 1.5));
+  fill.intensity = light.fill * (1 - cover) + 1.6 * strike;
   scene.environmentIntensity = (1 - 0.2 * light.darkness) * (1 - 0.8 * cover);
   // Out of the rain, seen and heard, when the camera or the car is under
   // the tunnel's roof.
@@ -460,15 +488,16 @@ function keepCameraInTunnel() {
 }
 // Continuous changes for the current time and weather.
 function applyDaylight() {
-  light = daylight(timeOfDay, rainLevel);
-  environment.setConditions(light, rainLevel);
+  const conditions = { fog: fogLevel, storm: stormLevel };
+  light = daylight(timeOfDay, rainLevel, conditions);
+  environment.setConditions(light, rainLevel, { ...conditions, flash: lightningFlash });
   ambient.intensity = light.ambient;
   ambient.color.setRGB(...light.ambientColour);
   sun.intensity = light.direct;
   sun.color.setRGB(...light.directColour);
   fill.intensity = light.fill;
   document.body.dataset.timeOfDay = timeOfDay.toFixed(3);
-  dayBar.update(light, { running: timeRunning, raining: rainMode });
+  dayBar.update(light, { running: timeRunning, weather: weatherKind });
   if (light.night !== nightMode || light.lowBeams !== lowBeamsOn) {
     nightMode = light.night;
     lowBeamsOn = light.lowBeams;
@@ -479,16 +508,21 @@ function setTimeOfDay(hours) {
   timeOfDay = wrapHours(hours);
   applyDaylight();
 }
-function setRain(value, fade = 0) {
-  rainMode = value;
+function setWeather(kind, fade = 0) {
+  weatherKind = kind;
+  rainMode = isWet(kind);
   applyWeather(fade);
   applyDaylight();
 }
+function setRain(value, fade = 0) {
+  setWeather(value ? (weatherKind === 'storm' ? 'storm' : 'rain') : 'clear', fade);
+}
 const dayBar = setupDayBar($('#day-bar'), {
   setTime: setTimeOfDay,
-  toggleRain() {
-    weather.set(!rainMode);
-    setRain(!rainMode, rainEase);
+  nextWeather() {
+    const kind = nextWeather(weatherKind);
+    weather.set(kind);
+    setWeather(kind, rainEase);
   },
   toggleRunning() {
     timeRunning = !timeRunning;
@@ -769,6 +803,12 @@ new GLTFLoader().load(
       // ?time=17.5 sets the time of day (hours).
       if (query.has('time') && Number.isFinite(Number(query.get('time'))))
         setTimeOfDay(Number(query.get('time')));
+      // ?weather=fog (or rain, storm) sets in that weather at once.
+      if (['rain', 'storm', 'fog'].includes(query.get('weather'))) {
+        weather.set(query.get('weather'));
+        setWeather(weather.kind);
+        stepWeather(rainEase);
+      }
       setDriving(query.get('paused') !== '1');
       if (!traffic.vehicles.length) trafficView.reset(sim.x, roadLateral(sim.x, sim.z));
       // The loading screen fades once the scene has drawn in full.
@@ -895,9 +935,16 @@ renderer.setAnimationLoop((time) => {
     const ratio = renderQuality.update(frameDt);
     if (Math.abs(renderer.getPixelRatio() - ratio) > 0.001) renderer.setPixelRatio(ratio);
   }
-  if ($('#weather-cycle').checked && !document.hidden && weather.update(dt))
-    setRain(weather.raining, weatherCycle.fade);
-  if (!document.hidden) stepRain(dt);
+  if ($('#weather-cycle').checked && !document.hidden && weather.update(dt, timeOfDay))
+    setWeather(weather.kind, weatherCycle.fade);
+  if (!document.hidden) stepWeather(dt);
+  // Lightning lights the sky and the scene for a moment; its thunder comes
+  // after.
+  const flash = lightning.update(dt, camera, stormLevel, cameraShelter);
+  const flashChanged = flash !== lightningFlash;
+  lightningFlash = flash;
+  document.body.dataset.lightning = String(lightning.strikes);
+  if (flashChanged && !(timeRunning && !document.hidden)) applyDaylight();
   if (timeRunning && !document.hidden) {
     timeOfDay = wrapHours(timeOfDay + (dt * 24) / (dayCycle.minutesPerDay * 60));
     applyDaylight();
@@ -937,8 +984,9 @@ renderer.setAnimationLoop((time) => {
       const follow = leader
         ? Math.max(0, leader.speed + 0.35 * (leader.gap - (6 + 1.4 * leader.speed)))
         : Infinity;
+      // (In fog it keeps to about 70 km/h.)
       input.cruiseSpeed = Math.min(
-        autopilotSpeed,
+        autopilotSpeed * (1 - 0.22 * fogLevel),
         follow,
         curveSpeed(sim.x, keptLane, { lateral: rainMode ? 2.5 : 3.5 }),
         bumpSpeed(sim.x)
@@ -1122,7 +1170,7 @@ renderer.setAnimationLoop((time) => {
     cockpitCluster.update(dt, sim, nightMode, inCabin);
     centreDisplay.update(dt, sim, {
       hours: timeOfDay,
-      raining: rainMode,
+      weather: weatherKind,
       night: nightMode,
       visible: inCabin,
     });
@@ -1231,9 +1279,14 @@ renderer.setAnimationLoop((time) => {
     night: lowBeamsOn ? 1 : 0,
     playerCover: cameraShelter,
     sun: sunDirection,
-    // Sun shadows by day, fainter in rain and gone once the sun is down.
+    // Sun shadows by day, fainter in rain or fog and gone once the sun is
+    // down or under a storm's clouds.
     sunlight:
-      (1 - light.darkness) * (1 - 0.7 * rainLevel) * Math.min(1, Math.max(0, sunDirection.y * 6)),
+      (1 - light.darkness) *
+      (1 - 0.7 * rainLevel) *
+      (1 - 0.8 * fogLevel) *
+      (1 - stormLevel) *
+      Math.min(1, Math.max(0, sunDirection.y * 6)),
   });
   document.body.dataset.traffic = String(traffic.vehicles.length);
   speedCameras.update(sim?.x ?? 0, dt);
