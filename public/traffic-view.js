@@ -73,20 +73,6 @@ const box = (sx, sy, sz, x, y, z) => {
   g.deleteAttribute('uv');
   return g;
 };
-const wheel = (r, w, x, z) => {
-  const g = new THREE.CylinderGeometry(r, r, w, 16);
-  g.rotateX(Math.PI / 2);
-  g.translate(x, r, z);
-  g.deleteAttribute('uv');
-  return g;
-};
-const hub = (r, w, x, z, side) => {
-  const g = new THREE.CylinderGeometry(r * 0.62, r * 0.62, 0.02, 12);
-  g.rotateX(Math.PI / 2);
-  g.translate(x, r, z + side * (w / 2 + 0.005));
-  g.deleteAttribute('uv');
-  return g;
-};
 // A five-spoke alloy on a tyre's outer face: rim, spokes and centre cap in
 // metal over a dark recess.
 function alloy(parts, r, w, x, z, side) {
@@ -115,82 +101,171 @@ function alloy(parts, r, w, x, z, side) {
   cap.deleteAttribute('uv');
   parts.metal.push(cap);
 }
-// A dark wheel-arch lip over a wheel, on the body's side.
-function arch(r, x, z) {
-  const g = new THREE.TorusGeometry(r + 0.07, 0.045, 5, 18, Math.PI);
-  g.scale(1, 1, 0.6);
+
+// The parts of a vehicle, by what they are drawn with.
+const newParts = (trailer = false) => ({
+  paint: [],
+  ...(trailer ? { trailer: [] } : {}),
+  glass: [],
+  trim: [],
+  metal: [],
+  plate: [],
+  tail: [],
+  head: [],
+  left: [],
+  right: [],
+});
+// A side profile whose bottom edge (its first two points, rear and front)
+// is cut away round each wheel: an arch of `r` + clearance over each.
+function withArches(points, radii, wheels, r, clearance = 0.06) {
+  const ra = r + clearance;
+  const arc = [];
+  for (const x of [...wheels].sort((a, b) => a - b))
+    for (let i = 0; i <= 12; i++) {
+      const t = Math.PI - (i / 12) * Math.PI;
+      arc.push([x + ra * Math.cos(t), r + ra * Math.sin(t)]);
+    }
+  const [rear, front, ...rest] = points;
+  const [rr, fr, ...restRadii] = Array.isArray(radii) ? radii : points.map(() => radii);
+  return {
+    points: [rear, ...arc, front, ...rest],
+    radii: [rr, ...arc.map(() => 0.015), fr, ...restRadii],
+  };
+}
+// A dark wheel well behind an arch: half a tube across the body.
+function wheelWell(r, x, width, clearance = 0.06) {
+  const g = new THREE.CylinderGeometry(
+    r + clearance,
+    r + clearance,
+    width,
+    14,
+    1,
+    true,
+    -Math.PI / 2,
+    Math.PI
+  );
+  g.rotateX(Math.PI / 2);
+  g.translate(x, r, 0);
+  g.deleteAttribute('uv');
+  return g;
+}
+// A tyre with its tread and both sidewalls.
+function tyre(r, w, x, z) {
+  const g = new THREE.CylinderGeometry(r, r, w, 22);
+  g.rotateX(Math.PI / 2);
   g.translate(x, r, z);
   g.deleteAttribute('uv');
   return g;
 }
+// A plain steel wheel with its hub cap, on a van or a lorry.
+function steelWheel(parts, r, w, x, z, side) {
+  parts.trim.push(tyre(r, w, x, z));
+  const face = z + side * (w / 2 + 0.004);
+  const rim = new THREE.CylinderGeometry(r * 0.66, r * 0.66, 0.02, 18);
+  rim.rotateX(Math.PI / 2);
+  rim.translate(x, r, face);
+  rim.deleteAttribute('uv');
+  parts.metal.push(rim);
+  const cap = new THREE.CylinderGeometry(r * 0.24, r * 0.3, 0.06, 12);
+  cap.rotateX(Math.PI / 2);
+  cap.translate(x, r, face + side * 0.03);
+  cap.deleteAttribute('uv');
+  parts.trim.push(cap);
+}
+// A slanted box: `sx` long, `sy` tall, `sz` deep, tilted back by `lean`
+// (radians) about its own centre.
+const leaning = (sx, sy, sz, x, y, z, lean) => {
+  const g = new THREE.BoxGeometry(sx, sy, sz);
+  g.rotateZ(lean);
+  g.translate(x, y, z);
+  g.deleteAttribute('uv');
+  return g;
+};
 
-// A car: lower body, greenhouse, roof, bumpers, wheels and lamps.
+// A car: a body with its wheel arches cut out and dark wells behind them,
+// a glasshouse leaning in with black pillars and a bright line along the
+// windows, a roof, bumpers with their dark lower parts, a grille, lamps in
+// dark housings, door handles and mirrors, and alloy wheels on tyres.
 function car({ length: L, width: W }, profile) {
   const { body, glass, roof, wheelbase, r, frontOverhang, lampY } = profile;
-  const parts = {
-    paint: [],
-    glass: [],
-    trim: [],
-    metal: [],
-    plate: [],
-    tail: [],
-    head: [],
-    left: [],
-    right: [],
-  };
+  const parts = newParts();
+  const front = L / 2 - frontOverhang,
+    rear = front - wheelbase;
   const belt = body.points.reduce((m, p) => Math.max(m, p[1]), 0);
   const top = roof.points.reduce((m, p) => Math.max(m, p[1]), 0);
-  // The body rounded at its shoulders, the greenhouse and roof leaning in.
-  parts.paint.push(taper(extruded(body.points, body.radii, W, 0.1), belt - 0.35, belt, 0.95));
+  // The body, its arches cut out, rounded at the shoulders.
+  const cut = withArches(body.points, body.radii, [front, rear], r);
+  parts.paint.push(taper(extruded(cut.points, cut.radii, W, 0.1), belt - 0.35, belt, 0.95));
+  for (const x of [front, rear]) parts.trim.push(wheelWell(r, x, W - 0.16));
+  // The glasshouse and the roof over it.
   parts.glass.push(
     taper(extruded(glass.points, glass.radii, W * 0.9, 0.05), belt - 0.05, top, 0.78)
   );
   parts.paint.push(taper(extruded(roof.points, roof.radii, W * 0.74, 0.05), belt, top, 0.92));
-  // Pillars between the side windows (the B-pillar, and on a saloon the
-  // C-pillar's root), leaning in with the glass.
   const [rearSill, screenBase, screenTop, rearTop] = glass.points;
+  // Black pillars between the side windows, and a bright strip along their
+  // foot.
   const pillar = (x, width) => {
     for (const side of [-1, 1]) {
       const g = box(width, top - belt + 0.05, 0.02, x, (belt + top) / 2, side * (W * 0.45 + 0.012));
-      parts.paint.push(taper(g, belt - 0.05, top, 0.78));
+      parts.trim.push(taper(g, belt - 0.05, top, 0.78));
     }
   };
-  pillar((screenTop[0] + rearTop[0]) / 2 + 0.05, 0.1);
-  // Door seams and the sill below them.
-  const doorFront = screenBase[0] - 0.05,
-    doorRear = rearSill[0] + 0.25;
-  const seams = [doorFront, (screenTop[0] + rearTop[0]) / 2 + 0.05, doorRear];
-  for (const side of [-1, 1]) {
-    for (const x of seams)
-      parts.trim.push(
-        box(0.012, belt - 0.55, 0.006, x, 0.3 + (belt - 0.55) / 2 + 0.12, side * (W / 2 + 0.004))
-      );
-    parts.trim.push(
+  const bPillar = (screenTop[0] + rearTop[0]) / 2 + 0.05;
+  pillar(bPillar, 0.12);
+  for (const side of [-1, 1])
+    parts.metal.push(
       box(
-        doorFront - doorRear + 0.2,
-        0.08,
+        screenBase[0] - rearSill[0] - 0.2,
+        0.025,
         0.02,
-        (doorFront + doorRear) / 2,
-        0.34,
-        side * (W / 2 - 0.005)
+        (screenBase[0] + rearSill[0]) / 2,
+        belt + 0.02,
+        side * (W * 0.45 + 0.016)
       )
     );
-    // Door mirrors at the windscreen's foot.
-    parts.paint.push(
-      box(0.1, 0.09, 0.17, screenBase[0] - 0.18, belt + 0.09, side * (W / 2 + 0.06))
-    );
+  // Door seams, handles and the sill between the arches.
+  const doorFront = screenBase[0] - 0.05,
+    doorRear = rearSill[0] + 0.25;
+  for (const side of [-1, 1]) {
+    for (const x of [doorFront, bPillar, doorRear])
+      parts.trim.push(
+        box(0.012, belt - 0.5, 0.006, x, 0.3 + (belt - 0.5) / 2 + 0.1, side * (W / 2 + 0.004))
+      );
+    for (const x of [bPillar - 0.28, doorRear + 0.32])
+      parts.metal.push(box(0.16, 0.035, 0.03, x, belt - 0.12, side * (W / 2 + 0.01)));
     parts.trim.push(
-      box(0.06, 0.03, 0.08, screenBase[0] - 0.16, belt + 0.03, side * (W / 2 - 0.01))
+      box(
+        front - rear - 2 * (r + 0.08),
+        0.09,
+        0.03,
+        (front + rear) / 2,
+        0.33,
+        side * (W / 2 - 0.004)
+      )
+    );
+    // Door mirrors at the windscreen's foot: a cap in the body's colour on
+    // a dark base, its glass facing back.
+    parts.paint.push(box(0.11, 0.1, 0.19, screenBase[0] - 0.2, belt + 0.1, side * (W / 2 + 0.07)));
+    parts.trim.push(
+      box(0.08, 0.04, 0.1, screenBase[0] - 0.16, belt + 0.03, side * (W / 2 - 0.005))
+    );
+    parts.glass.push(
+      box(0.01, 0.07, 0.15, screenBase[0] - 0.26, belt + 0.1, side * (W / 2 + 0.07))
     );
   }
-  // Grille between the headlamps; tail lamps wrap round the rear corners.
-  parts.trim.push(box(0.04, 0.14, W * 0.42, L / 2 + 0.03, lampY.head - 0.04, 0));
-  for (const side of [-1, 1])
-    parts.tail.push(box(0.26, 0.13, 0.03, -L / 2 + 0.13, lampY.tail, side * (W / 2 + 0.004)));
+  // The front: a grille in a bright surround between the lamps, a dark
+  // intake low in the bumper; the rear: a dark diffuser.
+  const nose = L / 2;
+  parts.trim.push(box(0.05, 0.16, W * 0.4, nose + 0.02, lampY.head - 0.03, 0));
+  parts.metal.push(box(0.03, 0.02, W * 0.42, nose + 0.035, lampY.head + 0.06, 0));
+  parts.metal.push(box(0.03, 0.02, W * 0.42, nose + 0.035, lampY.head - 0.12, 0));
+  parts.trim.push(box(0.08, 0.1, W * 0.62, nose - 0.02, 0.4, 0));
+  parts.trim.push(box(0.12, 0.12, W * 0.86, -nose + 0.06, 0.38, 0));
+  // Roof rails on an SUV.
   if (profile.rails)
     for (const side of [-1, 1])
-      parts.trim.push(
-        // (Within the roof, short of each end.)
+      parts.metal.push(
         box(
           screenTop[0] - rearTop[0] - 0.3,
           0.05,
@@ -201,25 +276,26 @@ function car({ length: L, width: W }, profile) {
         )
       );
   // Number plates, front and rear.
-  parts.plate.push(plateAt(-L / 2 - 0.035, lampY.tail - 0.33, -1));
-  parts.plate.push(plateAt(L / 2 + 0.035, 0.46, 1));
-  // Bumpers' dark lower edges.
-  parts.trim.push(box(0.12, 0.16, W * 0.92, L / 2 - 0.05, 0.36, 0));
-  parts.trim.push(box(0.12, 0.16, W * 0.92, -L / 2 + 0.05, 0.38, 0));
-  const front = L / 2 - frontOverhang,
-    rear = front - wheelbase;
+  parts.plate.push(plateAt(-nose - 0.035, lampY.tail - 0.33, -1));
+  parts.plate.push(plateAt(nose + 0.035, 0.46, 1));
+  // Alloy wheels on tyres, flush with the body's sides.
   for (const x of [front, rear])
     for (const side of [-1, 1]) {
-      parts.trim.push(wheel(r, 0.22, x, side * (W / 2 - 0.14)));
-      alloy(parts, r, 0.22, x, side * (W / 2 - 0.14), side);
-      parts.trim.push(arch(r, x, side * (W / 2 - 0.01)));
+      const z = side * (W / 2 - 0.13);
+      parts.trim.push(tyre(r, 0.22, x, z));
+      alloy(parts, r, 0.22, x, z, side);
     }
+  // Lamps: each in a dark housing, the tail lamps wrapping round the rear
+  // corners, the indicators at the corners.
   for (const side of [-1, 1]) {
-    parts.tail.push(box(0.06, 0.14, 0.42, -L / 2 - 0.01, lampY.tail, side * (W / 2 - 0.28)));
-    parts.head.push(box(0.05, 0.1, 0.32, L / 2 + 0.01, lampY.head, side * (W / 2 - 0.25)));
+    parts.trim.push(box(0.05, 0.16, 0.42, nose - 0.01, lampY.head, side * (W / 2 - 0.25)));
+    parts.head.push(box(0.03, 0.09, 0.34, nose + 0.012, lampY.head + 0.01, side * (W / 2 - 0.27)));
+    parts.trim.push(box(0.05, 0.17, 0.48, -nose + 0.01, lampY.tail, side * (W / 2 - 0.26)));
+    parts.tail.push(box(0.03, 0.12, 0.42, -nose - 0.012, lampY.tail, side * (W / 2 - 0.27)));
+    parts.tail.push(box(0.3, 0.12, 0.03, -nose + 0.16, lampY.tail, side * (W / 2 + 0.004)));
     const lamps = side < 0 ? parts.left : parts.right;
-    lamps.push(box(0.05, 0.07, 0.08, -L / 2 - 0.012, lampY.tail, side * (W / 2 - 0.05)));
-    lamps.push(box(0.05, 0.06, 0.08, L / 2 + 0.012, lampY.head, side * (W / 2 - 0.05)));
+    lamps.push(box(0.05, 0.07, 0.08, -nose - 0.014, lampY.tail, side * (W / 2 - 0.05)));
+    lamps.push(box(0.05, 0.06, 0.08, nose + 0.014, lampY.head, side * (W / 2 - 0.05)));
   }
   return parts;
 }
@@ -300,8 +376,8 @@ const profiles = {
   suv: {
     body: {
       points: [
-        [-2.3, 0.38],
-        [2.28, 0.38],
+        [-2.3, 0.4],
+        [2.28, 0.4],
         [2.33, 0.65],
         [2.25, 0.92],
         [1.25, 1.06],
@@ -335,135 +411,213 @@ const profiles = {
     rails: true,
   },
 };
+// A panel van: a short bonnet and a raked windscreen, the cab's side
+// windows, a sliding side door on its rail, two rear doors, a dark rubbing
+// strip along the sides, black bumpers, mirrors on arms, steel wheels.
 function van({ length: L, width: W }) {
-  const parts = {
-    paint: [],
-    glass: [],
-    trim: [],
-    metal: [],
-    plate: [],
-    tail: [],
-    head: [],
-    left: [],
-    right: [],
-  };
-  parts.paint.push(
-    extruded(
-      [
-        [-2.95, 0.35],
-        [2.88, 0.35],
-        [2.96, 0.7],
-        [2.78, 1.05],
-        [2.22, 1.25],
-        [1.62, 2.32],
-        [-2.9, 2.42],
-        [-2.97, 0.7],
-      ],
-      [0.08, 0.08, 0.15, 0.3, 0.2, 0.3, 0.12, 0.08],
-      W,
-      0.07
-    )
+  const parts = newParts();
+  const nose = L / 2,
+    tail = -L / 2;
+  const r = 0.36,
+    front = nose - 0.98,
+    rear = front - 3.66;
+  const shape = withArches(
+    [
+      [tail + 0.06, 0.38],
+      [nose - 0.1, 0.38],
+      [nose, 0.58],
+      [nose - 0.05, 0.95],
+      [nose - 0.62, 1.15],
+      [nose - 1.38, 2.25],
+      [nose - 1.62, 2.44],
+      [tail + 0.08, 2.46],
+      [tail, 2.2],
+      [tail, 0.55],
+    ],
+    [0.05, 0.06, 0.12, 0.2, 0.12, 0.25, 0.3, 0.12, 0.1, 0.06],
+    [front, rear],
+    r
   );
-  // Windscreen and the cab's side windows.
+  parts.paint.push(extruded(shape.points, shape.radii, W, 0.08));
+  for (const x of [front, rear]) parts.trim.push(wheelWell(r, x, W - 0.16));
+  // The windscreen and the cab's side windows, standing just proud.
   parts.glass.push(
     extruded(
       [
-        [0.95, 1.32],
-        [2.2, 1.3],
-        [1.7, 2.06],
-        [0.95, 2.08],
+        [nose - 2.1, 1.36],
+        [nose - 0.66, 1.2],
+        [nose - 1.4, 2.15],
+        [nose - 2.1, 2.15],
       ],
-      [0.02, 0.05, 0.08, 0.02],
+      [0.03, 0.04, 0.06, 0.03],
       W + 0.02,
       0.02
     )
   );
-  parts.trim.push(box(0.14, 0.2, W * 0.95, L / 2 - 0.02, 0.42, 0));
-  parts.trim.push(box(0.14, 0.2, W * 0.95, -L / 2 + 0.03, 0.42, 0));
-  parts.plate.push(plateAt(-L / 2 - 0.05, 0.62, -1));
-  parts.plate.push(plateAt(L / 2 + 0.03, 0.55, 1));
-  // The rear doors' seam.
-  parts.trim.push(box(0.02, 1.7, 0.03, -L / 2 - 0.03, 1.45, 0));
-  for (const x of [1.95, -1.72])
-    for (const side of [-1, 1]) {
-      parts.trim.push(wheel(0.34, 0.24, x, side * (W / 2 - 0.16)));
-      parts.metal.push(hub(0.34, 0.24, x, side * (W / 2 - 0.16), side));
-    }
+  // The B-pillar behind the cab doors, black.
+  for (const side of [-1, 1])
+    parts.trim.push(box(0.12, 0.85, 0.02, nose - 2.16, 1.75, side * (W / 2 + 0.012)));
   for (const side of [-1, 1]) {
-    parts.tail.push(box(0.05, 0.36, 0.14, -L / 2 - 0.01, 1.05, side * (W / 2 - 0.1)));
-    parts.head.push(box(0.05, 0.12, 0.34, L / 2 - 0.05, 0.82, side * (W / 2 - 0.28)));
+    const z = side * (W / 2 + 0.005);
+    // The sliding door (right side only, as on the real ones) and its rail.
+    if (side > 0) {
+      for (const x of [nose - 2.25, nose - 3.75])
+        parts.trim.push(box(0.014, 1.75, 0.008, x, 1.4, z));
+      parts.trim.push(box(1.9, 0.04, 0.03, nose - 3.4, 2.02, z));
+    }
+    // The cab door's seam, its handle; the rubbing strip; the mirror.
+    parts.trim.push(box(0.014, 1.5, 0.008, nose - 0.75, 1.35, z));
+    parts.metal.push(box(0.16, 0.035, 0.03, nose - 2.0, 1.2, side * (W / 2 + 0.012)));
+    parts.trim.push(box(L - 1.6, 0.14, 0.03, -0.4, 0.68, side * (W / 2 + 0.008)));
+    parts.trim.push(box(0.04, 0.04, 0.32, nose - 0.75, 1.62, side * (W / 2 + 0.14)));
+    parts.trim.push(box(0.1, 0.34, 0.16, nose - 0.8, 1.72, side * (W / 2 + 0.3)));
+    parts.glass.push(box(0.01, 0.28, 0.12, nose - 0.86, 1.72, side * (W / 2 + 0.3)));
+  }
+  // Bumpers, the grille with its bright bars, the rear doors' seams and
+  // their handle.
+  parts.trim.push(box(0.16, 0.24, W * 0.98, nose - 0.04, 0.46, 0));
+  parts.trim.push(box(0.14, 0.24, W * 0.98, tail + 0.04, 0.46, 0));
+  parts.trim.push(box(0.05, 0.3, W * 0.52, nose - 0.02, 0.8, 0));
+  for (const y of [0.72, 0.82, 0.92]) parts.metal.push(box(0.03, 0.02, W * 0.5, nose + 0.01, y, 0));
+  for (const z of [0, -W / 2 + 0.06, W / 2 - 0.06])
+    parts.trim.push(box(0.02, 1.85, 0.025, tail - 0.012, 1.5, z));
+  parts.metal.push(box(0.03, 0.04, 0.16, tail - 0.02, 1.25, 0.1));
+  parts.plate.push(plateAt(tail - 0.05, 0.62, -1));
+  parts.plate.push(plateAt(nose + 0.05, 0.5, 1));
+  for (const x of [front, rear])
+    for (const side of [-1, 1]) steelWheel(parts, r, 0.24, x, side * (W / 2 - 0.15), side);
+  for (const side of [-1, 1]) {
+    // Headlamps on the corners of the nose, tail lamps up the rear pillars.
+    parts.trim.push(leaning(0.42, 0.2, 0.42, nose - 0.25, 1.0, side * (W / 2 - 0.24), 0.32));
+    parts.head.push(leaning(0.36, 0.13, 0.36, nose - 0.22, 1.02, side * (W / 2 - 0.25), 0.32));
+    parts.tail.push(box(0.05, 0.5, 0.14, tail - 0.01, 1.1, side * (W / 2 - 0.08)));
     const lamps = side < 0 ? parts.left : parts.right;
-    lamps.push(box(0.05, 0.1, 0.14, -L / 2 - 0.012, 0.8, side * (W / 2 - 0.1)));
-    lamps.push(box(0.05, 0.07, 0.1, L / 2 - 0.04, 0.82, side * (W / 2 - 0.06)));
+    lamps.push(box(0.05, 0.12, 0.14, tail - 0.012, 0.78, side * (W / 2 - 0.08)));
+    lamps.push(box(0.05, 0.07, 0.1, nose - 0.08, 0.98, side * (W / 2 - 0.04)));
   }
   return parts;
 }
-// A tractor unit and a box trailer, 16.5 m in all.
+// A tractor unit and a box trailer, 16.5 m in all. The cab: a sloped,
+// rounded front with a big windscreen under a sun visor, a dark grille with
+// bright bars, a heavy bumper with the headlamps in it, mirrors on long
+// arms, steps under the doors, a roof fairing up to the trailer's height,
+// fuel tanks and side fairings. The trailer: ribbed sides between bright
+// top and bottom rails, side guards, landing legs, rear doors with their
+// locking bars, a bumper, mud flaps and three axles.
 function lorry({ length: L, width: W }) {
-  const parts = {
-    paint: [],
-    trailer: [],
-    glass: [],
-    trim: [],
-    metal: [],
-    plate: [],
-    tail: [],
-    head: [],
-    left: [],
-    right: [],
-  };
+  const parts = newParts(true);
   const front = L / 2;
+  const cabBack = front - 2.35;
   parts.paint.push(
     extruded(
       [
-        [front - 2.35, 0.95],
-        [front - 0.02, 0.95],
-        [front + 0.03, 1.5],
-        [front - 0.05, 3.55],
-        [front - 0.35, 3.86],
-        [front - 2.35, 3.86],
+        [cabBack, 0.95],
+        [front - 0.03, 0.95],
+        [front + 0.05, 1.6],
+        [front + 0.02, 2.25],
+        [front - 0.14, 3.4],
+        [front - 0.42, 3.86],
+        [cabBack, 3.86],
       ],
-      [0.05, 0.08, 0.12, 0.3, 0.2, 0.05],
+      [0.05, 0.08, 0.12, 0.1, 0.25, 0.2, 0.05],
       W,
-      0.08
+      0.1
     )
   );
-  parts.glass.push(box(0.06, 1.0, W - 0.3, front - 0.03, 2.62, 0));
-  parts.glass.push(box(0.7, 0.85, W + 0.02, front - 0.75, 2.6, 0));
-  parts.trailer.push(box(13.6, 2.75, W, front - 2.55 - 6.8, 1.25 + 2.75 / 2, 0));
-  // Chassis, bumper, the gap under the trailer and its underrun bar.
+  // The roof fairing, up toward the trailer's roof.
+  parts.paint.push(
+    extruded(
+      [
+        [cabBack + 0.1, 3.8],
+        [front - 0.55, 3.8],
+        [cabBack + 0.6, 4.02],
+        [cabBack + 0.1, 4.02],
+      ],
+      [0.02, 0.15, 0.2, 0.02],
+      W - 0.2,
+      0.05
+    )
+  );
+  // Windscreen, the doors' windows and the sun visor over them.
+  parts.glass.push(leaning(0.05, 1.08, W - 0.26, front - 0.06, 2.82, 0, -0.14));
+  parts.glass.push(box(0.75, 0.82, W + 0.02, front - 0.82, 2.72, 0));
+  parts.trim.push(leaning(0.32, 0.05, W - 0.12, front - 0.12, 3.44, 0, 0.2));
+  // Grille with bright bars, the bumper and the headlamps' housings.
+  parts.trim.push(box(0.06, 0.82, W * 0.62, front + 0.05, 1.82, 0));
+  for (const y of [1.55, 1.72, 1.89, 2.06])
+    parts.metal.push(box(0.04, 0.035, W * 0.6, front + 0.08, y, 0));
+  parts.trim.push(box(0.28, 0.42, W - 0.02, front - 0.02, 0.82, 0));
+  // Mirrors on their arms, the steps, fuel tanks and the side fairings.
+  for (const side of [-1, 1]) {
+    parts.trim.push(box(0.05, 0.05, 0.42, front - 0.3, 2.9, side * (W / 2 + 0.18)));
+    parts.trim.push(box(0.12, 0.62, 0.2, front - 0.32, 2.6, side * (W / 2 + 0.4)));
+    parts.glass.push(box(0.01, 0.55, 0.16, front - 0.39, 2.6, side * (W / 2 + 0.4)));
+    for (const y of [0.55, 0.85])
+      parts.trim.push(box(0.5, 0.05, 0.26, front - 1.75, y, side * (W / 2 - 0.12)));
+    const tank = new THREE.CylinderGeometry(0.3, 0.3, 1.2, 16);
+    tank.rotateZ(Math.PI / 2);
+    tank.translate(front - 3.2, 0.72, side * (W / 2 - 0.32));
+    tank.deleteAttribute('uv');
+    parts.metal.push(tank);
+    parts.paint.push(box(1.6, 0.55, 0.04, front - 3.9, 1.0, side * (W / 2 - 0.02)));
+  }
+  // The trailer: its box, ribs along both sides and bright rails top and
+  // bottom.
+  const trailerFront = front - 2.55,
+    back = trailerFront - 13.6,
+    trailerMid = (trailerFront + back) / 2,
+    floor = 1.25,
+    height = 2.75;
+  parts.trailer.push(box(13.6, height, W, trailerMid, floor + height / 2, 0));
+  for (const side of [-1, 1]) {
+    for (let x = back + 0.6; x < trailerFront - 0.3; x += 0.62)
+      parts.trailer.push(
+        box(0.07, height - 0.2, 0.035, x, floor + height / 2, side * (W / 2 + 0.012))
+      );
+    for (const y of [floor + 0.06, floor + height - 0.06])
+      parts.metal.push(box(13.6, 0.1, 0.04, trailerMid, y, side * (W / 2 + 0.02)));
+    // Side guards between the legs and the rear axles.
+    for (const y of [0.6, 0.95])
+      parts.metal.push(box(6.2, 0.06, 0.03, back + 8.4, y, side * (W / 2 - 0.06)));
+    // The landing legs.
+    parts.trim.push(box(0.1, 0.9, 0.1, trailerFront - 2.4, floor - 0.45, side * (W / 2 - 0.35)));
+  }
+  // Chassis under it all, the cab's mudguards and the rear underrun bar.
   parts.trim.push(box(L - 0.4, 0.35, 0.9, 0, 0.95, 0));
-  parts.trim.push(box(0.22, 0.45, W - 0.1, front - 0.05, 0.75, 0));
-  parts.trim.push(box(0.12, 0.18, W - 0.3, -L / 2 + 0.25, 0.55, 0));
-  parts.trim.push(box(2.6, 0.25, W - 0.4, front - 3.6, 1.12, 0));
-  // The trailer's rear doors (hinges, locking bars and the seam), its plate
-  // and mud flaps.
-  const back = front - 2.55 - 13.6;
+  parts.trim.push(box(0.16, 0.2, W - 0.3, back + 0.25, 0.55, 0));
+  // The rear doors, their hinges and locking bars, and the plates.
   for (const dz of [-0.55, 0.55, -1.18, 1.18])
-    parts.trim.push(box(0.05, 2.55, 0.05, back - 0.03, 2.62, dz));
-  parts.trim.push(box(0.03, 2.7, 0.025, back - 0.015, 2.62, 0));
-  parts.plate.push(plateAt(-L / 2 + 0.2, 0.42, -1));
-  parts.plate.push(plateAt(front + 0.14, 0.62, 1));
+    parts.metal.push(box(0.05, height - 0.2, 0.045, back - 0.03, floor + height / 2, dz));
+  parts.trim.push(box(0.03, height - 0.1, 0.025, back - 0.015, floor + height / 2, 0));
+  parts.plate.push(plateAt(back + 0.25 - 0.06, 0.42, -1));
+  parts.plate.push(plateAt(front + 0.12, 0.62, 1));
   for (const side of [-1, 1])
-    parts.trim.push(box(0.03, 0.55, 0.55, -L / 2 + 0.15, 0.62, side * (W / 2 - 0.35)));
-  const r = 0.52;
-  for (const [x, w] of [
-    [front - 1.15, 0.34],
-    [front - 4.9, 0.6],
-    [-L / 2 + 3.3, 0.6],
-    [-L / 2 + 2.0, 0.6],
-    [-L / 2 + 0.7, 0.6],
+    parts.trim.push(box(0.03, 0.55, 0.55, back + 0.15, 0.62, side * (W / 2 - 0.35)));
+  // Single tyres in front, pairs of tyres side by side on the drive axle
+  // and the trailer's three.
+  const r = 0.5;
+  for (const [x, dual] of [
+    [front - 1.15, false],
+    [front - 4.9, true],
+    [back + 3.3, true],
+    [back + 2.0, true],
+    [back + 0.7, true],
   ])
     for (const side of [-1, 1]) {
-      parts.trim.push(wheel(r, w, x, side * (W / 2 - w / 2 - 0.02)));
-      parts.metal.push(hub(r, w, x, side * (W / 2 - w / 2 - 0.02), side));
+      const outer = side * (W / 2 - 0.16);
+      steelWheel(parts, r, 0.3, x, outer, side);
+      if (dual) parts.trim.push(tyre(r, 0.28, x, outer - side * 0.34));
     }
+  // Mudguards over the cab's wheels.
+  for (const x of [front - 1.15, front - 4.9])
+    for (const side of [-1, 1])
+      parts.trim.push(box(1.1, 0.05, 0.62, x, 1.14, side * (W / 2 - 0.3)));
   for (const side of [-1, 1]) {
-    parts.tail.push(box(0.05, 0.14, 0.42, -L / 2 + 0.22, 0.68, side * (W / 2 - 0.35)));
-    parts.head.push(box(0.05, 0.16, 0.36, front + 0.02, 1.08, side * (W / 2 - 0.3)));
+    parts.tail.push(box(0.05, 0.14, 0.42, back + 0.22, 0.68, side * (W / 2 - 0.35)));
+    parts.head.push(box(0.05, 0.16, 0.36, front + 0.13, 0.86, side * (W / 2 - 0.3)));
     const lamps = side < 0 ? parts.left : parts.right;
-    lamps.push(box(0.05, 0.12, 0.12, -L / 2 + 0.22, 0.68, side * (W / 2 - 0.08)));
-    lamps.push(box(0.05, 0.1, 0.14, front + 0.02, 1.08, side * (W / 2 - 0.06)));
+    lamps.push(box(0.05, 0.12, 0.12, back + 0.22, 0.68, side * (W / 2 - 0.08)));
+    lamps.push(box(0.05, 0.1, 0.14, front + 0.13, 0.86, side * (W / 2 - 0.06)));
   }
   return parts;
 }
@@ -561,15 +715,19 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
   // The same traffic for the same road (?road=N), for repeatable pictures.
   const traffic = new Traffic({ count, random: seededRandom(roadSeed || 1, 9) });
   const materials = {
-    paint: new THREE.MeshStandardMaterial({
+    // Glossy paint under a clear coat, reflecting the sky as the car's own
+    // does.
+    paint: new THREE.MeshPhysicalMaterial({
       name: 'Traffic paint',
-      metalness: 0.45,
-      roughness: 0.32,
+      metalness: 0.5,
+      roughness: 0.38,
+      clearcoat: 1,
+      clearcoatRoughness: 0.06,
     }),
     trailer: new THREE.MeshStandardMaterial({
       name: 'Trailer sides',
-      metalness: 0.1,
-      roughness: 0.6,
+      metalness: 0.15,
+      roughness: 0.55,
     }),
     glass: new THREE.MeshStandardMaterial({
       name: 'Traffic glass',

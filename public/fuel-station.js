@@ -10,6 +10,7 @@ import {
 } from './road-profile.js';
 import { nearestOccurrence } from './road-structures.js';
 import { Kit, canvasTexture } from './build-kit.js';
+import { addSurfaceDetail } from './surface-detail.js';
 import { groupShadow } from './sun-shadows.js';
 
 // A roadside fuel station on the country road, on its far side where it
@@ -151,7 +152,7 @@ function station() {
   const kit = new Kit();
   const { length, from, depth } = fuelStationPlace;
   // The forecourt: a slab of concrete, thin so the car's wheels sit on it.
-  kit.box(length, 0.04, depth, 0, 0, from + depth / 2, 0x6f7377);
+  kit.box(length, 0.04, depth, 0, 0, from + depth / 2, 0x9a9ea2);
   // Paint on it: dashed lines between the lanes past the islands, arrows
   // showing the way through (in from the left, out to the right) and a
   // stop line by each pump.
@@ -168,20 +169,43 @@ function station() {
   for (const x of [-20, 18]) for (const z of [pumpRow - 3, pumpRow + 3]) arrowAt(x, z);
   for (const x of pumpIslands)
     for (const side of [-1, 1]) kit.box(0.2, 0.004, 1.9, x + 2.6, y, pumpRow + side * 2.5, paint);
-  // Kerbs round the islands, the dispensers on them, their hoses' holsters.
+  // Kerbs round the islands and the dispensers on them: on a dark plinth, a
+  // white body with the brand's green band on top, and on each face (both
+  // lanes) a dark display with its price strip, the nozzles in their black
+  // holsters and the hoses hanging in loops.
   for (const x of pumpIslands) {
     kit.box(1.4, 0.18, 5.2, x, 0.04, pumpRow, 0xd9dcde);
     for (const z of [pumpRow - 1.3, pumpRow + 1.3]) {
-      kit.box(0.9, 1.9, 0.55, x, 0.22, z, 0xf3f4f5);
+      kit.box(0.96, 0.22, 0.6, x, 0.22, z, 0x3a3f44);
+      kit.box(0.9, 1.68, 0.55, x, 0.44, z, 0xf3f4f5);
       kit.box(0.92, 0.32, 0.57, x, 1.72, z, brandGreen);
-      kit.box(0.5, 0.3, 0.58, x, 1.25, z, 0x1a1d20);
+      kit.box(0.94, 0.04, 0.59, x, 2.04, z, 0xdfe3e6);
+      for (const face of [-1, 1]) {
+        const fx = x + face * 0.455;
+        kit.box(0.02, 0.36, 0.42, fx, 1.18, z, 0x14181c);
+        kit.box(0.025, 0.07, 0.36, fx + face * 0.004, 1.42, z, 0xd8f0a8);
+        for (const dz of [-0.16, 0, 0.16]) {
+          kit.box(0.08, 0.2, 0.07, fx + face * 0.04, 0.82, z + dz, 0x1b1d20);
+          // The hose: a loop down from the top and back up to the nozzle.
+          const hose = new THREE.TorusGeometry(0.34, 0.018, 5, 14, Math.PI);
+          hose.rotateZ(Math.PI);
+          hose.rotateY(Math.PI / 2);
+          kit.add(hose, 0x22252a, new THREE.Matrix4().setPosition(fx + face * 0.05, 1.3, z + dz));
+        }
+      }
     }
-    // Bollards at the islands' ends.
+    // Bollards at the islands' ends, and a bin.
     for (const z of [pumpRow - 2.9, pumpRow + 2.9]) kit.cylinder(0.11, 0.9, x, 0.04, z, 0xf2c230);
+    kit.cylinder(0.2, 0.75, x, 0.22, pumpRow, 0x5b636b);
   }
-  // The canopy's columns.
+  // The canopy's columns: clad in the brand's green to head height, a
+  // bright ring at the top of the cladding.
   for (const x of [-12, -4, 4, 12])
-    for (const z of [pumpRow - 3.6, pumpRow + 3.6]) kit.box(0.45, 5.4, 0.45, x, 0, z, 0xe4e6e8);
+    for (const z of [pumpRow - 3.6, pumpRow + 3.6]) {
+      kit.box(0.45, 5.4, 0.45, x, 0, z, 0xe4e6e8);
+      kit.box(0.55, 1.6, 0.55, x, 0, z, brandGreen);
+      kit.box(0.57, 0.06, 0.57, x, 1.6, z, 0xe9ecef);
+    }
   // The shop: walls, a flat roof with a parapet, a glass front (see below)
   // and a door frame.
   const shopZ = from + depth - 6.5;
@@ -189,12 +213,32 @@ function station() {
   kit.box(18.4, 0.6, 9.4, 0, 4.2, shopZ + 2.5, 0x2e3236);
   kit.box(0.3, 4.2, 0.3, -9.05, 0, shopZ - 2.05, 0x2e3236);
   kit.box(0.3, 4.2, 0.3, 9.05, 0, shopZ - 2.05, 0x2e3236);
-  // An air and water post and a bin by the shop.
+  // The door in the glass front: its frame and handles.
+  kit.box(1.9, 2.4, 0.08, 4, 0, shopZ - 2.02, 0x2e3236);
+  for (const dx of [-0.12, 0.12]) kit.box(0.04, 0.9, 0.06, 4 + dx, 0.7, shopZ - 2.08, 0xc9ced3);
+  // Air-conditioning units on the roof.
+  for (const x of [-5, 0.5]) {
+    kit.box(1.4, 0.8, 1, x, 4.8, shopZ + 4, 0xc8ccd0);
+    kit.cylinder(0.32, 0.04, x, 5.6, shopZ + 4, 0x40464c, 16);
+  }
+  // An air and water post, a bin, a bench and an ice chest by the shop, and
+  // a cage of gas cylinders at its corner.
   kit.box(0.4, 1.3, 0.4, 13, 0.04, shopZ - 3, 0x2a62a8);
   kit.cylinder(0.25, 0.8, -13, 0.04, shopZ - 3, 0x3a3f44);
+  kit.box(1.8, 0.08, 0.45, -6.5, 0.45, shopZ - 2.6, 0x8a6a48);
+  for (const dx of [-0.75, 0.75]) kit.box(0.08, 0.45, 0.4, -6.5 + dx, 0.04, shopZ - 2.6, 0x3a3f44);
+  kit.box(1.3, 0.85, 0.7, 7.2, 0.04, shopZ - 2.6, 0xf2f4f6);
+  kit.box(1.32, 0.12, 0.72, 7.2, 0.89, shopZ - 2.6, 0x2f7fd0);
+  kit.box(1.6, 1.6, 0.8, -10.4, 0.04, shopZ - 1.4, 0x3c4247);
+  for (let i = 0; i < 4; i++)
+    kit.cylinder(0.15, 1.2, -11 + i * 0.38, 0.12, shopZ - 1.4, 0xd23b2e, 12);
   const solid = new THREE.Mesh(
     kit.geometry(),
-    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0.05 })
+    // Concrete panels' joints on the forecourt, plaster on the walls.
+    addSurfaceDetail(
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0.05 }),
+      { joints: 4.5 }
+    )
   );
   solid.name = 'Fuel station';
   solid.castShadow = solid.receiveShadow = true;

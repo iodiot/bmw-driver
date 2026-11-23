@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { shadowMaterial, shadowOpacity, sunProjection } from './sun-shadows.js';
 import {
   roadCenterZ,
   guardrailOffset,
@@ -334,7 +335,7 @@ export function layRail(geometry, side, startX, lateralAt, centre = roadCenterZ)
       colour.copyWithin(to * 3, from * 3, from * 3 + 3);
     }
   };
-  for (let s = 0; s < stations && first >= 0; ) {
+  for (let s = 0; s < stations && first >= 0;) {
     if (lateral[s] !== null) {
       s++;
       continue;
@@ -397,6 +398,25 @@ export function setupRoadside(scene) {
   });
   group.add(postMesh, spacerMesh);
   scene.add(group);
+  // Their sun shadows, beyond the shadow map's few metres: the beams and
+  // posts drawn again flattened onto the ground along the sun (their
+  // geometry and post places shared, so nothing more to lay out).
+  const shade = shadowMaterial('Guardrail shadow');
+  const shadows = [
+    ...rails.map(({ mesh }) => new THREE.Mesh(mesh.geometry, shade)),
+    Object.assign(new THREE.InstancedMesh(postMesh.geometry, shade, slots), {
+      instanceMatrix: postMesh.instanceMatrix,
+    }),
+  ];
+  for (const s of shadows) {
+    s.name = 'Guardrail shadow';
+    s.matrixAutoUpdate = false;
+    s.frustumCulled = false;
+    s.renderOrder = 2;
+    s.visible = false;
+    scene.add(s);
+  }
+  const projection = new THREE.Matrix4();
   const matrix = new THREE.Matrix4(),
     rotation = new THREE.Quaternion(),
     up = new THREE.Vector3(0, 1, 0),
@@ -451,6 +471,20 @@ export function setupRoadside(scene) {
     group,
     update(x) {
       if (!(Math.abs(x - builtAt) < 16)) layout(x);
+    },
+    // Lays their shadows for the sun (pointing toward it) and its strength.
+    shadow(sun, strength) {
+      const show = Boolean(sun) && strength > 0.02;
+      if (show) {
+        shade.opacity = shadowOpacity(strength);
+        sunProjection(sun, projection);
+      }
+      for (const s of shadows) {
+        s.visible = show;
+        if (!show) continue;
+        s.matrix.copy(projection);
+        s.matrixWorld.copy(projection);
+      }
     },
   };
 }

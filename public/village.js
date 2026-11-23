@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { branchOffset, roadBranch, roadCenterSlope, roadCenterZ } from './road-profile.js';
 import { nearestOccurrence } from './road-structures.js';
 import { Kit, canvasTexture } from './build-kit.js';
+import { addSurfaceDetail } from './surface-detail.js';
 import { groupShadow } from './sun-shadows.js';
 
 // A village along the country road's far side, past the fuel station and
@@ -95,15 +96,28 @@ export function yardKits(index) {
     lamp = [lx, -1.8];
     colliders.push([lx, lz, 0.12, 0.12]);
   }
-  // Windows toward the track, framed and shuttered.
+  // Windows toward the track: white frames with a T of glazing bars, a
+  // sill, carved surrounds (наличники) in the trim colour stepped up into a
+  // crown over each, and shutters either side.
   const count = w > 10.5 ? 4 : 3;
+  const face = hz - d / 2;
   for (let i = 0; i < count; i++) {
     const x = hx - w / 2 + ((i + 0.5) * w) / count;
-    windows.box(1.0, 1.15, 0.06, x, 1.05, hz - d / 2 - 0.02, 0x23303c);
-    kit.box(1.22, 0.1, 0.1, x, 0.98, hz - d / 2 - 0.05, trim);
-    kit.box(1.22, 0.1, 0.1, x, 2.22, hz - d / 2 - 0.05, trim);
+    windows.box(1.0, 1.15, 0.06, x, 1.05, face - 0.02, 0x23303c);
     for (const side of [-1, 1])
-      kit.box(0.42, 1.2, 0.05, x + side * 0.78, 1.03, hz - d / 2 - 0.06, trim);
+      kit.box(0.07, 1.15, 0.05, x + side * 0.5, 1.05, face - 0.06, 0xf4f4ef);
+    kit.box(1.07, 0.07, 0.05, x, 1.02, face - 0.06, 0xf4f4ef);
+    kit.box(1.07, 0.07, 0.05, x, 2.16, face - 0.06, 0xf4f4ef);
+    kit.box(0.05, 1.12, 0.04, x, 1.06, face - 0.07, 0xf4f4ef);
+    kit.box(1.0, 0.05, 0.04, x, 1.78, face - 0.07, 0xf4f4ef);
+    kit.box(1.36, 0.08, 0.16, x, 0.94, face - 0.08, 0xe9e7e2);
+    kit.box(1.3, 0.12, 0.08, x, 2.24, face - 0.05, trim);
+    kit.box(1.1, 0.1, 0.07, x, 2.36, face - 0.05, trim);
+    kit.box(0.6, 0.1, 0.06, x, 2.46, face - 0.05, trim);
+    for (const side of [-1, 1]) {
+      kit.box(0.12, 1.3, 0.07, x + side * 0.6, 0.98, face - 0.05, trim);
+      kit.box(0.42, 1.2, 0.05, x + side * 0.86, 1.03, face - 0.07, trim);
+    }
   }
   // A door and a porch on the gable end nearer the gate.
   const end = gate < hx ? -1 : 1;
@@ -207,7 +221,11 @@ export function yardColliders(index) {
 }
 
 export function setupVillage(scene) {
-  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 });
+  // Plastered walls, tin roofs ribbed down their slopes (see
+  // surface-detail.js).
+  const material = addSurfaceDetail(
+    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 })
+  );
   const glass = new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.15,

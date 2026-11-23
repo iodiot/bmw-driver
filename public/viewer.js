@@ -1797,6 +1797,7 @@ renderer.setAnimationLoop((time) => {
   document.body.dataset.traffic = String(traffic.vehicles.length);
   speedCameras.update(sim?.x ?? 0, dt, sunDirection, sunlight);
   powerLines.update(sim?.x ?? 0, sunDirection, sunlight);
+  roadside?.shadow(sunDirection, sunlight);
   busStops.update(sim?.x ?? 0, sunDirection, sunlight);
   const evening = Math.min(1, Math.max(0, (light.darkness - 0.25) / 0.5));
   fuelStation.update(sim?.x ?? 0, evening, sunDirection, sunlight);
