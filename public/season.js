@@ -13,7 +13,14 @@ export const snowColour = Object.freeze([0.9, 0.92, 0.96]);
 // What winter changes besides the look: grip on snow and packed ice (a
 // share of the dry asphalt's), and how fast the traffic and the autopilot
 // go.
-export const winterDriving = Object.freeze({ grip: 0.6, trafficSpeed: 0.82, autopilotSpeed: 0.8 });
+// (`autopilotSpeed`: its 90 km/h in the right-hand lanes; `autopilotPace`:
+// its pace in the left one.)
+export const winterDriving = Object.freeze({
+  grip: 0.6,
+  trafficSpeed: 0.82,
+  autopilotSpeed: 0.8,
+  autopilotPace: 0.7,
+});
 
 // Snow on a material's upward faces as winter sets in.
 export function addSnowCover(material) {

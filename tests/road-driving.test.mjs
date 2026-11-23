@@ -281,7 +281,7 @@ test('The autopilot keeps left and flashes slower cars out of its way', async ()
   assert.equal(fastLanePlan({ ...base, lane: 2, leader: null }), 'left', 'Moves left when clear');
   assert.equal(fastLanePlan({ ...base, lane: 1, clearLeft: false, leader: null }), null);
   assert.equal(fastLanePlan({ ...base, lane: 0, leader: null }), null, 'Stays left');
-  const slow = { gap: 50, speed: 26, moving: false };
+  const slow = { gap: 40, speed: 26, moving: false };
   assert.equal(fastLanePlan({ ...base, lane: 0, leader: slow }), 'flash');
   assert.equal(
     fastLanePlan({ ...base, lane: 0, leader: slow, sinceFlash: 1 }),
@@ -304,7 +304,8 @@ test('The autopilot keeps left and flashes slower cars out of its way', async ()
   );
   const ignored = { ...base, lane: 0, leader: slow, flashes: fastLane.patience };
   assert.equal(fastLanePlan(ignored), 'right', 'Ignored, goes round on the right');
-  assert.equal(fastLanePlan({ ...ignored, clearRight: false }), null);
+  assert.equal(fastLanePlan({ ...ignored, clearRight: false, sinceFlash: 5 }), null);
+  assert.equal(fastLanePlan({ ...ignored, clearRight: false }), 'flash', 'No room: flashes again');
 });
 
 test('In the left lane the autopilot presses on in spells, up toward 180 km/h', async () => {

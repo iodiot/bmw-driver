@@ -80,6 +80,10 @@ export const trafficLayout = Object.freeze({
   spawnBehind: [250, 290],
   // A lane change: indicator first, then across the lane.
   signalLead: 1.3,
+  // Flashed at: the indicator only this long before it moves over.
+  yieldLead: 0.8,
+  // The share of cars in the left lane that sit there (see place).
+  campers: 0.45,
   changeTime: { car: 3.4, lorry: 5.5 },
   tunnelSpeed: 100 / 3.6,
 });
@@ -158,7 +162,11 @@ export class Traffic {
     if (!clear && !anyType) return null;
     if (!clear) return null;
     const [low, high] = spec.speed;
-    const desired = low + (high - low) * this.random();
+    let desired = low + (high - low) * this.random();
+    // Some cars sit in the left lane below the pace of it, until someone
+    // flashes them over.
+    const camper = index === 0 && this.random() < trafficLayout.campers;
+    if (camper) desired = Math.min(desired, 24 + 5 * this.random());
     const vehicle = {
       id: this.serial++,
       type,
@@ -181,6 +189,7 @@ export class Traffic {
       decide: this.random() * 1.5,
       sinceChange: 10,
       hurried: 0,
+      camper,
       colour: spec.lorry
         ? pick(cabPaints, this.random)
         : pick(type === 'van' ? vanPaints : paints, this.random),
@@ -312,8 +321,8 @@ export class Traffic {
     // Round a car stopped in the lane, by either side.
     if (stuck && can(v.lane + 1) && this.laneOpen(v, v.lane + 1, users, 15))
       return this.begin(v, v.lane + 1);
-    // Keep right when the right lane is free well ahead.
-    if (can(v.lane + 1) && !heldUp) {
+    // Keep right when the right lane is free well ahead (a camper does not).
+    if (can(v.lane + 1) && !heldUp && !v.camper) {
       const there = this.neighbour(v, lanes[v.lane + 1], users, 1);
       const roomy = !there || there.gap > 70 + v.speed * 1.5 || there.speed > desired - 1;
       if (roomy && this.laneOpen(v, v.lane + 1, users, 40)) return this.begin(v, v.lane + 1);
@@ -396,14 +405,16 @@ export class Traffic {
     return this.askToYield(x, lat, 90);
   }
   // The car flashes its headlights: seen in the mirror further off than a
-  // horn is heard, and answered after a moment's reaction.
+  // horn is heard, and answered at once with a short signal.
   flashedAt(x, lat, range = 150) {
-    return this.askToYield(x, lat, range, 0.5);
+    return this.askToYield(x, lat, range, trafficLayout.yieldLead - trafficLayout.signalLead);
   }
   askToYield(x, lat, range, reaction = 0) {
     const ahead = this.leaderFor(x, lat);
     if (!ahead || ahead.gap > range) return null;
     const v = ahead.who;
+    // Asked to, a camper is one no longer.
+    v.camper = false;
     if (v.crash || v.change) return v;
     const users = [...this.vehicles, { x, lat, speed: v.speed, length: 4.9, width: 1.9 }];
     const spec = vehicleTypes[v.type];

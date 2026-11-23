@@ -145,7 +145,7 @@ test('A horn moves the car ahead over to the right, or hurries it', async () => 
   assert.equal(traffic.honk(0, roadLanes[0]), null);
   assert.equal(traffic.flashedAt(0, roadLanes[0]), ahead);
   assert.equal(ahead.change.to, 1);
-  assert.ok(ahead.change.t < -trafficLayout.signalLead, 'A moment to react');
+  assert.equal(ahead.change.t, -trafficLayout.yieldLead, 'Moves over promptly');
 });
 
 test("A lorry's shadow falls on the car beside it, not on one in front", async () => {

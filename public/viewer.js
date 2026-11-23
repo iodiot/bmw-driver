@@ -75,6 +75,7 @@ import { daylight, dayCycle, wrapHours } from './time-of-day.js';
 import { setupDayBar } from './day-bar.js';
 import { setupRearGlow } from './rear-glow.js';
 import { setupSignalGlow } from './signal-glow.js';
+import { setupBeamFlash } from './beam-flash.js';
 import { setupInterior } from './interior.js';
 import { mergeStaticMeshes } from './merge-static.js';
 import { setAmbientLight } from './door-trim.js';
@@ -416,6 +417,7 @@ let rig,
   contactShadow,
   rearGlow,
   signalGlow,
+  beamFlashGlow,
   interior,
   cockpitCluster,
   centreDisplay,
@@ -426,6 +428,9 @@ let rig,
   driving = false,
   telemetryTime = 0;
 const peaks = { compression: 0, extension: 0, roll: 0, pitch: 0, ground: 0 };
+// The view's aspect; a page opened hidden, with no size yet, has none: wide,
+// then.
+const shownAspect = () => (camera.aspect > 0 ? camera.aspect : 16 / 9);
 function resetView() {
   const x = sim?.x ?? 0,
     z = sim?.z ?? 0,
@@ -434,7 +439,7 @@ function resetView() {
     const wheel = rig.wheels.find((w) => w.front && w.z > 0);
     const target = new THREE.Vector3(wheel.x, wheel.y, wheel.z).applyAxisAngle(up, heading);
     target.add(new THREE.Vector3(x, roadElevation(x), z));
-    const distance = (1.25 * lensScale) / Math.min(1, camera.aspect);
+    const distance = (1.25 * lensScale) / Math.min(1, shownAspect());
     const offset = new THREE.Vector3(distance * 0.18, distance * 0.07, distance).applyAxisAngle(
       up,
       heading
@@ -452,7 +457,7 @@ function resetView() {
       ? new THREE.Vector3(...given)
       : new THREE.Vector3(4.8, 1.9, 5.6)
   )
-    .multiplyScalar(Math.max(1, 0.9 / camera.aspect) * lensScale)
+    .multiplyScalar(Math.max(1, 0.9 / shownAspect()) * lensScale)
     .applyAxisAngle(up, heading);
   const ground = roadElevation(x);
   camera.position.set(x, ground, z).add(offset);
@@ -1116,6 +1121,7 @@ new GLTFLoader().load(
       contactShadow.setNight(nightMode);
       rearGlow = setupRearGlow(scene);
       signalGlow = setupSignalGlow(scene);
+      beamFlashGlow = setupBeamFlash(scene);
       reverseGlow = setupRearGlow(scene, {
         colour: new THREE.Color(0.95, 0.93, 0.88),
         idle: 0,
@@ -1439,12 +1445,13 @@ renderer.setAnimationLoop((time) => {
         passing: autopilotPassing,
         speed: sim.speed,
       });
-      // The weather tames it: in fog it keeps to about 70 km/h, in rain to
-      // 130, and on snow slower still.
+      // The weather tames it: in rain it keeps to about 145 km/h, on snow
+      // to some 70% of its pace (125 at most), and in fog to about 70.
       let wanted = pace.speed;
-      wanted += (Math.min(wanted, 36) - wanted) * rainLevel;
-      wanted += (autopilotSpeed * 0.78 - wanted) * fogLevel;
-      wanted += (autopilotSpeed * winterDriving.autopilotSpeed - wanted) * winterLevel;
+      wanted += (Math.min(wanted, 40) - wanted) * rainLevel;
+      const onSnow = fastLane ? winterDriving.autopilotPace : winterDriving.autopilotSpeed;
+      wanted += (Math.min(wanted * onSnow, 35) - wanted) * winterLevel;
+      wanted += (Math.min(wanted, autopilotSpeed * 0.78) - wanted) * fogLevel;
       input.cruiseSpeed = Math.min(
         wanted,
         follow,
@@ -1571,7 +1578,7 @@ renderer.setAnimationLoop((time) => {
     if (wasAutopilot && !autopilot && cameraView === 'chase') chaseSwing = true;
     wasAutopilot = autopilot;
     if (chaseSwing && cameraView === 'chase') {
-      const scale = Math.max(1, 0.9 / camera.aspect) * lensScale;
+      const scale = Math.max(1, 0.9 / shownAspect()) * lensScale;
       chaseBehind.set(-6.2 * scale, 1.75 * scale, 0).applyAxisAngle(up, courseHeading);
       swingFrom.setFromVector3(offset);
       swingTo.setFromVector3(chaseBehind);
@@ -1627,6 +1634,7 @@ renderer.setAnimationLoop((time) => {
     instruments.setLamps(clusterLamps);
     // And their amber light on the road beside the car, in the dark.
     signalGlow.update(dt, sim, light.darkness, flashing);
+    beamFlashGlow.update(dt, sim, light.darkness, beamFlasher.lit);
     document.body.dataset.signal = signals.hazard ? 'hazard' : (signals.side ?? 'none');
     document.body.dataset.highBeam = String(headlights.high);
     document.body.dataset.beamFlashes = String(flashCount);

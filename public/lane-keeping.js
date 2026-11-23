@@ -86,13 +86,14 @@ export function bumpSpeed(x, { over = 13.9, braking = 2.2 } = {}) {
 // moves over as soon as the left one is clear; in it, held up by something
 // slower within `flashRange` m, it flashes its headlights (no more often than
 // every `flashEvery` s) and waits for it to move over; ignored `patience`
-// times, it goes round on the right and comes back. `lane` is the lane's
+// times, it goes round on the right and comes back, or with no room there
+// flashes again now and then. `lane` is the lane's
 // index from the left, `leader` {gap, speed, moving} the vehicle ahead in
 // it (moving: already changing lanes), `cruise` the car's own pace.
 // Returns 'left', 'right', 'flash' or null.
-// (Faster, it flashes from further back: some four seconds ahead.)
-export const fastLane = Object.freeze({ flashGap: 90, flashEvery: 4, patience: 2, slower: 1 });
-export const flashRange = (speed = 0) => Math.max(fastLane.flashGap, 30 + 4 * speed);
+// (Close up, as a driver in a hurry does: some 60 m behind at 170 km/h.)
+export const fastLane = Object.freeze({ flashGap: 50, flashEvery: 4, patience: 2, slower: 1 });
+export const flashRange = (speed = 0) => Math.max(fastLane.flashGap, 10 + 1.15 * speed);
 export function fastLanePlan({
   lane,
   leader,
@@ -108,7 +109,10 @@ export function fastLanePlan({
     leader && leader.gap < flashRange(speed) && leader.speed < cruise - fastLane.slower;
   if (!heldUp || leader.moving) return null;
   if (flashes < fastLane.patience) return sinceFlash >= fastLane.flashEvery ? 'flash' : null;
-  return clearRight && sinceFlash >= fastLane.flashEvery ? 'right' : null;
+  if (sinceFlash < fastLane.flashEvery) return null;
+  // Ignored: round it on the right, or with no room there, a flash now and
+  // then till it moves over.
+  return clearRight ? 'right' : sinceFlash >= 2 * fastLane.flashEvery ? 'flash' : null;
 }
 
 // How hard the self-driving car presses on in the left lane, as a driver
@@ -130,7 +134,9 @@ export class AutopilotPace {
   constructor(random = Math.random) {
     this.random = random;
     this.pushing = false;
-    this.left = 3 + 4 * random();
+    // (The first spell, once in the left lane, is always a push.)
+    this.first = true;
+    this.left = 4 + 3 * random();
     this.wish = this.pick();
     this.drive = 0.9 + 0.3 * random();
     this.set = autopilotPace.slow;
@@ -143,9 +149,10 @@ export class AutopilotPace {
   // would use to get there. In the other lanes it keeps to 90 km/h, unless
   // `passing` (going round a car on the right) holds its pace.
   step(dt, { fastLane, passing = false, speed = 0 }) {
-    this.left -= dt;
+    if (fastLane || !this.first) this.left -= dt;
     if (this.left <= 0) {
-      this.pushing = !this.pushing && this.random() < 0.6;
+      this.pushing = this.first || (!this.pushing && this.random() < 0.6);
+      this.first = false;
       const [a, b] = this.pushing ? autopilotPace.pushFor : autopilotPace.cruiseFor;
       this.left = a + (b - a) * this.random();
       this.wish = this.pick();
