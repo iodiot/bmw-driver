@@ -129,6 +129,8 @@ export class Traffic {
       desired,
       accel: 0,
       latSpeed: 0,
+      yaw: 0,
+      crash: null,
       change: null,
       signal: 0,
       clock: this.random() * 0.7,
@@ -211,10 +213,27 @@ export class Traffic {
       }
       const desired = this.limitAt(v);
       v.accel = Traffic.acceleration(v.speed, desired, leader, v.lorry);
+      // Hit by the car: thrown off line, it brakes to a stop with its
+      // hazard lights on, waits, then drives on.
+      if (v.crash) {
+        const c = v.crash;
+        c.time += dt;
+        v.yaw += c.spin * dt;
+        c.spin *= Math.exp(-2.5 * dt);
+        v.lat = Math.max(-6.4, Math.min(6.4, v.lat + c.drift * dt));
+        c.drift *= Math.exp(-3 * dt);
+        if (c.time < c.wait) v.accel = v.speed > 0 ? -Math.min(7, 2 + v.speed) : 0;
+        else {
+          // Straightening up as it moves off.
+          v.yaw *= Math.exp(-1.5 * dt);
+          v.accel = Math.min(v.accel, 1);
+          if (Math.abs(v.yaw) < 0.01 && c.time > c.wait + 2) v.crash = null;
+        }
+      }
       v.speed = Math.max(0, v.speed + v.accel * dt);
       v.x += v.speed * dt;
       v.leader = leader;
-      this.decide(v, leader, users, dt, desired);
+      if (!v.crash) this.decide(v, leader, users, dt, desired);
       this.move(v, dt, users);
     }
     this.recycle(player);
@@ -313,6 +332,7 @@ export class Traffic {
 
   // Is `v`'s indicator lit now (on for 0.4 s of every 0.7 s)?
   static blink(v) {
+    if (v.crash) return v.crash.time % 0.7 < 0.4;
     return v.signal !== 0 && v.clock % 0.7 < 0.4;
   }
 
@@ -385,6 +405,20 @@ export function collideWithTraffic(sim, traffic) {
       v.speed *= 0.97;
     }
     sim.speed = Math.max(0, sim.speed);
+    // A hard enough knock stops it, turned off line (a lorry hardly turns).
+    if (impact > 2.5) {
+      const kick = Math.min(1, impact / 25) * (v.lorry ? 0.15 : 1);
+      const turn = side !== 0 ? -side : dLat >= 0 ? -1 : 1;
+      v.crash = {
+        time: 0,
+        wait: 6 + 4 * Math.min(1, impact / 20),
+        spin: (v.crash?.spin ?? 0) + turn * kick * 1.6,
+        drift: (v.crash?.drift ?? 0) + (side !== 0 ? side : 0) * kick * 2,
+      };
+      v.yaw ??= 0;
+      v.change = null;
+      v.signal = 0;
+    }
     const c = Math.cos(sim.heading),
       s = Math.sin(sim.heading);
     const hit = {

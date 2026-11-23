@@ -189,10 +189,12 @@ export const knockSettings = Object.freeze({
   bump: Object.freeze({ height: 0.08, from: 3, full: 20, cooldown: 0.1 }),
   // Speed into the rail (m/s) that starts a clang, and full strength.
   rail: Object.freeze({ from: 0.4, full: 6, cooldown: 0.3 }),
+  // Closing speed into another vehicle (m/s): a crunch, full at 15.
+  crash: Object.freeze({ from: 0.6, full: 15, cooldown: 0.35 }),
 });
 export function knockStrength(kind, value, speed = 0) {
-  if (kind === 'rail') {
-    const { from, full } = knockSettings.rail;
+  if (kind === 'rail' || kind === 'crash') {
+    const { from, full } = knockSettings[kind];
     return value < from ? 0 : clamp(0.25 + (0.75 * (value - from)) / (full - from), 0, 1);
   }
   const { height, from, full } = knockSettings.bump;
@@ -218,9 +220,10 @@ export function setupVehicleAudio({ sound, volume, status }) {
   const sources = new Map(),
     gains = new Map(),
     filters = new Map(),
-    cooldown = { bump: 0, rail: 0 };
+    cooldown = { bump: 0, rail: 0, crash: 0 };
   let bumpPeak = 0,
     railPeak = 0,
+    crashPeak = 0,
     knocks = 0;
   // The obstacle each wheel was on at the last frame.
   const under = [];
@@ -384,6 +387,68 @@ export function setupVehicleAudio({ sound, volume, status }) {
     }
     knocks++;
   }
+  // Into another car: a deep thud of panels, a crunch of crumpling metal
+  // and cracking plastic, and in a hard hit glass tinkling after it.
+  function crunch(strength) {
+    const now = context.currentTime;
+    const envelope = (peak, decay, at = now) => {
+      const gain = context.createGain();
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), at + 0.006);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + decay);
+      gain.connect(outside);
+      return gain;
+    };
+    const noise = (at, length, filter, frequency, q, peak, decay) => {
+      const source = context.createBufferSource(),
+        band = context.createBiquadFilter();
+      source.buffer = noiseBuffer;
+      band.type = filter;
+      band.frequency.value = frequency;
+      band.Q.value = q;
+      source.connect(band).connect(envelope(peak, decay, at));
+      source.start(at, Math.random());
+      source.stop(at + length);
+    };
+    const thud = context.createOscillator();
+    thud.type = 'sine';
+    thud.frequency.setValueAtTime(64, now);
+    thud.frequency.exponentialRampToValueAtTime(32, now + 0.3);
+    thud.connect(envelope(strength * 0.9, 0.38));
+    thud.start(now);
+    thud.stop(now + 0.45);
+    // Crumpling panels, low and broad.
+    noise(now, 0.4, 'bandpass', 520, 0.7, strength * 0.75, 0.3);
+    // Plastic cracking: a run of short bright snaps.
+    const snaps = 3 + Math.round(strength * 5);
+    for (let i = 0; i < snaps; i++) {
+      const at = now + 0.01 + Math.random() * 0.12 * (1 + strength);
+      noise(
+        at,
+        0.05,
+        'bandpass',
+        1800 + Math.random() * 1800,
+        1.5,
+        strength * 0.35,
+        0.03 + Math.random() * 0.03
+      );
+    }
+    // Glass, in a hard hit.
+    if (strength > 0.55)
+      for (let i = 0; i < 6; i++) {
+        const at = now + 0.05 + Math.random() * 0.45;
+        noise(
+          at,
+          0.12,
+          'bandpass',
+          4200 + Math.random() * 3500,
+          28,
+          strength * 0.9,
+          0.08 + Math.random() * 0.06
+        );
+      }
+    knocks++;
+  }
   async function unlock() {
     if (!sound.checked) return;
     try {
@@ -425,23 +490,35 @@ export function setupVehicleAudio({ sound, volume, status }) {
     get audible() {
       return sound.checked && running();
     },
-    // The turn-signal relay: a tick as the lamps light, a softer tock as
-    // they go out. Heard in the cabin, so it bypasses the cabin filter.
+    // The turn-signal relay, heard in the cabin (it bypasses the cabin
+    // filter): a dry click with a little hollow body, higher as the lamps
+    // light ("tick") and lower as they go out ("tock").
     tick(on) {
       if (!ready || !sound.checked || !running()) return;
       const now = context.currentTime;
       const click = context.createBufferSource(),
         band = context.createBiquadFilter(),
-        gain = context.createGain();
+        clickGain = context.createGain();
       click.buffer = noiseBuffer;
       band.type = 'bandpass';
-      band.frequency.value = on ? 3200 : 2300;
-      band.Q.value = 3;
-      gain.gain.setValueAtTime(on ? 0.5 : 0.32, now);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.025);
-      click.connect(band).connect(gain).connect(master);
+      band.frequency.value = on ? 2100 : 1500;
+      band.Q.value = 1.4;
+      clickGain.gain.setValueAtTime(on ? 0.22 : 0.15, now);
+      clickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.014);
+      click.connect(band).connect(clickGain).connect(master);
       click.start(now, Math.random());
-      click.stop(now + 0.04);
+      click.stop(now + 0.03);
+      // The relay's body: a short damped knock.
+      const body = context.createOscillator(),
+        bodyGain = context.createGain();
+      body.type = 'triangle';
+      body.frequency.setValueAtTime(on ? 520 : 380, now);
+      body.frequency.exponentialRampToValueAtTime(on ? 300 : 230, now + 0.04);
+      bodyGain.gain.setValueAtTime(on ? 0.12 : 0.085, now);
+      bodyGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
+      body.connect(bodyGain).connect(master);
+      body.start(now);
+      body.stop(now + 0.06);
     },
     // The sound button: mutes or unmutes. Sound that is on but still waiting
     // for the browser's permission starts instead of muting.
@@ -472,11 +549,15 @@ export function setupVehicleAudio({ sound, volume, status }) {
           if (now && now !== was) bumpPeak = Math.max(bumpPeak, hit(now));
           else if (!now && was?.table) bumpPeak = Math.max(bumpPeak, 0.6 * hit(was));
         });
-        railPeak = Math.max(railPeak, simulation.railContact?.impact ?? 0);
+        // Into another vehicle, or a guardrail.
+        if (simulation.railContact?.traffic)
+          crashPeak = Math.max(crashPeak, simulation.railContact.impact ?? 0);
+        else railPeak = Math.max(railPeak, simulation.railContact?.impact ?? 0);
       } else under.length = 0;
       elapsed -= dt;
       cooldown.bump -= dt;
       cooldown.rail -= dt;
+      cooldown.crash -= dt;
       if (elapsed > 0 || !simulation) return;
       elapsed = 1 / 30;
       const mix = vehicleAudioMix({
@@ -498,7 +579,9 @@ export function setupVehicleAudio({ sound, volume, status }) {
         wet: raining,
         slipAngle: simulation.slipAngle,
         tractionLoss: simulation.tractionLoss,
-        scrape: simulation.railContact?.scrape ?? 0,
+        // Rubbing along another car scrapes less than along a rail.
+        scrape:
+          (simulation.railContact?.scrape ?? 0) * (simulation.railContact?.traffic ? 0.35 : 1),
         driving,
         distance,
         inside,
@@ -515,11 +598,15 @@ export function setupVehicleAudio({ sound, volume, status }) {
         .map((v) => (audible ? v : 0).toFixed(3))
         .join(',');
       const bump = bumpPeak,
-        rail = knockStrength('rail', railPeak);
-      bumpPeak = railPeak = 0;
+        rail = knockStrength('rail', railPeak),
+        hit = knockStrength('crash', crashPeak);
+      bumpPeak = railPeak = crashPeak = 0;
       if (!ready) return;
       const now = context.currentTime;
-      if (audible && rail > 0 && cooldown.rail <= 0) {
+      if (audible && hit > 0 && cooldown.crash <= 0) {
+        crunch(hit);
+        cooldown.crash = knockSettings.crash.cooldown;
+      } else if (audible && rail > 0 && cooldown.rail <= 0) {
         knock(rail, true);
         cooldown.rail = knockSettings.rail.cooldown;
       } else if (audible && bump > 0 && cooldown.bump <= 0) {

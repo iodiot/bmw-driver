@@ -72,32 +72,75 @@ export function highBeamWanted({
   );
 }
 
-// Amber lamps on the headlights' outer edge, along the mirror caps and in
-// the tail lamps: thin strips laid onto the model's surface where a ray
-// from outside meets it. Body space: x forward, y up, z to the right, so the
-// left lamps are at negative z; positions are given for the right side.
+// Amber lamps where the F10 has them: a strip along the top edge of each
+// headlight (its "eyebrow"), one along the lower edge of each mirror cap
+// and one along the lower edge of each tail lamp. Each is a ribbon laid on
+// the model's surface: for points across the lamp, a ray from outside
+// finds the lamp's edge (scanning down from above, or up from below) and
+// the ribbon runs a little inside it, following the surface's curve. Body
+// space: x forward, y up, z to the right; given for the right side.
 export const signalLamps = Object.freeze([
-  // Width across (z), height (y); ray start and direction; surfaces to hit.
   {
     name: 'front',
-    size: [0.13, 0.012],
-    from: [2.8, 0.13, 0.62],
-    dir: [-1, 0, 0],
+    across: [0.4, 0.86],
+    rayX: 2.9,
+    dir: -1,
+    scan: [0.32, 0.02],
+    inset: 0.018,
+    width: 0.026,
     // The headlight's cover glass.
     onto: ['Object_49'],
   },
-  { name: 'mirror', size: [0.15, 0.009], from: [1.2, 0.392, 0.975], dir: [-1, 0, 0], onto: null },
+  {
+    name: 'mirror',
+    across: [0.94, 1.08],
+    rayX: 1.4,
+    dir: -1,
+    scan: [0.26, 0.52],
+    inset: 0.012,
+    width: 0.02,
+    onto: null,
+  },
   {
     name: 'rear',
-    size: [0.13, 0.016],
-    from: [-3.2, 0.262, 0.62],
-    dir: [1, 0, 0],
+    // The outer lamp, in the wing (not the part in the boot lid).
+    across: [0.6, 0.88],
+    rayX: -3.2,
+    dir: 1,
+    scan: [0.12, 0.42],
+    inset: 0.02,
+    width: 0.032,
     onto: ['BrakeLamp_Left', 'BrakeLamp_Right'],
   },
 ]);
 
+// A soft round glow, for the light round a lit lamp.
+function glowTexture() {
+  if (typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 64;
+  const g = canvas.getContext('2d');
+  const gradient = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gradient.addColorStop(0, 'rgba(255,255,255,1)');
+  gradient.addColorStop(0.2, 'rgba(255,255,255,0.55)');
+  gradient.addColorStop(0.55, 'rgba(255,255,255,0.12)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gradient;
+  g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(canvas);
+}
+
 export function setupSignalLamps(rig) {
   const lit = { left: [], right: [] };
+  // The light round each lit lamp, added onto the scene behind it.
+  const glow = new THREE.SpriteMaterial({
+    map: glowTexture(),
+    color: new THREE.Color(0.9, 0.34, 0.03),
+    blending: THREE.AdditiveBlending,
+    transparent: true,
+    depthWrite: false,
+    toneMapped: false,
+  });
   const materials = {};
   rig.body.updateMatrixWorld(true);
   const toBody = new THREE.Matrix4().copy(rig.body.matrixWorld).invert();
@@ -106,50 +149,172 @@ export function setupSignalLamps(rig) {
   const meshes = [];
   rig.body.traverse((o) => o.isMesh && o.visible && meshes.push(o));
   for (const side of ['left', 'right']) {
-    materials[side] = new THREE.MeshStandardMaterial({
-      name: `Turn signal ${side}`,
-      color: 0x3a2508,
-      emissive: 0xff7a0a,
-      emissiveIntensity: 0,
-      roughness: 0.3,
-      toneMapped: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -2,
-    });
+    // The lit strip, brightest along its middle, and the light it spreads
+    // into the lens round it: both added onto the lamp, in amber.
+    const light = (name) =>
+      new THREE.MeshBasicMaterial({
+        name,
+        color: 0x000000,
+        vertexColors: true,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+      });
+    materials[side] = {
+      core: light(`Turn signal ${side}`),
+      halo: light(`Turn signal ${side} halo`),
+    };
     const sign = side === 'left' ? -1 : 1;
     for (const lamp of signalLamps) {
-      const from = new THREE.Vector3(lamp.from[0], lamp.from[1], sign * lamp.from[2]);
-      const dir = new THREE.Vector3(...lamp.dir);
-      raycaster.set(from.clone().applyMatrix4(toWorld), dir.clone().transformDirection(toWorld));
       const targets = lamp.onto ? meshes.filter((m) => lamp.onto.includes(m.name)) : meshes;
-      const hit = raycaster.intersectObjects(targets, false)[0];
-      if (!hit) continue;
-      const point = hit.point.applyMatrix4(toBody);
-      // Facing back along the ray, onto the surface.
-      const normal = dir.clone().negate();
-      const mesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(lamp.size[0], lamp.size[1]),
-        materials[side]
+      const dir = new THREE.Vector3(lamp.dir, 0, 0);
+      const worldDir = dir.clone().transformDirection(toWorld);
+      const cast = (y, z) => {
+        raycaster.set(new THREE.Vector3(lamp.rayX, y, z).applyMatrix4(toWorld), worldDir);
+        return raycaster.intersectObjects(targets, false)[0] ?? null;
+      };
+      // Scanning from `scan[0]` toward `scan[1]`: the first height that
+      // meets the lamp is its edge.
+      const step = Math.sign(lamp.scan[1] - lamp.scan[0]) * 0.004;
+      const samples = [];
+      const count = 18;
+      for (let i = 0; i <= count; i++) {
+        const z = sign * (lamp.across[0] + ((lamp.across[1] - lamp.across[0]) * i) / count);
+        let edge = null;
+        for (let y = lamp.scan[0]; step > 0 ? y <= lamp.scan[1] : y >= lamp.scan[1]; y += step)
+          if (cast(y, z)) {
+            edge = y;
+            break;
+          }
+        if (edge === null) continue;
+        const hit = cast(edge - Math.sign(step) * -lamp.inset, z);
+        if (!hit) continue;
+        const point = hit.point.clone().applyMatrix4(toBody);
+        const normal = hit.face
+          ? hit.face.normal
+              .clone()
+              .transformDirection(hit.object.matrixWorld)
+              .transformDirection(toBody)
+          : dir.clone().negate();
+        if (normal.dot(dir) > 0) normal.negate();
+        samples.push({ point: point.addScaledVector(normal, 0.003), normal });
+      }
+      if (samples.length < 2) continue;
+      // The ribbon: across the lamp, `width` up and down the surface, its
+      // brightness by `profile` (pairs of offset, −1…1, and brightness), and
+      // fading out at its two ends.
+      const up = new THREE.Vector3();
+      const ribbon = (width, profile, lift) => {
+        const positions = [],
+          colours = [];
+        const vertex = (s, i, [k, bright]) => {
+          up.set(0, 1, 0).addScaledVector(s.normal, -s.normal.y).normalize();
+          const end = Math.min(1, (Math.min(i, samples.length - 1 - i) + 0.5) / 2.5);
+          positions.push(
+            ...s.point
+              .clone()
+              .addScaledVector(up, (k * width) / 2)
+              .addScaledVector(s.normal, lift)
+              .toArray()
+          );
+          const b = bright * end;
+          colours.push(b, b, b);
+        };
+        for (let i = 0; i < samples.length - 1; i++) {
+          const a = samples[i],
+            b = samples[i + 1];
+          if (a.point.distanceTo(b.point) > 0.08) continue;
+          for (let j = 0; j < profile.length - 1; j++) {
+            const p = profile[j],
+              q = profile[j + 1];
+            vertex(a, i, p);
+            vertex(b, i + 1, p);
+            vertex(a, i, q);
+            vertex(a, i, q);
+            vertex(b, i + 1, p);
+            vertex(b, i + 1, q);
+          }
+        }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colours, 3));
+        return geometry;
+      };
+      const core = new THREE.Mesh(
+        ribbon(
+          lamp.width,
+          [
+            [-1, 0.15],
+            [-0.45, 0.85],
+            [0, 1],
+            [0.45, 0.85],
+            [1, 0.15],
+          ],
+          0
+        ),
+        materials[side].core
       );
-      mesh.name = `Turn signal ${side} ${lamp.name}`;
-      mesh.position.copy(point).addScaledVector(normal, 0.004);
-      mesh.lookAt(mesh.position.clone().add(normal));
-      mesh.visible = false;
-      rig.body.add(mesh);
-      lit[side].push(mesh);
+      core.name = `Turn signal ${side} ${lamp.name}`;
+      const halo = new THREE.Mesh(
+        ribbon(
+          lamp.width * 3.5,
+          [
+            [-1, 0],
+            [-0.25, 0.55],
+            [0, 0.7],
+            [0.25, 0.55],
+            [1, 0],
+          ],
+          0.004
+        ),
+        materials[side].halo
+      );
+      halo.name = `Turn signal ${side} ${lamp.name} halo`;
+      for (const m of [core, halo]) {
+        m.visible = false;
+        m.renderOrder = 5;
+        rig.body.add(m);
+        lit[side].push(m);
+      }
+      // A little bloom at its middle.
+      const s = samples[Math.floor(samples.length / 2)];
+      const bloom = new THREE.Sprite(glow);
+      bloom.name = `Turn signal ${side} ${lamp.name} glow`;
+      bloom.position.copy(s.point).addScaledVector(s.normal, 0.03);
+      bloom.scale.setScalar(lamp.name === 'mirror' ? 0.18 : 0.2);
+      bloom.visible = false;
+      bloom.renderOrder = 5;
+      rig.body.add(bloom);
+      lit[side].push(bloom);
     }
   }
+  // A bulb's warm-up and fade (s): the lamps swell on and die away rather
+  // than switch.
+  const rise = 0.05,
+    fall = 0.12;
+  const core = new THREE.Color(2.4, 0.78, 0.05),
+    halo = new THREE.Color(0.42, 0.13, 0.008);
   return {
     lit,
-    // The strips show only while lit: the lenses are clear when off.
+    // The lamps show only while lit: the lenses are clear when off.
     update(signals) {
-      const on = signals.lit;
+      const { period, lit: share } = signalTiming;
+      const t = signals.side ? signals.time % period : Infinity,
+        on = period * share;
+      const level = t < on ? Math.min(1, t / rise) : t < on + fall ? 1 - (t - on) / fall : 0;
       for (const side of ['left', 'right']) {
-        const shown = on && signals.side === side;
-        materials[side].emissiveIntensity = shown ? 9 : 0;
+        const shown = signals.side === side && level > 0;
+        const k = shown ? level * level : 0;
+        materials[side].core.color.copy(core).multiplyScalar(k);
+        materials[side].halo.color.copy(halo).multiplyScalar(k);
         for (const mesh of lit[side]) mesh.visible = shown;
       }
+      glow.opacity = 0.75 * level;
     },
   };
 }

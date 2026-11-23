@@ -88,3 +88,28 @@ test('Driving into the back of a vehicle trades speed and pushes the car back', 
   assert.ok(v.speed > 20, 'and shoves the other one on');
   assert.ok(sim.x + 2.45 <= v.x - v.length / 2 + 1e-6, 'no longer inside it');
 });
+
+test('A vehicle hit hard stops with its hazards on, then drives on', () => {
+  const traffic = new Traffic({ count: 0, random: seeded(9) });
+  const v = traffic.place(100, { x: 1e6, lat: 0, length: 4.9, width: 1.9, speed: 0 });
+  v.lat = 0;
+  v.speed = v.desired = 25;
+  const sim = {
+    x: 100 - v.length / 2 - 2.4,
+    z: roadCenterZ(100 - v.length / 2 - 2.4),
+    heading: 0,
+    speed: 45,
+    lateralVelocity: 0,
+  };
+  collideWithTraffic(sim, traffic);
+  assert.ok(v.crash, 'knocked');
+  let stopped = false;
+  for (let t = 0; t < 30; t += 1 / 30) {
+    traffic.step(1 / 30, null);
+    if (v.speed < 0.1) stopped = true;
+    if (stopped && v.crash) assert.ok(Traffic.blink(v) !== undefined);
+  }
+  assert.ok(stopped, 'it stopped');
+  assert.equal(v.crash, null, 'and drove on');
+  assert.ok(v.speed > 5);
+});

@@ -26,6 +26,9 @@ import { setupBodyWater } from './body-water.js';
 import { setupWipers } from './wipers.js';
 import { setupTraffic } from './traffic-view.js';
 import { collideWithTraffic } from './traffic.js';
+import { RunTimer, describeRun } from './runs.js';
+import { setupSpeedCameras, camerasPassed, fineFor } from './speed-cameras.js';
+import { setupToasts } from './toasts.js';
 import { setupGrassBlades } from './grass-blades.js';
 import { setupBrakes } from './brakes.js';
 import { RenderQuality } from './render-quality.js';
@@ -152,6 +155,18 @@ const grassBlades = lowPower ? null : setupGrassBlades(scene, road.fields);
 // Cars, vans and lorries on the motorway (see traffic.js).
 const trafficView = setupTraffic(scene, { count: lowPower ? 10 : 16 }),
   traffic = trafficView.traffic;
+// Timed runs and speed cameras, announced in short notices.
+const toasts = setupToasts(document.body),
+  runTimer = new RunTimer(),
+  speedCameras = setupSpeedCameras(scene);
+let finesToday = 0,
+  lastCameraX = NaN;
+function cameraFlash() {
+  const flash = document.createElement('div');
+  flash.className = 'camera-flash';
+  document.body.append(flash);
+  setTimeout(() => flash.remove(), 700);
+}
 const sparks = setupSparks(scene);
 const dust = setupDust(scene);
 const tyreSmoke = setupTyreSmoke(scene);
@@ -540,6 +555,8 @@ function restart(x = 0) {
   sim.z = roadCenterZ(x);
   sim.heading = -Math.atan(roadCenterSlope(x));
   trafficView.reset(x, 0);
+  runTimer.reset();
+  lastCameraX = x;
   rig.wheels.forEach((w) => {
     w.spin.rotation.z = 0;
     w.mount.rotation.y = 0;
@@ -798,11 +815,16 @@ const autopilotSpeed = 25;
 // The self-driving car in traffic: overtakes on the left when held up by
 // something slower, then moves back right when there is room, signalling
 // each change (a lane is a constant offset; lane keeping steers there).
-let autopilotPlan = 0;
+let autopilotPlan = 0,
+  // The indicator the autopilot put on (it turns off only its own).
+  autopilotSignal = null;
 function autopilotTraffic(dt) {
   const lat = roadLateral(sim.x, sim.z);
   const settled = Math.abs(lat - keptLane) < 0.4;
-  if (settled && signals.side) signals.set(null);
+  if (settled && autopilotSignal && signals.side === autopilotSignal) {
+    signals.set(null);
+    autopilotSignal = null;
+  }
   autopilotPlan -= dt;
   if (autopilotPlan > 0 || !settled) return;
   autopilotPlan = 1;
@@ -818,6 +840,7 @@ function autopilotTraffic(dt) {
   ) {
     keptLane = left;
     signals.set('left');
+    autopilotSignal = 'left';
   } else if (
     right <= 3.61 &&
     (!leader || leader.gap > 90) &&
@@ -825,6 +848,7 @@ function autopilotTraffic(dt) {
   ) {
     keptLane = right;
     signals.set('right');
+    autopilotSignal = 'right';
   }
 }
 let cameraFollowHeading = 0,
@@ -935,6 +959,30 @@ renderer.setAnimationLoop((time) => {
       const hit = collideWithTraffic(sim, traffic);
       if (hit && (!sim.railContact || hit.strength > sim.railContact.strength))
         sim.railContact = hit;
+      // Timed runs while you drive.
+      const manual = !autopilot && !sim.reversing;
+      for (const result of runTimer.update(dt, Math.max(0, sim.forwardSpeed ?? sim.speed), manual))
+        toasts.show({ ...describeRun(result), tone: result.record ? 'record' : '' });
+      // Speed cameras passed this frame.
+      if (Number.isFinite(lastCameraX) && Math.abs(lat) < 7.6)
+        for (const camera of camerasPassed(lastCameraX, sim.x)) {
+          const speed = sim.speed * 3.6,
+            fine = fineFor(speed, camera.limit);
+          if (!fine) continue;
+          finesToday += fine;
+          speedCameras.flash(camera);
+          if (!reducedMotion.matches) cameraFlash();
+          toasts.show(
+            {
+              label: 'Speed camera',
+              shown: `${Math.round(speed)} km/h in a ${camera.limit} zone`,
+              note: `fine ${fine.toLocaleString('uk-UA')} ₴ · ${finesToday.toLocaleString('uk-UA')} ₴ so far`,
+              tone: 'fine',
+            },
+            6
+          );
+        }
+      lastCameraX = sim.x;
     }
     // In reverse the brake key drives backward and the accelerator brakes:
     // the pedals as the car feels them, for lamps, sound and smoke.
@@ -1188,5 +1236,6 @@ renderer.setAnimationLoop((time) => {
       (1 - light.darkness) * (1 - 0.7 * rainLevel) * Math.min(1, Math.max(0, sunDirection.y * 6)),
   });
   document.body.dataset.traffic = String(traffic.vehicles.length);
+  speedCameras.update(sim?.x ?? 0, dt);
   renderer.render(scene, camera);
 });

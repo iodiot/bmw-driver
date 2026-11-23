@@ -755,7 +755,9 @@ export function setupTraffic(scene, { count } = {}) {
         const index = counts[v.type]++;
         const z = roadCenterZ(v.x) + v.lat;
         const heading =
-          -Math.atan(roadCenterSlope(v.x)) - Math.atan2(v.latSpeed, Math.max(v.speed, 1));
+          -Math.atan(roadCenterSlope(v.x)) -
+          Math.atan2(v.latSpeed, Math.max(v.speed, 1)) +
+          (v.yaw ?? 0);
         // The nose dips under braking and lifts a little accelerating; the
         // body leans out of a lane change.
         euler.set(
@@ -789,7 +791,9 @@ export function setupTraffic(scene, { count } = {}) {
           else if (kind === 'head') colour.copy(lamps > 0.5 ? lit.headNight : lit.headDay);
           else if (kind === 'left' || kind === 'right')
             colour.copy(
-              Traffic.blink(v) && (kind === 'left') === v.signal < 0 ? lit.signalOn : lit.signalOff
+              Traffic.blink(v) && (v.crash || (kind === 'left') === v.signal < 0)
+                ? lit.signalOn
+                : lit.signalOff
             );
           else colour.setRGB(shade, shade, shade);
           mesh.setColorAt(index, colour);
