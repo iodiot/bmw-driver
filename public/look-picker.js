@@ -1,16 +1,17 @@
 import { paints, wheelFinishes } from './car-look.js';
+import { graphicsLevels, graphicsPresets } from './settings.js';
 
 // Swatches for the paint and the wheels, opened from the top panel's paint
 // button. A click applies the choice at once; Escape, the button again or a
 // click elsewhere closes it.
 const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
 
-export function setupLookPicker(container, { look, onChange }) {
+export function setupLookPicker(container, { look, onChange, graphics = 'auto', onGraphics }) {
   const panel = document.createElement('div');
   panel.className = 'look-picker';
   panel.hidden = true;
   panel.setAttribute('role', 'dialog');
-  panel.setAttribute('aria-label', 'Paint and wheels');
+  panel.setAttribute('aria-label', 'Paint, wheels and graphics');
   const group = (title, kind, items, swatch) => `
     <h3>${title}<span data-name="${kind}"></span></h3>
     <div class="look-swatches" role="group" aria-label="${title}">
@@ -32,10 +33,28 @@ export function setupLookPicker(container, { look, onChange }) {
         ? 'linear-gradient(135deg, #e9edf0, #8d949a)'
         : `linear-gradient(135deg, ${hex(w.tint)}, #000 160%)`
     );
+  panel.insertAdjacentHTML(
+    'beforeend',
+    `<h3>Graphics</h3>
+    <div class="look-graphics" role="group" aria-label="Graphics">
+      ${graphicsLevels
+        .map(
+          (level) =>
+            `<button type="button" data-graphics="${level}">${graphicsPresets[level].label}</button>`
+        )
+        .join('')}
+    </div>`
+  );
   container.append(panel);
   const current = { ...look };
+  let level = graphics;
+  const showGraphics = () => {
+    for (const button of panel.querySelectorAll('[data-graphics]'))
+      button.setAttribute('aria-pressed', String(button.dataset.graphics === level));
+  };
+  showGraphics();
   const show = () => {
-    for (const button of panel.querySelectorAll('button'))
+    for (const button of panel.querySelectorAll('button[data-kind]'))
       button.setAttribute(
         'aria-pressed',
         String(current[button.dataset.kind] === button.dataset.id)
@@ -54,6 +73,14 @@ export function setupLookPicker(container, { look, onChange }) {
     opener?.setAttribute('aria-expanded', 'false');
   };
   panel.addEventListener('click', (e) => {
+    const choice = e.target.closest('button[data-graphics]');
+    if (choice) {
+      level = choice.dataset.graphics;
+      showGraphics();
+      onGraphics?.(level);
+      choice.blur();
+      return;
+    }
     const button = e.target.closest('button[data-kind]');
     if (!button) return;
     current[button.dataset.kind] = button.dataset.id;
@@ -70,6 +97,11 @@ export function setupLookPicker(container, { look, onChange }) {
   });
   return {
     panel,
+    // The graphics level chosen elsewhere (the frame rate's button).
+    setGraphics(chosen) {
+      level = chosen;
+      showGraphics();
+    },
     toggle(button) {
       opener = button;
       panel.hidden = !panel.hidden;

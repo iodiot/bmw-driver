@@ -21,6 +21,14 @@ export class RenderQuality {
     this.samples = [];
   }
 
+  // A new pixel budget (and floor); `adaptive` false holds the resolution
+  // at its limit whatever the frame rate.
+  setBudget(maxPixels, { minPixels = 0, adaptive = true } = {}) {
+    this.maxPixels = maxPixels;
+    this.minPixels = minPixels;
+    this.adaptive = adaptive;
+  }
+
   resize(width, height) {
     this.limit = Math.min(this.devicePixelRatio, Math.sqrt(this.maxPixels / (width * height)));
     this.floor = Math.min(this.limit, Math.max(0.75, Math.sqrt(this.minPixels / (width * height))));
@@ -37,6 +45,7 @@ export class RenderQuality {
       this.reset();
       return this.ratio;
     }
+    if (this.adaptive === false) return this.ratio;
     this.recoveryDelay = Math.max(0, this.recoveryDelay - dt);
     if (this.warmup > 0) {
       this.warmup -= dt;

@@ -125,7 +125,7 @@ const presetLabels = { day: 'Day (13:00)', sunset: 'Sunset (18:54)', night: 'Nig
 
 export function setupDayBar(
   container,
-  { setTime, nextWeather, toggleRunning, restart, toggleSound, nextCamera, openLook }
+  { setTime, nextWeather, toggleRunning, restart, toggleSound, nextCamera, openLook, nextGraphics }
 ) {
   container.innerHTML = `
     <div class="day-graph" title="Time of day: click or drag to change">
@@ -143,7 +143,7 @@ export function setupDayBar(
         <path class="moon" d="M17.5 17.2A7.2 7.2 0 0 1 8.8 8.5a7.2 7.2 0 1 0 8.7 8.7z"/>
       </svg>
       <b class="day-clock">13:00</b>
-      <span class="day-fps" data-level="good" title="Frames per second"><i></i><b>–</b> FPS</span>
+      <button type="button" class="day-fps" data-level="good" title="Frames per second · graphics: Auto (click to change)"><i></i><b>–</b> FPS</button>
     </div>
     <div class="day-buttons">
       <div class="day-presets" role="group" aria-label="Time presets">
@@ -156,7 +156,7 @@ export function setupDayBar(
       </div>
       <button type="button" class="day-rain" aria-label="Weather: clear" title="Weather: clear" aria-pressed="false">${icon('clear')}</button>
       <button type="button" class="day-run" aria-label="Pause time" title="Pause time" aria-pressed="false">${icon('pause')}</button>
-      <button type="button" class="day-paint" aria-label="Paint and wheels" title="Paint and wheels" aria-expanded="false">${icon('paint')}</button>
+      <button type="button" class="day-paint" aria-label="Paint, wheels and graphics" title="Paint, wheels and graphics" aria-expanded="false">${icon('paint')}</button>
       <button type="button" class="day-camera" aria-label="Camera: Chase (C)" title="Camera: Chase (C)">${icon('camera')}</button>
       <button type="button" class="day-sound" aria-label="Sound (M)" title="Sound (M)" aria-pressed="true">${icon('sound')}</button>
       <button type="button" class="day-restart" aria-label="Restart (R)" title="Restart (R)">${icon('restart')}</button>
@@ -184,6 +184,7 @@ export function setupDayBar(
   cameraButton.onclick = () => nextCamera?.();
   const paintButton = container.querySelector('.day-paint');
   paintButton.onclick = () => openLook?.(paintButton);
+  fps.onclick = () => nextGraphics?.();
   // A clicked button lets go of focus, so the keyboard drives the car again.
   for (const button of container.querySelectorAll('button'))
     button.addEventListener('pointerup', () => button.blur());
@@ -214,6 +215,11 @@ export function setupDayBar(
       if (fpsValue.textContent !== shown) fpsValue.textContent = shown;
       const level = value >= 55 ? 'good' : value >= 30 ? 'fair' : 'low';
       if (fps.dataset.level !== level) fps.dataset.level = level;
+    },
+    // The graphics level, named on the frame rate's tooltip.
+    setGraphics(label) {
+      fps.title = fps.ariaLabel = `Frames per second · graphics: ${label} (click to change)`;
+      fps.dataset.graphics = label;
     },
     // The current camera view, named on the button.
     setCamera(view, label) {

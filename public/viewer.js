@@ -45,6 +45,7 @@ import { setupContactShadow } from './contact-shadow.js';
 import { refineCarMaterials } from './car-materials.js';
 import { applyLook, loadLook, saveLook } from './car-look.js';
 import { setupLookPicker } from './look-picker.js';
+import { graphicsPresets, loadSettings, nextGraphics, saveSettings } from './settings.js';
 import { laneKeepingSteer, nearestLane, curveSpeed, bumpSpeed } from './lane-keeping.js';
 import { setupSparks } from './sparks.js';
 import { setupMinimap } from './minimap.js';
@@ -128,6 +129,15 @@ const camera = new THREE.PerspectiveCamera(cameraFov, innerWidth / innerHeight, 
 // Layer 1: the cabin, seen only by this camera (see the model's setup).
 const cabinLayer = 1;
 camera.layers.enable(cabinLayer);
+// Layer 2: what only the main view draws, not the mirrors (shadows laid on
+// the ground, the grass blades, the beads on the glass's inner side): in a
+// small mirror none of it shows, and each mirror is a whole scene's draw.
+const mainViewLayer = 2;
+camera.layers.enable(mainViewLayer);
+const mainViewOnly = (root) =>
+  root.traverse((o) => {
+    if (/shadows?$|^Grass blades$|^Glass water inside$/i.test(o.name)) o.layers.set(mainViewLayer);
+  });
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.autoRotateSpeed = 0.6;
@@ -151,12 +161,54 @@ const environment = setupEnvironment(scene, renderer, sun, { refresh: lowPower ?
 // the road still shades itself under the overpasses.
 if (lowPower) sun.castShadow = false;
 document.body.dataset.lowPower = String(lowPower);
+// What the viewer remembers between visits (not in a capture, which must
+// come out the same each time): graphics, time of day, camera view.
+const capturing = new URLSearchParams(location.search).get('capture') === '1';
+const remembered = capturing ? loadSettings(null) : loadSettings();
+const rememberSettings = () => {
+  if (!capturing) saveSettings(remembered);
+};
 const rain = setupRain(scene);
 const roadside = guardrailsEnabled ? setupRoadside(scene) : null;
 const structures = setupRoadStructures(scene, road.fields);
 // Blades of grass round the camera (not on phones: a few hundred thousand
 // vertices every frame).
 const grassBlades = lowPower ? null : setupGrassBlades(scene, road.fields);
+// Graphics quality (the top panel's frame rate, or the paint panel, steps
+// through Auto, High, Medium and Low): the canvas's pixel budget and
+// whether it adapts to the frame rate, the sun's shadow map round the car,
+// the grass blades, the projected sun shadows and the mirrors' refresh.
+let graphics = remembered.graphics,
+  projectedShadows = true;
+function applyGraphics(level) {
+  graphics = level;
+  const preset = graphicsPresets[level];
+  const auto = level === 'auto';
+  renderQuality.setBudget(preset.pixels ?? (lowPower ? 1_400_000 : 3_000_000), {
+    minPixels: auto && lowPower ? 900_000 : 0,
+    adaptive: preset.adaptive,
+  });
+  renderer.setPixelRatio(renderQuality.resize(innerWidth, innerHeight));
+  const size = preset.shadowMap ?? (lowPower ? 0 : 2048);
+  if (sun.castShadow !== size > 0) {
+    sun.castShadow = size > 0;
+    // Lit materials' programs change with the shadow map.
+    scene.traverse((o) => {
+      for (const m of [o.material ?? []].flat()) m.needsUpdate = true;
+    });
+  }
+  if (size > 0 && sun.shadow.mapSize.x !== size) {
+    sun.shadow.mapSize.set(size, size);
+    sun.shadow.map?.dispose();
+    sun.shadow.map = null;
+  }
+  if (grassBlades) grassBlades.mesh.visible = preset.grass ?? true;
+  projectedShadows = preset.projected;
+  document.body.dataset.graphics = level;
+  remembered.graphics = level;
+  rememberSettings();
+}
+applyGraphics(graphics);
 // Cars, vans and lorries on the motorway (see traffic.js).
 const trafficView = setupTraffic(scene, { count: lowPower ? 10 : 16 }),
   traffic = trafficView.traffic;
@@ -208,8 +260,16 @@ function showLook() {
   document.body.dataset.paint = paint.name;
   document.body.dataset.wheels = wheels.name;
 }
+function chooseGraphics(level) {
+  applyGraphics(level);
+  applyMirrors();
+  lookPicker.setGraphics(level);
+  dayBar.setGraphics(graphicsPresets[level].label);
+}
 const lookPicker = setupLookPicker(document.body, {
   look,
+  graphics,
+  onGraphics: (level) => chooseGraphics(level),
   onChange(chosen) {
     look = chosen;
     saveLook(look);
@@ -280,7 +340,7 @@ resetView();
 // Camera view: the orbiting chase camera, the driver's seat or the bonnet.
 // Every visit starts with the chase camera, from behind the car.
 const seatCamera = new SeatCamera();
-let cameraView = 'chase';
+let cameraView = cameraViews[remembered.camera] ? remembered.camera : 'chase';
 function applyCameraFov() {
   camera.fov = viewFov(cameraView, camera.aspect) ?? cameraFov;
   camera.near = cameraView === 'chase' ? 0.05 : 0.02;
@@ -293,7 +353,8 @@ function applyMirrors() {
   if (rearViewMirror) rearViewMirror.mirror.visible = cameraView === 'driver';
   // On a phone, from behind the car the door mirrors (each a whole scene
   // render) keep their first picture, and the cabin is not drawn.
-  setMirrorInterval(lowPower ? (cameraView === 'chase' ? 1e9 : 4) : cameraView === 'chase' ? 4 : 2);
+  const lite = lowPower || graphics === 'low';
+  setMirrorInterval(lite ? (cameraView === 'chase' ? 1e9 : 4) : cameraView === 'chase' ? 4 : 2);
   if (interior) interior.interior.visible = !(lowPower && cameraView === 'chase');
 }
 function setCameraView(view) {
@@ -303,6 +364,8 @@ function setCameraView(view) {
   applyCameraFov();
   if (view === 'chase') resetView();
   document.body.dataset.cameraView = view;
+  remembered.camera = view;
+  rememberSettings();
   dayBar.setCamera(view, cameraViews[view].label);
   applyMirrors();
 }
@@ -338,8 +401,8 @@ const lightning = setupLightning(scene, {
 });
 // Time of day: it runs a full day in dayCycle.minutesPerDay real minutes and
 // sets the sky, light and fog continuously; lamps switch at dusk and dawn.
-let timeOfDay = dayCycle.start,
-  timeRunning = true,
+let timeOfDay = remembered.time ?? dayCycle.start,
+  timeRunning = remembered.timeRunning,
   lowBeamsOn = false,
   light = daylight(timeOfDay, rainMode);
 // Discrete changes: the weather, night-time lamps and materials.
@@ -547,8 +610,16 @@ function applyDaylight() {
 }
 function setTimeOfDay(hours) {
   timeOfDay = wrapHours(hours);
+  remembered.time = timeOfDay;
+  rememberSettings();
   applyDaylight();
 }
+// The running clock is remembered every few seconds and on leaving.
+let timeSavedAt = 0;
+addEventListener('pagehide', () => {
+  remembered.time = timeOfDay;
+  rememberSettings();
+});
 function setWeather(kind, fade = 0) {
   weatherKind = kind;
   rainMode = isWet(kind);
@@ -567,14 +638,23 @@ const dayBar = setupDayBar($('#day-bar'), {
   },
   toggleRunning() {
     timeRunning = !timeRunning;
+    remembered.timeRunning = timeRunning;
+    remembered.time = timeOfDay;
+    rememberSettings();
     applyDaylight();
   },
   restart: () => restart(),
   toggleSound: () => vehicleAudio.toggle(),
   nextCamera: () => setCameraView(nextCameraView(cameraView)),
   openLook: (button) => lookPicker.toggle(button),
+  nextGraphics() {
+    const level = nextGraphics(graphics);
+    chooseGraphics(level);
+    toasts.show({ label: 'Graphics', shown: graphicsPresets[level].label }, 2);
+  },
 });
 setCameraView(cameraView);
+dayBar.setGraphics(graphicsPresets[graphics].label);
 $('#night').onchange = (e) => {
   setTimeOfDay(e.target.checked ? dayCycle.presets.night : dayCycle.presets.day);
 };
@@ -837,6 +917,7 @@ new GLTFLoader().load(
       renderer.initTexture(headlights.highPattern);
       skidMarks.warmup(renderer, camera, scene);
       warmNightPrograms();
+      mainViewOnly(scene);
       Object.assign(document.body.dataset, {
         loaded: 'true',
         triangles: String(triangles),
@@ -1002,6 +1083,11 @@ renderer.setAnimationLoop((time) => {
   if (timeRunning && !document.hidden) {
     timeOfDay = wrapHours(timeOfDay + (dt * 24) / (dayCycle.minutesPerDay * 60));
     applyDaylight();
+    if ((timeSavedAt += dt) > 10) {
+      timeSavedAt = 0;
+      remembered.time = timeOfDay;
+      rememberSettings();
+    }
   }
   if (sim) {
     const previousBrakeEnergy = sim.brakeEnergy,
@@ -1342,7 +1428,8 @@ renderer.setAnimationLoop((time) => {
     (1 - 0.7 * rainLevel) *
     (1 - 0.8 * fogLevel) *
     (1 - stormLevel) *
-    Math.min(1, Math.max(0, sunDirection.y * 6));
+    Math.min(1, Math.max(0, sunDirection.y * 6)) *
+    (projectedShadows ? 1 : 0);
   trafficView.update({
     night: lowBeamsOn ? 1 : 0,
     playerCover: cameraShelter,
