@@ -135,3 +135,24 @@ export function setupSpeedCameras(scene) {
     },
   };
 }
+
+// The speed a driver who knows the road keeps for the cameras: it slows to
+// within `margin` km/h over the limit, braking gently from far enough ahead,
+// until past each one; and keeps to about 110 km/h from shortly before the
+// tunnel's mouth to its far end. m/s, at x.
+export function cameraSpeed(x, { margin = 12, braking = 1.6, after = 40 } = {}) {
+  const { period, tunnel } = structureLayout;
+  const approach = (v, d) => Math.sqrt(v * v + 2 * braking * Math.max(0, d));
+  let limit = Infinity;
+  for (const camera of speedCameras) {
+    let at = nearestOccurrence(x, camera.at);
+    if (at < x - after) at += period;
+    limit = Math.min(limit, approach((camera.limit + margin) / 3.6, at - x));
+  }
+  if (tunnel.to > tunnel.from) {
+    let start = nearestOccurrence(x, tunnel.from);
+    if (x > start + tunnel.to - tunnel.from) start += period;
+    limit = Math.min(limit, approach(110 / 3.6, start - 150 - x));
+  }
+  return limit;
+}

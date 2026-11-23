@@ -41,12 +41,19 @@ export const shadowOpacity = (strength) => 0.5 * Math.max(0, Math.min(1, strengt
 // The shadow of a group's meshes (in its own frame), added to the scene. Its
 // `update(sun, strength)` lays it under the group as it stands now, on the
 // ground (or `height` above it, on a paved slab).
-export function groupShadow(scene, group, name, { height = 0.02 } = {}) {
+// `select` picks the meshes that cast it (by default all but those marked
+// noShadow).
+export function groupShadow(
+  scene,
+  group,
+  name,
+  { height = 0.02, select = (o) => !o.userData.noShadow } = {}
+) {
   group.updateMatrixWorld(true);
   const toGroup = new THREE.Matrix4().copy(group.matrixWorld).invert();
   const pieces = [];
   group.traverse((o) => {
-    if (!o.isMesh || o.material?.transparent || o.userData.noShadow) return;
+    if (!o.isMesh || o.material?.transparent || !select(o)) return;
     const g = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(
       new THREE.Matrix4().multiplyMatrices(toGroup, o.matrixWorld)
     );

@@ -306,3 +306,44 @@ test('The autopilot keeps left and flashes slower cars out of its way', async ()
   assert.equal(fastLanePlan(ignored), 'right', 'Ignored, goes round on the right');
   assert.equal(fastLanePlan({ ...ignored, clearRight: false }), null);
 });
+
+test('In the left lane the autopilot presses on in spells, up toward 180 km/h', async () => {
+  const { AutopilotPace, autopilotPace } = await import('../public/lane-keeping.js');
+  let seed = 7;
+  const pace = new AutopilotPace(() => (seed = (seed * 16807) % 2147483647) / 2147483647);
+  let top = 0,
+    pushes = 0,
+    was = false,
+    fallMax = 0,
+    last = pace.set;
+  for (let t = 0; t < 600; t += 0.1) {
+    const { speed, accel } = pace.step(0.1, { fastLane: true, speed: 40 });
+    top = Math.max(top, speed);
+    if (pace.pushing && !was) pushes++;
+    was = pace.pushing;
+    fallMax = Math.max(fallMax, (last - speed) / 0.1);
+    last = speed;
+    assert.ok(accel > 0.5 && accel < 4.5);
+  }
+  assert.ok(top * 3.6 > 170 && top <= autopilotPace.push[1], `top ${top * 3.6} km/h`);
+  assert.ok(pushes >= 5 && pushes < 60, `${pushes} pushes in ten minutes`);
+  assert.ok(fallMax <= autopilotPace.liftOff + 1e-9, 'Lifts off rather than brakes');
+  // Out of the left lane: back to 90 km/h, unless going round a car.
+  for (let t = 0; t < 60; t += 0.1) pace.step(0.1, { fastLane: false });
+  assert.equal(pace.set, autopilotPace.slow);
+  assert.ok(pace.step(0.1, { fastLane: false, passing: true }).speed > autopilotPace.slow);
+});
+
+test('The autopilot slows for the speed cameras and the tunnel', async () => {
+  const { cameraSpeed, speedCameras, fineFor } = await import('../public/speed-cameras.js');
+  const { structureLayout } = await import('../public/road-structures.js');
+  for (const camera of speedCameras) {
+    const at = camera.at + structureLayout.period;
+    assert.equal(fineFor(cameraSpeed(at) * 3.6, camera.limit), 0, 'No fine passing');
+    assert.ok(cameraSpeed(at - 1500) * 3.6 > 180, 'Free well before');
+  }
+  const { from, to } = structureLayout.tunnel;
+  assert.ok(
+    Math.abs(cameraSpeed(from + structureLayout.period + (to - from) / 2) * 3.6 - 110) < 0.5
+  );
+});

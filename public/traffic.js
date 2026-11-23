@@ -397,8 +397,8 @@ export class Traffic {
   }
   // The car flashes its headlights: seen in the mirror further off than a
   // horn is heard, and answered after a moment's reaction.
-  flashedAt(x, lat) {
-    return this.askToYield(x, lat, 150, 0.5);
+  flashedAt(x, lat, range = 150) {
+    return this.askToYield(x, lat, range, 0.5);
   }
   askToYield(x, lat, range, reaction = 0) {
     const ahead = this.leaderFor(x, lat);

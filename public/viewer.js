@@ -28,7 +28,7 @@ import { setupWipers } from './wipers.js';
 import { setupTraffic } from './traffic-view.js';
 import { collideWithTraffic, trafficShade } from './traffic.js';
 import { RunTimer, describeRun } from './runs.js';
-import { setupSpeedCameras, camerasPassed, fineFor } from './speed-cameras.js';
+import { setupSpeedCameras, camerasPassed, fineFor, cameraSpeed } from './speed-cameras.js';
 import { setupPowerLines } from './power-lines.js';
 import { setupBusStops } from './bus-stops.js';
 import { FuelTank, atPump, fuelPrice, setupFuelStation } from './fuel-station.js';
@@ -63,6 +63,8 @@ import {
   curveSpeed,
   bumpSpeed,
   fastLanePlan,
+  flashRange,
+  AutopilotPace,
 } from './lane-keeping.js';
 import { setupSparks } from './sparks.js';
 import { setupMinimap } from './minimap.js';
@@ -1254,9 +1256,12 @@ let chaseSwing = false,
 controls.addEventListener('start', () => {
   chaseSwing = false;
 });
-// The self-driving cruise speed: 90 km/h, and 115 km/h in the left lane.
+// The self-driving pace: 90 km/h in the right-hand lanes, and in the left
+// one a driver's moods, from a brisk cruise to a push toward 180 km/h (see
+// AutopilotPace in lane-keeping.js).
 const autopilotSpeed = 25,
-  autopilotFastSpeed = 32;
+  autopilotPacing = new AutopilotPace();
+let autopilotPassing = false;
 // The self-driving car in traffic keeps to the left lane (see fastLanePlan
 // in lane-keeping.js): it moves over whenever the left lane is clear,
 // flashes its headlights at a slower car ahead there, which then moves over
@@ -1273,9 +1278,6 @@ let autopilotPlan = 0,
 const beamFlasher = new HeadlightFlasher();
 // The tell-tales lit on both clusters (the overlay's and the cabin's).
 const clusterLamps = { left: false, right: false, low: false, high: false };
-function autopilotCruise() {
-  return Math.abs(keptLane - roadLanes[0]) < 0.1 ? autopilotFastSpeed : autopilotSpeed;
-}
 function autopilotTraffic(dt) {
   sinceBeamFlash += dt;
   const lat = roadLateral(sim.x, sim.z);
@@ -1299,7 +1301,8 @@ function autopilotTraffic(dt) {
   const plan = fastLanePlan({
     lane,
     leader: ahead && { gap: ahead.gap, speed: ahead.speed, moving: Boolean(ahead.who.change) },
-    cruise: autopilotFastSpeed,
+    cruise: autopilotPacing.set,
+    speed: sim.speed,
     clearLeft: left !== undefined && traffic.laneClearFor(sim.x, sim.speed, left, 4.9, 1.9, 30),
     clearRight: right !== undefined && traffic.laneClearFor(sim.x, sim.speed, right, 4.9, 1.9, 40),
     flashes: flashCount,
@@ -1309,9 +1312,11 @@ function autopilotTraffic(dt) {
     beamFlasher.start();
     sinceBeamFlash = 0;
     flashCount++;
-    traffic.flashedAt(sim.x, keptLane);
+    traffic.flashedAt(sim.x, keptLane, flashRange(sim.speed) + 30);
   } else if (plan) {
     keptLane = plan === 'left' ? left : right;
+    // Going round on the right keeps up its pace.
+    autopilotPassing = plan === 'right';
     signals.set(plan);
     autopilotSignal = plan;
   }
@@ -1427,19 +1432,35 @@ renderer.setAnimationLoop((time) => {
       const follow = leader
         ? Math.max(0, leader.speed + 0.35 * (leader.gap - (6 + 1.4 * leader.speed)))
         : Infinity;
-      // (In fog it keeps to about 70 km/h.)
+      const fastLane = Math.abs(keptLane - roadLanes[0]) < 0.1;
+      if (fastLane) autopilotPassing = false;
+      const pace = autopilotPacing.step(dt, {
+        fastLane,
+        passing: autopilotPassing,
+        speed: sim.speed,
+      });
+      // The weather tames it: in fog it keeps to about 70 km/h, in rain to
+      // 130, and on snow slower still.
+      let wanted = pace.speed;
+      wanted += (Math.min(wanted, 36) - wanted) * rainLevel;
+      wanted += (autopilotSpeed * 0.78 - wanted) * fogLevel;
+      wanted += (autopilotSpeed * winterDriving.autopilotSpeed - wanted) * winterLevel;
       input.cruiseSpeed = Math.min(
-        autopilotCruise() *
-          (1 - 0.22 * fogLevel) *
-          (1 - (1 - winterDriving.autopilotSpeed) * winterLevel),
+        wanted,
         follow,
         curveSpeed(sim.x, keptLane, { lateral: rainMode ? 2.5 : 3.5 }),
-        bumpSpeed(sim.x)
+        bumpSpeed(sim.x),
+        cameraSpeed(sim.x)
       );
+      input.cruiseAccel = pace.accel;
+      // Firmer on the brakes at speed, gentler on snow.
+      input.cruiseBrake = 2.5 + 2 * (1 - winterLevel);
     } else {
       keptLane = null;
       delete input.steerAngle;
       delete input.cruiseSpeed;
+      delete input.cruiseAccel;
+      delete input.cruiseBrake;
     }
     document.body.dataset.autopilot = String(autopilot);
     // Snow and ice: less grip all round.

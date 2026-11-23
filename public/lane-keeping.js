@@ -84,18 +84,79 @@ export function bumpSpeed(x, { over = 13.9, braking = 2.2 } = {}) {
 
 // The self-driving car keeps to the left, fast lane: from another lane it
 // moves over as soon as the left one is clear; in it, held up by something
-// slower within `flashGap` m, it flashes its headlights (no more often than
+// slower within `flashRange` m, it flashes its headlights (no more often than
 // every `flashEvery` s) and waits for it to move over; ignored `patience`
 // times, it goes round on the right and comes back. `lane` is the lane's
 // index from the left, `leader` {gap, speed, moving} the vehicle ahead in
 // it (moving: already changing lanes), `cruise` the car's own pace.
 // Returns 'left', 'right', 'flash' or null.
+// (Faster, it flashes from further back: some four seconds ahead.)
 export const fastLane = Object.freeze({ flashGap: 90, flashEvery: 4, patience: 2, slower: 1 });
-export function fastLanePlan({ lane, leader, cruise, clearLeft, clearRight, flashes, sinceFlash }) {
+export const flashRange = (speed = 0) => Math.max(fastLane.flashGap, 30 + 4 * speed);
+export function fastLanePlan({
+  lane,
+  leader,
+  cruise,
+  speed = 0,
+  clearLeft,
+  clearRight,
+  flashes,
+  sinceFlash,
+}) {
   if (lane > 0) return clearLeft ? 'left' : null;
   const heldUp =
-    leader && leader.gap < fastLane.flashGap && leader.speed < cruise - fastLane.slower;
+    leader && leader.gap < flashRange(speed) && leader.speed < cruise - fastLane.slower;
   if (!heldUp || leader.moving) return null;
   if (flashes < fastLane.patience) return sinceFlash >= fastLane.flashEvery ? 'flash' : null;
   return clearRight && sinceFlash >= fastLane.flashEvery ? 'right' : null;
+}
+
+// How hard the self-driving car presses on in the left lane, as a driver
+// would: spells of a brisk cruise at 130–150 km/h, now and then a push to
+// 170–190 km/h, and back. It picks up speed briskly (more gently the
+// faster it goes and the calmer its mood) and, when the mood passes, lifts
+// off and lets the speed fall away on the drag instead of braking. Bends,
+// traffic and cameras are left to the caller: they brake as they need.
+// Speeds in m/s.
+export const autopilotPace = Object.freeze({
+  slow: 25,
+  cruise: [36, 41.5],
+  push: [48, 53],
+  cruiseFor: [8, 18],
+  pushFor: [8, 16],
+  liftOff: 0.9,
+});
+export class AutopilotPace {
+  constructor(random = Math.random) {
+    this.random = random;
+    this.pushing = false;
+    this.left = 3 + 4 * random();
+    this.wish = this.pick();
+    this.drive = 0.9 + 0.3 * random();
+    this.set = autopilotPace.slow;
+  }
+  pick() {
+    const [low, high] = this.pushing ? autopilotPace.push : autopilotPace.cruise;
+    return low + (high - low) * this.random();
+  }
+  // Advances by dt; returns the speed it wants now and the acceleration it
+  // would use to get there. In the other lanes it keeps to 90 km/h, unless
+  // `passing` (going round a car on the right) holds its pace.
+  step(dt, { fastLane, passing = false, speed = 0 }) {
+    this.left -= dt;
+    if (this.left <= 0) {
+      this.pushing = !this.pushing && this.random() < 0.6;
+      const [a, b] = this.pushing ? autopilotPace.pushFor : autopilotPace.cruiseFor;
+      this.left = a + (b - a) * this.random();
+      this.wish = this.pick();
+      this.drive = (this.pushing ? 1.05 : 0.8) + 0.25 * this.random();
+    }
+    const wish = fastLane || passing ? this.wish : autopilotPace.slow;
+    // Up at once (the accelerator does the easing), down at a lift-off's rate.
+    this.set = wish >= this.set ? wish : Math.max(wish, this.set - autopilotPace.liftOff * dt);
+    // Brisk at motorway pace, tailing off toward 200 km/h as a driver eases
+    // the throttle.
+    const accel = this.drive * Math.max(1.2, 3.6 - 0.045 * speed);
+    return { speed: this.set, accel };
+  }
 }

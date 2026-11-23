@@ -63,3 +63,20 @@ test('Village yards stay clear of the bus stop and the fuel station', () => {
   const { solid, glass } = yardKits(0);
   assert.ok(solid.attributes.position.count > 1000 && glass.attributes.position.count > 0);
 });
+
+test('Village houses come in three kinds, with trees, a shed and room to walk round', () => {
+  const sizes = new Set();
+  for (let i = 0; i < villageYards.length; i++) {
+    const { solid, leaves, flowers, chimney, colliders } = yardKits(i);
+    assert.ok(leaves && leaves.attributes.position.count > 500, `yard ${i} has trees`);
+    assert.ok(flowers, 'Beds and sunflowers');
+    assert.ok(chimney[1] > 4.5, 'The chimney stands over the roof');
+    const [house] = colliders;
+    // The house stands back from the fence (at 4.5 m), inside its plot.
+    assert.ok(house[1] - house[3] > 4.5 + 2, `yard ${i}: house clear of the fence`);
+    assert.ok(Math.abs(house[0]) + house[2] < 15, `yard ${i}: house inside its plot`);
+    sizes.add(`${Math.round(house[2])}x${Math.round(house[3])}`);
+    assert.ok(solid.attributes.position.count < 30000, 'Light enough');
+  }
+  assert.ok(sizes.size >= 3, 'Houses of different shapes');
+});

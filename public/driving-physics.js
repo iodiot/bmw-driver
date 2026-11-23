@@ -312,9 +312,14 @@ export class DrivingSimulation {
       this.powertrain.step(dt, this.speed, input, !this.pedalUsed) *
       (input.brake ? this.brakePressure : 1);
     // Cruise control for self-driving: eases toward the set speed (gently up,
-    // firmer down for a bend) until the driver touches a pedal.
+    // firmer down for a bend, or as hard as `cruiseAccel` and `cruiseBrake`
+    // allow) until the driver touches a pedal.
     if (Number.isFinite(input.cruiseSpeed) && !this.pedalUsed)
-      acceleration = clamp((input.cruiseSpeed - this.speed) * 0.5, -2.5, 1.8);
+      acceleration = clamp(
+        (input.cruiseSpeed - this.speed) * 0.5,
+        -(input.cruiseBrake ?? 2.5),
+        input.cruiseAccel ?? 1.8
+      );
     // With DSC off the driver has more lock at speed, to throw the car into
     // a slide and catch it.
     const limit = Math.min(

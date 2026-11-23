@@ -44,6 +44,16 @@ export class Kit {
     this.add(g, colour, m);
     return this;
   }
+  // Moves another kit's parts into this one (by `matrix`): a piece built in
+  // its own frame, such as a house or a window, set in place.
+  append(other, matrix = null) {
+    for (const g of other.parts) {
+      if (matrix) g.applyMatrix4(matrix);
+      this.parts.push(g);
+    }
+    other.parts = [];
+    return this;
+  }
   // A cylinder (posts, chimneys, wells).
   cylinder(r, h, x, y, z, colour, segments = 10) {
     const m = new THREE.Matrix4().setPosition(x, y + h / 2, z);
