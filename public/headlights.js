@@ -49,7 +49,8 @@ export function setupHeadlights(rig) {
   const highPattern = createLowBeamPattern(128, 4096, highBeamProfile);
   highPattern.name = 'High beam angular distribution';
   let night = false,
-    high = false;
+    high = false,
+    flash = false;
   const projectors = [];
   for (const side of [-1, 1]) {
     // Measured projector centres, expressed relative to the suspended body pivot.
@@ -94,7 +95,8 @@ export function setupHeadlights(rig) {
       light.distance = settings.range;
       light.map = night && high ? highPattern : pattern;
     }
-    lens.material.emissiveIntensity = night ? (high ? 6 : 4) : 0.8;
+    // A flash by day shows only in the lenses, bright for a moment.
+    lens.material.emissiveIntensity = night ? (high ? 6 : 4) : flash ? 7 : 0.8;
   }
 
   return {
@@ -127,6 +129,13 @@ export function setupHeadlights(rig) {
     setHighBeam(enabled) {
       if (enabled === high) return;
       high = enabled;
+      apply();
+    },
+    // Flashing the headlights: the main beam at night (setHighBeam), the
+    // lenses lit up by day.
+    setFlash(enabled) {
+      if (enabled === flash) return;
+      flash = enabled;
       apply();
     },
   };

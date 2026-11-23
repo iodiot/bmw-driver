@@ -390,3 +390,26 @@ export function setupReversingLamps(rig) {
     },
   };
 }
+
+// Flashing the headlights (the stalk pulled toward the driver): two quick
+// blinks of the main beam, the motorway's way of asking a slower car ahead
+// in the fast lane to move over.
+export const beamFlash = Object.freeze({ on: 0.16, off: 0.13, blinks: 2 });
+export class HeadlightFlasher {
+  t = Infinity;
+  start() {
+    this.t = 0;
+  }
+  // Advances by dt; returns 'on' or 'off' when the beam changes (for the
+  // stalk's click), else null.
+  step(dt) {
+    const was = this.lit;
+    this.t += dt;
+    const lit = this.lit;
+    return lit === was ? null : lit ? 'on' : 'off';
+  }
+  get lit() {
+    const period = beamFlash.on + beamFlash.off;
+    return this.t < beamFlash.blinks * period && this.t % period < beamFlash.on;
+  }
+}

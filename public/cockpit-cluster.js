@@ -94,6 +94,55 @@ function drawNeedle(ctx, cx, cy, r, angle) {
   ctx.fill();
 }
 
+// The tell-tales as the F10 shows them: a green arrow above each dial's
+// inner shoulder for the turn signals, and between the dials the headlamp
+// symbols, green for dipped beam, blue for main beam (the lamp's dome with
+// its rays, slanted down for dipped, level for main).
+function drawArrow(ctx, cx, cy, size, dir) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(dir, 1);
+  ctx.shadowColor = 'rgba(60,230,110,0.9)';
+  ctx.shadowBlur = size * 0.5;
+  ctx.fillStyle = '#3ee06e';
+  ctx.beginPath();
+  ctx.moveTo(-size, 0);
+  ctx.lineTo(-size * 0.1, -size * 0.75);
+  ctx.lineTo(-size * 0.1, -size * 0.32);
+  ctx.lineTo(size, -size * 0.32);
+  ctx.lineTo(size, size * 0.32);
+  ctx.lineTo(-size * 0.1, size * 0.32);
+  ctx.lineTo(-size * 0.1, size * 0.75);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+function drawHeadlamp(ctx, cx, cy, size, high) {
+  const colour = high ? '#3d8bff' : '#3ee06e';
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.shadowColor = colour;
+  ctx.shadowBlur = size * 0.4;
+  ctx.strokeStyle = ctx.fillStyle = colour;
+  ctx.lineWidth = size * 0.16;
+  ctx.lineCap = 'round';
+  // The dome, facing left, the way the beam goes.
+  ctx.beginPath();
+  ctx.moveTo(size * 0.35, -size * 0.6);
+  ctx.quadraticCurveTo(-size * 0.45, -size * 0.6, -size * 0.45, 0);
+  ctx.quadraticCurveTo(-size * 0.45, size * 0.6, size * 0.35, size * 0.6);
+  ctx.closePath();
+  ctx.fill();
+  const drop = high ? 0 : size * 0.28;
+  for (const y of [-0.45, 0, 0.45]) {
+    ctx.beginPath();
+    ctx.moveTo(-size * 0.62, y * size);
+    ctx.lineTo(-size * 1.15, y * size + drop);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 export function setupCockpitCluster(rig) {
   const { corners, width, height, speedMax, rpmMax, redline, refresh } = clusterLayout;
   const body = rig.body;
@@ -219,8 +268,18 @@ export function setupCockpitCluster(rig) {
     body.add(ring, sleeve);
   }
   let elapsed = Infinity;
-  function draw(speedKmh, rpm, gear, nav = null) {
+  const noLamps = { left: false, right: false, low: false, high: false };
+  function drawLamps({ left: l, right: rt, low, high }) {
+    const size = r * 0.13,
+      y = height * 0.1;
+    if (l) drawArrow(ctx, left[0] + r * 0.62, y, size, 1);
+    if (rt) drawArrow(ctx, right[0] - r * 0.62, y, size, -1);
+    if (low) drawHeadlamp(ctx, width / 2 - r * 0.16, y, size * 0.8, false);
+    if (high) drawHeadlamp(ctx, width / 2 + r * 0.26, y, size * 0.8, true);
+  }
+  function draw(speedKmh, rpm, gear, nav = null, lamps = noLamps) {
     ctx.drawImage(dials, 0, 0);
+    drawLamps(lamps);
     drawNeedle(ctx, ...left, r, dialAngle(speedKmh, speedMax));
     drawNeedle(ctx, ...right, r, dialAngle(rpm / 1000, rpmMax));
     ctx.fillStyle = '#f4f6f8';
@@ -241,20 +300,26 @@ export function setupCockpitCluster(rig) {
     texture.needsUpdate = true;
   }
   draw(0, 0, 'D1');
+  let shownLamps = '';
   return {
     mesh,
     // `visible`: seen from the driver's seat; from outside the canvas is
-    // neither redrawn nor uploaded.
-    update(dt, simulation, night = false, visible = true, nav = null) {
+    // neither redrawn nor uploaded. `lamps`: the tell-tales lit ({left,
+    // right, low, high}); a change redraws at once, so the arrows keep the
+    // relay's beat.
+    update(dt, simulation, night = false, visible = true, nav = null, lamps = noLamps) {
       material.color.setScalar(night ? 0.62 : 0.85);
       elapsed += dt;
-      if (elapsed < refresh || !simulation || !visible) return;
+      const lampKey = `${+lamps.left}${+lamps.right}${+lamps.low}${+lamps.high}`;
+      if ((elapsed < refresh && lampKey === shownLamps) || !simulation || !visible) return;
       elapsed = 0;
+      shownLamps = lampKey;
       draw(
         simulation.speed * 3.6,
         simulation.powertrain.rpm,
         simulation.gearLabel ?? `D${simulation.powertrain.gear}`,
-        nav
+        nav,
+        lamps
       );
     },
   };

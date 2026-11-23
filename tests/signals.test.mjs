@@ -71,3 +71,18 @@ test('Hazards flash both sides over a turn signal, which resumes after', async (
   signals.toggleHazard();
   assert.ok(signals.flashes('left') && !signals.flashes('right'));
 });
+
+test('Flashing the headlights blinks the main beam twice, with a click each way', async () => {
+  const { HeadlightFlasher } = await import('../public/signals.js');
+  const f = new HeadlightFlasher();
+  assert.equal(f.lit, false, 'Off until flashed');
+  f.start();
+  assert.equal(f.lit, true);
+  const clicks = [];
+  for (let i = 0; i < 100; i++) {
+    const click = f.step(0.01);
+    if (click) clicks.push(click);
+  }
+  assert.deepEqual(clicks, ['off', 'on', 'off']);
+  assert.equal(f.lit, false, 'Done within a second');
+});

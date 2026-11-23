@@ -81,3 +81,21 @@ export function bumpSpeed(x, { over = 13.9, braking = 2.2 } = {}) {
   }
   return Math.sqrt(over * over + 2 * braking * distance);
 }
+
+// The self-driving car keeps to the left, fast lane: from another lane it
+// moves over as soon as the left one is clear; in it, held up by something
+// slower within `flashGap` m, it flashes its headlights (no more often than
+// every `flashEvery` s) and waits for it to move over; ignored `patience`
+// times, it goes round on the right and comes back. `lane` is the lane's
+// index from the left, `leader` {gap, speed, moving} the vehicle ahead in
+// it (moving: already changing lanes), `cruise` the car's own pace.
+// Returns 'left', 'right', 'flash' or null.
+export const fastLane = Object.freeze({ flashGap: 90, flashEvery: 4, patience: 2, slower: 1 });
+export function fastLanePlan({ lane, leader, cruise, clearLeft, clearRight, flashes, sinceFlash }) {
+  if (lane > 0) return clearLeft ? 'left' : null;
+  const heldUp =
+    leader && leader.gap < fastLane.flashGap && leader.speed < cruise - fastLane.slower;
+  if (!heldUp || leader.moving) return null;
+  if (flashes < fastLane.patience) return sinceFlash >= fastLane.flashEvery ? 'flash' : null;
+  return clearRight && sinceFlash >= fastLane.flashEvery ? 'right' : null;
+}

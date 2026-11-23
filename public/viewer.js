@@ -57,7 +57,13 @@ import { applyLook, loadLook, saveLook } from './car-look.js';
 import { setupLookPicker } from './look-picker.js';
 import { setupWeatherPicker } from './weather-picker.js';
 import { graphicsPresets, loadSettings, nextGraphics, saveSettings } from './settings.js';
-import { laneKeepingSteer, nearestLane, curveSpeed, bumpSpeed } from './lane-keeping.js';
+import {
+  laneKeepingSteer,
+  nearestLane,
+  curveSpeed,
+  bumpSpeed,
+  fastLanePlan,
+} from './lane-keeping.js';
 import { setupSparks } from './sparks.js';
 import { setupMinimap } from './minimap.js';
 import { setMirrorInterval, setupMirrors, setupRearViewMirror } from './mirrors.js';
@@ -75,7 +81,13 @@ import { setupCockpitCluster } from './cockpit-cluster.js';
 import { setupCentreDisplay } from './centre-display.js';
 import { setupDust } from './dust.js';
 import { setupTyreSmoke } from './tyre-smoke.js';
-import { TurnSignals, highBeamWanted, setupReversingLamps, setupSignalLamps } from './signals.js';
+import {
+  TurnSignals,
+  HeadlightFlasher,
+  highBeamWanted,
+  setupReversingLamps,
+  setupSignalLamps,
+} from './signals.js';
 import { readPad, setupTouchControls } from './touch-controls.js';
 import { setupBodyDirt } from './body-dirt.js';
 import { openingGroups, setupCarOpenings } from './car-openings.js';
@@ -85,6 +97,7 @@ import {
   roadCenterSlope,
   guardrailsEnabled,
   surfaceRoughness,
+  roadLanes,
 } from './road-profile.js';
 
 const $ = (s) => document.querySelector(s);
@@ -1241,15 +1254,30 @@ let chaseSwing = false,
 controls.addEventListener('start', () => {
   chaseSwing = false;
 });
-// The self-driving cruise speed: 90 km/h.
-const autopilotSpeed = 25;
-// The self-driving car in traffic: overtakes on the left when held up by
-// something slower, then moves back right when there is room, signalling
-// each change (a lane is a constant offset; lane keeping steers there).
+// The self-driving cruise speed: 90 km/h, and 115 km/h in the left lane.
+const autopilotSpeed = 25,
+  autopilotFastSpeed = 32;
+// The self-driving car in traffic keeps to the left lane (see fastLanePlan
+// in lane-keeping.js): it moves over whenever the left lane is clear,
+// flashes its headlights at a slower car ahead there, which then moves over
+// to the right, and if one will not, goes round it on the right and comes
+// back. Each change is signalled (a lane is a constant offset; lane keeping
+// steers there).
 let autopilotPlan = 0,
   // The indicator the autopilot put on (it turns off only its own).
-  autopilotSignal = null;
+  autopilotSignal = null,
+  // Who it last flashed at, how many times, and how long ago.
+  flashedVehicle = null,
+  flashCount = 0,
+  sinceBeamFlash = Infinity;
+const beamFlasher = new HeadlightFlasher();
+// The tell-tales lit on both clusters (the overlay's and the cabin's).
+const clusterLamps = { left: false, right: false, low: false, high: false };
+function autopilotCruise() {
+  return Math.abs(keptLane - roadLanes[0]) < 0.1 ? autopilotFastSpeed : autopilotSpeed;
+}
 function autopilotTraffic(dt) {
+  sinceBeamFlash += dt;
   const lat = roadLateral(sim.x, sim.z);
   const settled = Math.abs(lat - keptLane) < 0.4;
   if (settled && autopilotSignal && signals.side === autopilotSignal) {
@@ -1258,28 +1286,34 @@ function autopilotTraffic(dt) {
   }
   autopilotPlan -= dt;
   if (autopilotPlan > 0 || !settled) return;
-  autopilotPlan = 1;
-  const leader = traffic.leaderFor(sim.x, keptLane);
-  const left = keptLane - 3.6,
-    right = keptLane + 3.6;
-  if (
-    leader &&
-    leader.gap < 70 &&
-    leader.speed < autopilotSpeed - 1.5 &&
-    left >= -3.61 &&
-    traffic.laneClearFor(sim.x, sim.speed, left, 4.9, 1.9, 30)
-  ) {
-    keptLane = left;
-    signals.set('left');
-    autopilotSignal = 'left';
-  } else if (
-    right <= 3.61 &&
-    (!leader || leader.gap > 90) &&
-    traffic.laneClearFor(sim.x, sim.speed, right, 4.9, 1.9, 90)
-  ) {
-    keptLane = right;
-    signals.set('right');
-    autopilotSignal = 'right';
+  autopilotPlan = 0.5;
+  const lane = roadLanes.findIndex((l) => Math.abs(l - keptLane) < 0.1);
+  if (lane < 0) return;
+  const ahead = traffic.leaderFor(sim.x, keptLane);
+  if (ahead?.who !== flashedVehicle) {
+    flashedVehicle = ahead?.who ?? null;
+    flashCount = 0;
+  }
+  const left = roadLanes[lane - 1],
+    right = roadLanes[lane + 1];
+  const plan = fastLanePlan({
+    lane,
+    leader: ahead && { gap: ahead.gap, speed: ahead.speed, moving: Boolean(ahead.who.change) },
+    cruise: autopilotFastSpeed,
+    clearLeft: left !== undefined && traffic.laneClearFor(sim.x, sim.speed, left, 4.9, 1.9, 30),
+    clearRight: right !== undefined && traffic.laneClearFor(sim.x, sim.speed, right, 4.9, 1.9, 40),
+    flashes: flashCount,
+    sinceFlash: sinceBeamFlash,
+  });
+  if (plan === 'flash') {
+    beamFlasher.start();
+    sinceBeamFlash = 0;
+    flashCount++;
+    traffic.flashedAt(sim.x, keptLane);
+  } else if (plan) {
+    keptLane = plan === 'left' ? left : right;
+    signals.set(plan);
+    autopilotSignal = plan;
   }
 }
 let cameraFollowHeading = 0,
@@ -1395,7 +1429,7 @@ renderer.setAnimationLoop((time) => {
         : Infinity;
       // (In fog it keeps to about 70 km/h.)
       input.cruiseSpeed = Math.min(
-        autopilotSpeed *
+        autopilotCruise() *
           (1 - 0.22 * fogLevel) *
           (1 - (1 - winterDriving.autopilotSpeed) * winterLevel),
         follow,
@@ -1541,14 +1575,19 @@ renderer.setAnimationLoop((time) => {
     roadJolt.update(dt, sim.wheels, { enabled: driving, speed: sim.speed });
     rig.body.position.y = 0.55 + sim.heave + roadJolt.heave;
     rig.body.rotation.set(sim.roll + roadJolt.roll, 0, sim.pitch + roadJolt.pitch);
+    // (Flashing them works whatever the assistant wants.)
+    const beamClick = beamFlasher.step(dt);
+    if (beamClick) vehicleAudio.tick(beamClick === 'on');
+    headlights.setFlash(beamFlasher.lit);
     headlights.setHighBeam(
-      highBeamWanted({
-        night: lowBeamsOn,
-        speed: sim.speed,
-        raining: rainMode,
-        enabled: highBeamAssistOn,
-        trafficDistance: traffic.distanceAhead(sim.x, roadLateral(sim.x, sim.z)),
-      })
+      beamFlasher.lit ||
+        highBeamWanted({
+          night: lowBeamsOn,
+          speed: sim.speed,
+          raining: rainMode,
+          enabled: highBeamAssistOn,
+          trafficDistance: traffic.distanceAhead(sim.x, roadLateral(sim.x, sim.z)),
+        })
     );
     headlights.update(dt);
     // The stalk cancels by itself when the driver steers back; the
@@ -1560,11 +1599,16 @@ renderer.setAnimationLoop((time) => {
       left: signals.lit && signals.flashes('left'),
       right: signals.lit && signals.flashes('right'),
     };
-    instruments.setLamps({ ...flashing, high: headlights.high });
+    clusterLamps.left = flashing.left;
+    clusterLamps.right = flashing.right;
+    clusterLamps.low = lowBeamsOn;
+    clusterLamps.high = headlights.high || beamFlasher.lit;
+    instruments.setLamps(clusterLamps);
     // And their amber light on the road beside the car, in the dark.
     signalGlow.update(dt, sim, light.darkness, flashing);
     document.body.dataset.signal = signals.hazard ? 'hazard' : (signals.side ?? 'none');
     document.body.dataset.highBeam = String(headlights.high);
+    document.body.dataset.beamFlashes = String(flashCount);
     for (let i = 0; i < rig.wheels.length; i++) {
       const w = rig.wheels[i],
         state = sim.wheels[i];
@@ -1636,7 +1680,8 @@ renderer.setAnimationLoop((time) => {
       sim,
       nightMode,
       inCabin,
-      route ? { to: route.to, km: route.toGo(sim.x) / 1000 } : null
+      route ? { to: route.to, km: route.toGo(sim.x) / 1000 } : null,
+      clusterLamps
     );
     centreDisplay.update(dt, sim, {
       hours: timeOfDay,

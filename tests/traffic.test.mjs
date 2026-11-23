@@ -139,6 +139,13 @@ test('A horn moves the car ahead over to the right, or hurries it', async () => 
   assert.ok(hurried > calm, 'A little faster while hurried');
   assert.equal(traffic.honk(0, roadLanes[1] + 0), ahead);
   assert.equal(traffic.honk(-200, roadLanes[1]), null, 'Too far to hear');
+  // Flashed at from 120 m, too far for the horn: it moves over after a moment.
+  Object.assign(blocker, { x: -400 });
+  Object.assign(ahead, { x: 120, lane: 0, lat: roadLanes[0], change: null, hurried: 0 });
+  assert.equal(traffic.honk(0, roadLanes[0]), null);
+  assert.equal(traffic.flashedAt(0, roadLanes[0]), ahead);
+  assert.equal(ahead.change.to, 1);
+  assert.ok(ahead.change.t < -trafficLayout.signalLead, 'A moment to react');
 });
 
 test("A lorry's shadow falls on the car beside it, not on one in front", async () => {

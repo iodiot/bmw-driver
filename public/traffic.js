@@ -320,8 +320,8 @@ export class Traffic {
     }
   }
 
-  begin(v, to) {
-    v.change = { from: v.lane, to, t: -trafficLayout.signalLead };
+  begin(v, to, reaction = 0) {
+    v.change = { from: v.lane, to, t: -trafficLayout.signalLead - reaction };
     v.signal = to < v.lane ? -1 : 1;
     v.clock = 0;
   }
@@ -393,14 +393,22 @@ export class Traffic {
   // within 90 m, moves over to the right if it can, or else hurries on for
   // a while. Returns it, or null.
   honk(x, lat) {
+    return this.askToYield(x, lat, 90);
+  }
+  // The car flashes its headlights: seen in the mirror further off than a
+  // horn is heard, and answered after a moment's reaction.
+  flashedAt(x, lat) {
+    return this.askToYield(x, lat, 150, 0.5);
+  }
+  askToYield(x, lat, range, reaction = 0) {
     const ahead = this.leaderFor(x, lat);
-    if (!ahead || ahead.gap > 90) return null;
+    if (!ahead || ahead.gap > range) return null;
     const v = ahead.who;
     if (v.crash || v.change) return v;
     const users = [...this.vehicles, { x, lat, speed: v.speed, length: 4.9, width: 1.9 }];
     const spec = vehicleTypes[v.type];
     if (v.lane < 2 && spec.lanes.includes(v.lane + 1) && this.laneOpen(v, v.lane + 1, users, 12)) {
-      this.begin(v, v.lane + 1);
+      this.begin(v, v.lane + 1, reaction);
       v.sinceChange = 0;
     } else v.hurried = 8;
     return v;
