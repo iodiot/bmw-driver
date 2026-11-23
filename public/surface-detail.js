@@ -68,6 +68,9 @@ export function addSurfaceDetail(material, { joints = 0 } = {}) {
             vec2 cell = abs(fract(p.xz / ${joints.toFixed(2)} + .5) - .5) * ${joints.toFixed(2)};
             float edge = min(cell.x, cell.y);
             float joint = 1. - smoothstep(.015, .035 + fwidth(edge), edge);
+            // Fading out once a joint is thinner than a pixel, so it does not
+            // shimmer from afar.
+            joint *= 1. - smoothstep(.015, .06, fwidth(edge));
             diffuseColor.rgb *= mix(1., .62, joint * slab);
             diffuseColor.rgb *= mix(1., .9 + .16 * detailNoise(p * .9), slab);
           }`

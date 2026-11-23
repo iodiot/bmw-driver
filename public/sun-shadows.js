@@ -39,8 +39,9 @@ export function shadowMaterial(name) {
 export const shadowOpacity = (strength) => 0.5 * Math.max(0, Math.min(1, strength));
 
 // The shadow of a group's meshes (in its own frame), added to the scene. Its
-// `update(sun, strength)` lays it under the group as it stands now.
-export function groupShadow(scene, group, name) {
+// `update(sun, strength)` lays it under the group as it stands now, on the
+// ground (or `height` above it, on a paved slab).
+export function groupShadow(scene, group, name, { height = 0.02 } = {}) {
   group.updateMatrixWorld(true);
   const toGroup = new THREE.Matrix4().copy(group.matrixWorld).invert();
   const pieces = [];
@@ -68,7 +69,7 @@ export function groupShadow(scene, group, name) {
       if (!mesh.visible) return;
       material.opacity = shadowOpacity(strength);
       group.updateMatrixWorld();
-      mesh.matrix.multiplyMatrices(sunProjection(sun, projection), group.matrixWorld);
+      mesh.matrix.multiplyMatrices(sunProjection(sun, projection, height), group.matrixWorld);
       mesh.matrixWorld.copy(mesh.matrix);
     },
   };

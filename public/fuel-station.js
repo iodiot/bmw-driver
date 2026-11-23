@@ -149,10 +149,13 @@ function shopSignTexture() {
 function station() {
   const group = new THREE.Group();
   group.name = 'Fuel station';
-  const kit = new Kit();
+  const kit = new Kit(),
+    // The slab and its paint, apart: they cast no shadow (a shadow of the
+    // forecourt laid on the forecourt flickered).
+    ground = new Kit();
   const { length, from, depth } = fuelStationPlace;
   // The forecourt: a slab of concrete, thin so the car's wheels sit on it.
-  kit.box(length, 0.04, depth, 0, 0, from + depth / 2, 0x9a9ea2);
+  ground.box(length, 0.04, depth, 0, 0, from + depth / 2, 0x9a9ea2);
   // Paint on it: dashed lines between the lanes past the islands, arrows
   // showing the way through (in from the left, out to the right) and a
   // stop line by each pump.
@@ -160,15 +163,16 @@ function station() {
     y = 0.045;
   for (const x of [-12, -4, 4, 12])
     for (let z = pumpRow - 6; z < pumpRow + 6; z += 1.6)
-      kit.box(0.12, 0.004, 0.8, x, y, z + 0.4, paint);
+      ground.box(0.12, 0.004, 0.8, x, y, z + 0.4, paint);
   const arrowAt = (x, z) => {
-    kit.box(2.2, 0.004, 0.22, x - 0.6, y, z, paint);
+    ground.box(2.2, 0.004, 0.22, x - 0.6, y, z, paint);
     for (const side of [-1, 1])
-      kit.box(1, 0.004, 0.22, x + 0.55, y, z + side * 0.3, paint, side * 0.75);
+      ground.box(1, 0.004, 0.22, x + 0.55, y, z + side * 0.3, paint, side * 0.75);
   };
   for (const x of [-20, 18]) for (const z of [pumpRow - 3, pumpRow + 3]) arrowAt(x, z);
   for (const x of pumpIslands)
-    for (const side of [-1, 1]) kit.box(0.2, 0.004, 1.9, x + 2.6, y, pumpRow + side * 2.5, paint);
+    for (const side of [-1, 1])
+      ground.box(0.2, 0.004, 1.9, x + 2.6, y, pumpRow + side * 2.5, paint);
   // Kerbs round the islands and the dispensers on them: on a dark plinth, a
   // white body with the brand's green band on top, and on each face (both
   // lanes) a dark display with its price strip, the nozzles in their black
@@ -214,8 +218,8 @@ function station() {
   kit.box(0.3, 4.2, 0.3, -9.05, 0, shopZ - 2.05, 0x2e3236);
   kit.box(0.3, 4.2, 0.3, 9.05, 0, shopZ - 2.05, 0x2e3236);
   // The door in the glass front: its frame and handles.
-  kit.box(1.9, 2.4, 0.08, 4, 0, shopZ - 2.02, 0x2e3236);
-  for (const dx of [-0.12, 0.12]) kit.box(0.04, 0.9, 0.06, 4 + dx, 0.7, shopZ - 2.08, 0xc9ced3);
+  kit.box(1.9, 2.4, 0.08, 4, 0, shopZ - 2.12, 0x2e3236);
+  for (const dx of [-0.12, 0.12]) kit.box(0.04, 0.9, 0.06, 4 + dx, 0.7, shopZ - 2.19, 0xc9ced3);
   // Air-conditioning units on the roof.
   for (const x of [-5, 0.5]) {
     kit.box(1.4, 0.8, 1, x, 4.8, shopZ + 4, 0xc8ccd0);
@@ -243,6 +247,11 @@ function station() {
   solid.name = 'Fuel station';
   solid.castShadow = solid.receiveShadow = true;
   group.add(solid);
+  const forecourt = new THREE.Mesh(ground.geometry(), solid.material);
+  forecourt.name = 'Fuel station forecourt';
+  forecourt.receiveShadow = true;
+  forecourt.userData.noShadow = true;
+  group.add(forecourt);
   // The canopy: white, its fascia green with the brand on both long sides,
   // its underside lit at night.
   const fasciaMap = fasciaTexture();
@@ -282,14 +291,15 @@ function station() {
   });
   const front = new THREE.Mesh(new THREE.PlaneGeometry(17.4, 3.2), glass);
   front.rotation.y = Math.PI;
-  front.position.set(0, 1.9, shopZ - 2.01);
+  // (Clear of the wall by a few centimetres, so the two never flicker.)
+  front.position.set(0, 1.9, shopZ - 2.06);
   front.name = 'Fuel station shop window';
   const sign = new THREE.Mesh(
     new THREE.PlaneGeometry(14, 1.1),
     new THREE.MeshStandardMaterial({ map: shopSignTexture(), roughness: 0.5 })
   );
   sign.rotation.y = Math.PI;
-  sign.position.set(0, 3.85, shopZ - 2.02);
+  sign.position.set(0, 3.85, shopZ - 2.1);
   group.add(front, sign);
   // At night the canopy's lights fall on the forecourt: a soft pool of
   // light laid on it (cheaper than lights, which would cost every pixel).
@@ -317,7 +327,7 @@ function station() {
     })
   );
   pool.rotation.x = -Math.PI / 2;
-  pool.position.set(0, 0.06, pumpRow);
+  pool.position.set(0, 0.08, pumpRow);
   pool.name = 'Fuel station light pool';
   pool.visible = false;
   group.add(pool);
@@ -347,10 +357,11 @@ function priceSign() {
   const panel = new THREE.Mesh(new THREE.PlaneGeometry(2.3, 5.75), face);
   // Facing the motorway's traffic coming along it (−x).
   panel.rotation.y = -Math.PI / 2;
-  panel.position.set(-0.36, 6, 0);
+  // (A few centimetres clear of the pylon, so they never flicker.)
+  panel.position.set(-0.4, 6, 0);
   const back = panel.clone();
   back.rotation.y = Math.PI / 2;
-  back.position.x = 0.36;
+  back.position.x = 0.4;
   group.add(pylon, panel, back);
   return { group, face };
 }
@@ -361,7 +372,8 @@ export function setupFuelStation(scene) {
   const sign = priceSign();
   scene.add(sign.group);
   const shadows = [
-    groupShadow(scene, group, 'Fuel station shadow'),
+    // (Laid on the forecourt's top, not under it.)
+    groupShadow(scene, group, 'Fuel station shadow', { height: 0.07 }),
     groupShadow(scene, sign.group, 'Fuel price sign shadow'),
   ];
   return {
