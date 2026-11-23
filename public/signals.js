@@ -5,7 +5,9 @@ import * as THREE from 'three';
 // Turn signals flash about 85 times a minute, the lamp lit a little more
 // than half of each cycle. Q and E switch them on by hand, and like a real
 // stalk they cancel once the steering, having turned that way, comes back
-// to straight. The self-driving car signals its own lane changes.
+// to straight. The self-driving car signals its own lane changes. The
+// hazard switch (X) flashes all of them; a signal set meanwhile waits
+// under it.
 export const signalTiming = Object.freeze({ period: 0.7, lit: 0.55 });
 
 export class TurnSignals {
@@ -14,6 +16,7 @@ export class TurnSignals {
   }
   reset() {
     this.side = null;
+    this.hazard = false;
     this.time = 0;
     this.turned = 0;
     this.wasLit = false;
@@ -22,29 +25,39 @@ export class TurnSignals {
   set(side) {
     if (side === this.side) return;
     this.side = side;
-    this.time = 0;
+    if (!this.hazard) this.time = 0;
     this.turned = 0;
   }
   toggle(side) {
     this.set(this.side === side ? null : side);
   }
+  toggleHazard() {
+    this.hazard = !this.hazard;
+    this.time = 0;
+  }
+  // Flashing at all: hazards or a turn signal.
+  get active() {
+    return this.hazard || this.side !== null;
+  }
+  // Whether a side's lamps flash.
+  flashes(side) {
+    return this.hazard || this.side === side;
+  }
   get lit() {
-    return (
-      this.side !== null && this.time % signalTiming.period < signalTiming.period * signalTiming.lit
-    );
+    return this.active && this.time % signalTiming.period < signalTiming.period * signalTiming.lit;
   }
   // Advances the flashing; returns 'on' or 'off' at each relay click.
   step(dt, steer = 0, { autoCancel = true } = {}) {
-    if (this.side === null) {
+    if (!this.active) {
       const click = this.wasLit ? 'off' : null;
       this.wasLit = false;
       return click;
     }
     this.time += dt;
     // Positive steer turns left.
-    const toward = this.side === 'left' ? steer : -steer;
+    const toward = this.side === 'left' ? steer : this.side === 'right' ? -steer : 0;
     this.turned = Math.max(this.turned, toward);
-    if (autoCancel && this.turned > 0.06 && toward < 0.015) this.set(null);
+    if (this.side && autoCancel && this.turned > 0.06 && toward < 0.015) this.set(null);
     const lit = this.lit;
     const click = lit !== this.wasLit ? (lit ? 'on' : 'off') : null;
     this.wasLit = lit;
@@ -130,6 +143,154 @@ function glowTexture() {
   return new THREE.CanvasTexture(canvas);
 }
 
+// A lamp's light: a strip, brightest along its middle, and the light it
+// spreads into the lens round it, both added onto the lamp.
+function lampLight(name) {
+  return new THREE.MeshBasicMaterial({
+    name,
+    color: 0x000000,
+    vertexColors: true,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    toneMapped: false,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+  });
+}
+
+// Lays a lit strip on the model along a lamp's edge (a `signalLamps` entry)
+// on one side (`sign` 1 right, −1 left): for points across the lamp, a ray
+// from outside finds the lamp's edge (scanning toward `scan[1]`) and the
+// strip runs `inset` inside it, following the surface. Adds its core and
+// halo to the body, hidden, and returns them with the point and normal at
+// its middle; null if the lamp was not found.
+export function lampStrip(rig, lamp, sign, { core: coreMaterial, halo: haloMaterial }, name) {
+  rig.body.updateMatrixWorld(true);
+  const toBody = new THREE.Matrix4().copy(rig.body.matrixWorld).invert();
+  const toWorld = rig.body.matrixWorld;
+  const raycaster = new THREE.Raycaster();
+  const meshes = [];
+  rig.body.traverse((o) => o.isMesh && o.visible && meshes.push(o));
+  const targets = lamp.onto ? meshes.filter((m) => lamp.onto.includes(m.name)) : meshes;
+  const dir = new THREE.Vector3(lamp.dir, 0, 0);
+  const worldDir = dir.clone().transformDirection(toWorld);
+  const cast = (y, z) => {
+    raycaster.set(new THREE.Vector3(lamp.rayX, y, z).applyMatrix4(toWorld), worldDir);
+    return raycaster.intersectObjects(targets, false)[0] ?? null;
+  };
+  // Scanning from `scan[0]` toward `scan[1]`: the first height that meets
+  // the lamp is its edge.
+  const step = Math.sign(lamp.scan[1] - lamp.scan[0]) * 0.004;
+  const samples = [];
+  const count = 18;
+  for (let i = 0; i <= count; i++) {
+    const z = sign * (lamp.across[0] + ((lamp.across[1] - lamp.across[0]) * i) / count);
+    let edge = null;
+    for (let y = lamp.scan[0]; step > 0 ? y <= lamp.scan[1] : y >= lamp.scan[1]; y += step)
+      if (cast(y, z)) {
+        edge = y;
+        break;
+      }
+    if (edge === null) continue;
+    const hit = cast(edge - Math.sign(step) * -lamp.inset, z);
+    if (!hit) continue;
+    const point = hit.point.clone().applyMatrix4(toBody);
+    const normal = hit.face
+      ? hit.face.normal
+          .clone()
+          .transformDirection(hit.object.matrixWorld)
+          .transformDirection(toBody)
+      : dir.clone().negate();
+    if (normal.dot(dir) > 0) normal.negate();
+    samples.push({ point: point.addScaledVector(normal, 0.003), normal });
+  }
+  if (samples.length < 2) return null;
+  // The ribbon: across the lamp, `width` up and down the surface, its
+  // brightness by `profile` (pairs of offset, −1…1, and brightness), and
+  // fading out at its two ends.
+  const up = new THREE.Vector3();
+  const ribbon = (width, profile, lift) => {
+    const positions = [],
+      colours = [];
+    const vertex = (s, i, [k, bright]) => {
+      up.set(0, 1, 0).addScaledVector(s.normal, -s.normal.y).normalize();
+      const end = Math.min(1, (Math.min(i, samples.length - 1 - i) + 0.5) / 2.5);
+      positions.push(
+        ...s.point
+          .clone()
+          .addScaledVector(up, (k * width) / 2)
+          .addScaledVector(s.normal, lift)
+          .toArray()
+      );
+      const b = bright * end;
+      colours.push(b, b, b);
+    };
+    for (let i = 0; i < samples.length - 1; i++) {
+      const a = samples[i],
+        b = samples[i + 1];
+      if (a.point.distanceTo(b.point) > 0.08) continue;
+      for (let j = 0; j < profile.length - 1; j++) {
+        const p = profile[j],
+          q = profile[j + 1];
+        vertex(a, i, p);
+        vertex(b, i + 1, p);
+        vertex(a, i, q);
+        vertex(a, i, q);
+        vertex(b, i + 1, p);
+        vertex(b, i + 1, q);
+      }
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colours, 3));
+    return geometry;
+  };
+  const core = new THREE.Mesh(
+    ribbon(
+      lamp.width,
+      [
+        [-1, 0.15],
+        [-0.45, 0.85],
+        [0, 1],
+        [0.45, 0.85],
+        [1, 0.15],
+      ],
+      0
+    ),
+    coreMaterial
+  );
+  core.name = name;
+  const halo = new THREE.Mesh(
+    ribbon(
+      lamp.width * 3.5,
+      [
+        [-1, 0],
+        [-0.25, 0.55],
+        [0, 0.7],
+        [0.25, 0.55],
+        [1, 0],
+      ],
+      0.004
+    ),
+    haloMaterial
+  );
+  halo.name = `${name} halo`;
+  for (const m of [core, halo]) {
+    m.visible = false;
+    m.renderOrder = 5;
+    rig.body.add(m);
+  }
+  return { meshes: [core, halo], middle: samples[Math.floor(samples.length / 2)] };
+}
+
+// A bulb's warm-up and fade (s): lamps swell on and die away rather than
+// switch.
+const rise = 0.05,
+  fall = 0.12;
+
 export function setupSignalLamps(rig) {
   const lit = { left: [], right: [] };
   // The light round each lit lamp, added onto the scene behind it.
@@ -142,147 +303,18 @@ export function setupSignalLamps(rig) {
     toneMapped: false,
   });
   const materials = {};
-  rig.body.updateMatrixWorld(true);
-  const toBody = new THREE.Matrix4().copy(rig.body.matrixWorld).invert();
-  const toWorld = rig.body.matrixWorld;
-  const raycaster = new THREE.Raycaster();
-  const meshes = [];
-  rig.body.traverse((o) => o.isMesh && o.visible && meshes.push(o));
   for (const side of ['left', 'right']) {
-    // The lit strip, brightest along its middle, and the light it spreads
-    // into the lens round it: both added onto the lamp, in amber.
-    const light = (name) =>
-      new THREE.MeshBasicMaterial({
-        name,
-        color: 0x000000,
-        vertexColors: true,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        toneMapped: false,
-        side: THREE.DoubleSide,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
-      });
     materials[side] = {
-      core: light(`Turn signal ${side}`),
-      halo: light(`Turn signal ${side} halo`),
+      core: lampLight(`Turn signal ${side}`),
+      halo: lampLight(`Turn signal ${side} halo`),
     };
     const sign = side === 'left' ? -1 : 1;
     for (const lamp of signalLamps) {
-      const targets = lamp.onto ? meshes.filter((m) => lamp.onto.includes(m.name)) : meshes;
-      const dir = new THREE.Vector3(lamp.dir, 0, 0);
-      const worldDir = dir.clone().transformDirection(toWorld);
-      const cast = (y, z) => {
-        raycaster.set(new THREE.Vector3(lamp.rayX, y, z).applyMatrix4(toWorld), worldDir);
-        return raycaster.intersectObjects(targets, false)[0] ?? null;
-      };
-      // Scanning from `scan[0]` toward `scan[1]`: the first height that
-      // meets the lamp is its edge.
-      const step = Math.sign(lamp.scan[1] - lamp.scan[0]) * 0.004;
-      const samples = [];
-      const count = 18;
-      for (let i = 0; i <= count; i++) {
-        const z = sign * (lamp.across[0] + ((lamp.across[1] - lamp.across[0]) * i) / count);
-        let edge = null;
-        for (let y = lamp.scan[0]; step > 0 ? y <= lamp.scan[1] : y >= lamp.scan[1]; y += step)
-          if (cast(y, z)) {
-            edge = y;
-            break;
-          }
-        if (edge === null) continue;
-        const hit = cast(edge - Math.sign(step) * -lamp.inset, z);
-        if (!hit) continue;
-        const point = hit.point.clone().applyMatrix4(toBody);
-        const normal = hit.face
-          ? hit.face.normal
-              .clone()
-              .transformDirection(hit.object.matrixWorld)
-              .transformDirection(toBody)
-          : dir.clone().negate();
-        if (normal.dot(dir) > 0) normal.negate();
-        samples.push({ point: point.addScaledVector(normal, 0.003), normal });
-      }
-      if (samples.length < 2) continue;
-      // The ribbon: across the lamp, `width` up and down the surface, its
-      // brightness by `profile` (pairs of offset, −1…1, and brightness), and
-      // fading out at its two ends.
-      const up = new THREE.Vector3();
-      const ribbon = (width, profile, lift) => {
-        const positions = [],
-          colours = [];
-        const vertex = (s, i, [k, bright]) => {
-          up.set(0, 1, 0).addScaledVector(s.normal, -s.normal.y).normalize();
-          const end = Math.min(1, (Math.min(i, samples.length - 1 - i) + 0.5) / 2.5);
-          positions.push(
-            ...s.point
-              .clone()
-              .addScaledVector(up, (k * width) / 2)
-              .addScaledVector(s.normal, lift)
-              .toArray()
-          );
-          const b = bright * end;
-          colours.push(b, b, b);
-        };
-        for (let i = 0; i < samples.length - 1; i++) {
-          const a = samples[i],
-            b = samples[i + 1];
-          if (a.point.distanceTo(b.point) > 0.08) continue;
-          for (let j = 0; j < profile.length - 1; j++) {
-            const p = profile[j],
-              q = profile[j + 1];
-            vertex(a, i, p);
-            vertex(b, i + 1, p);
-            vertex(a, i, q);
-            vertex(a, i, q);
-            vertex(b, i + 1, p);
-            vertex(b, i + 1, q);
-          }
-        }
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colours, 3));
-        return geometry;
-      };
-      const core = new THREE.Mesh(
-        ribbon(
-          lamp.width,
-          [
-            [-1, 0.15],
-            [-0.45, 0.85],
-            [0, 1],
-            [0.45, 0.85],
-            [1, 0.15],
-          ],
-          0
-        ),
-        materials[side].core
-      );
-      core.name = `Turn signal ${side} ${lamp.name}`;
-      const halo = new THREE.Mesh(
-        ribbon(
-          lamp.width * 3.5,
-          [
-            [-1, 0],
-            [-0.25, 0.55],
-            [0, 0.7],
-            [0.25, 0.55],
-            [1, 0],
-          ],
-          0.004
-        ),
-        materials[side].halo
-      );
-      halo.name = `Turn signal ${side} ${lamp.name} halo`;
-      for (const m of [core, halo]) {
-        m.visible = false;
-        m.renderOrder = 5;
-        rig.body.add(m);
-        lit[side].push(m);
-      }
+      const strip = lampStrip(rig, lamp, sign, materials[side], `Turn signal ${side} ${lamp.name}`);
+      if (!strip) continue;
+      lit[side].push(...strip.meshes);
       // A little bloom at its middle.
-      const s = samples[Math.floor(samples.length / 2)];
+      const s = strip.middle;
       const bloom = new THREE.Sprite(glow);
       bloom.name = `Turn signal ${side} ${lamp.name} glow`;
       bloom.position.copy(s.point).addScaledVector(s.normal, 0.03);
@@ -293,10 +325,6 @@ export function setupSignalLamps(rig) {
       lit[side].push(bloom);
     }
   }
-  // A bulb's warm-up and fade (s): the lamps swell on and die away rather
-  // than switch.
-  const rise = 0.05,
-    fall = 0.12;
   const core = new THREE.Color(2.4, 0.78, 0.05),
     halo = new THREE.Color(0.42, 0.13, 0.008);
   return {
@@ -304,17 +332,61 @@ export function setupSignalLamps(rig) {
     // The lamps show only while lit: the lenses are clear when off.
     update(signals) {
       const { period, lit: share } = signalTiming;
-      const t = signals.side ? signals.time % period : Infinity,
+      const t = signals.active ? signals.time % period : Infinity,
         on = period * share;
       const level = t < on ? Math.min(1, t / rise) : t < on + fall ? 1 - (t - on) / fall : 0;
       for (const side of ['left', 'right']) {
-        const shown = signals.side === side && level > 0;
+        const shown = signals.flashes(side) && level > 0;
         const k = shown ? level * level : 0;
         materials[side].core.color.copy(core).multiplyScalar(k);
         materials[side].halo.color.copy(halo).multiplyScalar(k);
         for (const mesh of lit[side]) mesh.visible = shown;
       }
       glow.opacity = 0.75 * level;
+    },
+  };
+}
+
+// Reversing lamps: the F10 has them in the lower part of the tail lamps in
+// the boot lid, white. Lit while reverse is engaged.
+export const reversingLamp = Object.freeze({
+  name: 'reversing',
+  across: [0.36, 0.56],
+  rayX: -3.2,
+  dir: 1,
+  scan: [0.12, 0.42],
+  inset: 0.022,
+  width: 0.034,
+  onto: ['BrakeLamp_Left', 'BrakeLamp_Right'],
+});
+
+export function setupReversingLamps(rig) {
+  const materials = { core: lampLight('Reversing lamp'), halo: lampLight('Reversing lamp halo') };
+  const meshes = [];
+  for (const sign of [-1, 1]) {
+    const strip = lampStrip(
+      rig,
+      reversingLamp,
+      sign,
+      materials,
+      `Reversing lamp ${sign < 0 ? 'left' : 'right'}`
+    );
+    if (strip) meshes.push(...strip.meshes);
+  }
+  const core = new THREE.Color(2.2, 2.1, 1.95),
+    halo = new THREE.Color(0.4, 0.39, 0.36);
+  let level = 0;
+  return {
+    meshes,
+    get level() {
+      return level;
+    },
+    update(dt, on) {
+      level = on ? Math.min(1, level + dt / rise) : Math.max(0, level - dt / fall);
+      const k = level * level;
+      materials.core.color.copy(core).multiplyScalar(k);
+      materials.halo.color.copy(halo).multiplyScalar(k);
+      for (const mesh of meshes) mesh.visible = level > 0;
     },
   };
 }

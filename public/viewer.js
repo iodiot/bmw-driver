@@ -41,6 +41,8 @@ import { setupSkidMarks } from './skid-marks.js';
 import { setupLicensePlates } from './license-plates.js';
 import { setupContactShadow } from './contact-shadow.js';
 import { refineCarMaterials } from './car-materials.js';
+import { applyLook, loadLook, saveLook } from './car-look.js';
+import { setupLookPicker } from './look-picker.js';
 import { laneKeepingSteer, nearestLane, curveSpeed, bumpSpeed } from './lane-keeping.js';
 import { setupSparks } from './sparks.js';
 import { setupMinimap } from './minimap.js';
@@ -58,7 +60,7 @@ import { setupCockpitCluster } from './cockpit-cluster.js';
 import { setupCentreDisplay } from './centre-display.js';
 import { setupDust } from './dust.js';
 import { setupTyreSmoke } from './tyre-smoke.js';
-import { TurnSignals, highBeamWanted, setupSignalLamps } from './signals.js';
+import { TurnSignals, highBeamWanted, setupReversingLamps, setupSignalLamps } from './signals.js';
 import { readPad, setupTouchControls } from './touch-controls.js';
 import { setupBodyDirt } from './body-dirt.js';
 import {
@@ -171,10 +173,45 @@ function cameraFlash() {
 const sparks = setupSparks(scene);
 const dust = setupDust(scene);
 const tyreSmoke = setupTyreSmoke(scene);
-// Turn signals (Q, E) and the high-beam assistant (H switches it off and on).
+// Turn signals (Q, E), hazards (X) and the high-beam assistant (H switches
+// it off and on).
 const signals = new TurnSignals();
 let signalLamps,
+  reversingLamps,
+  reverseGlow,
   highBeamAssistOn = true;
+// The horn (G, held): the car ahead in the lane moves over or hurries.
+let horning = false;
+function setHorn(on) {
+  if (on === horning) return;
+  horning = on;
+  vehicleAudio.horn(on);
+  document.body.dataset.horn = String(on);
+  if (on && sim) {
+    const yielding = traffic.honk(sim.x, roadLateral(sim.x, sim.z));
+    document.body.dataset.hornedAt = yielding
+      ? yielding.change
+        ? 'moving over'
+        : 'hurrying'
+      : 'none';
+  }
+}
+// The paint and wheel finish, chosen in the top panel and remembered.
+let look = loadLook(),
+  paintMaterials = [];
+function showLook() {
+  const { paint, wheels } = applyLook(paintMaterials, look);
+  document.body.dataset.paint = paint.name;
+  document.body.dataset.wheels = wheels.name;
+}
+const lookPicker = setupLookPicker(document.body, {
+  look,
+  onChange(chosen) {
+    look = chosen;
+    saveLook(look);
+    showLook();
+  },
+});
 road.update(0, 0);
 const input = {},
   held = new Set(),
@@ -531,6 +568,7 @@ const dayBar = setupDayBar($('#day-bar'), {
   restart: () => restart(),
   toggleSound: () => vehicleAudio.toggle(),
   nextCamera: () => setCameraView(nextCameraView(cameraView)),
+  openLook: (button) => lookPicker.toggle(button),
 });
 setCameraView(cameraView);
 $('#night').onchange = (e) => {
@@ -546,6 +584,7 @@ applyDaylight();
 // a gamepad each frame.
 const keyInput = {};
 function clearInput() {
+  setHorn(false);
   held.clear();
   for (const k of Object.keys(input)) input[k] = false;
   for (const k of Object.keys(keyInput)) keyInput[k] = false;
@@ -629,10 +668,16 @@ addEventListener('keydown', (e) => {
     restart();
     return;
   }
-  if (['KeyQ', 'KeyE', 'KeyH'].includes(e.code) && !e.repeat && !e.metaKey && !e.ctrlKey) {
+  if (['KeyQ', 'KeyE', 'KeyH', 'KeyX'].includes(e.code) && !e.repeat && !e.metaKey && !e.ctrlKey) {
     e.preventDefault();
     if (e.code === 'KeyH') highBeamAssistOn = !highBeamAssistOn;
+    else if (e.code === 'KeyX') signals.toggleHazard();
     else signals.toggle(e.code === 'KeyQ' ? 'left' : 'right');
+    return;
+  }
+  if (e.code === 'KeyG' && !e.metaKey && !e.ctrlKey) {
+    e.preventDefault();
+    setHorn(true);
     return;
   }
   if (e.code === 'KeyC' && !e.repeat && !e.metaKey && !e.ctrlKey) {
@@ -655,6 +700,7 @@ addEventListener('keydown', (e) => {
   }
 });
 addEventListener('keyup', (e) => {
+  if (e.code === 'KeyG') setHorn(false);
   const action = actions[e.code];
   if (action) {
     e.preventDefault();
@@ -679,15 +725,12 @@ new GLTFLoader().load(
   './assets/bmw-m5-f10.glb',
   async (g) => {
     try {
+      const paintSet = new Set();
       g.scene.traverse((o) => {
-        if (o.isMesh && o.material.name === 'M5_F10_Paint') {
-          o.material.color.set(0x11151b);
-          o.material.metalness = 0.5;
-          o.material.roughness = 0.32;
-          o.material.clearcoat = 0.85;
-          o.material.clearcoatRoughness = 0.16;
-        }
+        if (o.isMesh && o.material.name === 'M5_F10_Paint') paintSet.add(o.material);
       });
+      paintMaterials = [...paintSet];
+      showLook();
       rig = rigDownloadedCar(g.scene);
       addArchLiners(rig);
       addRearDefroster(rig);
@@ -699,6 +742,7 @@ new GLTFLoader().load(
       brakeLights = setupBrakeLights(rig);
       headlights = setupHeadlights(rig);
       signalLamps = setupSignalLamps(rig);
+      reversingLamps = setupReversingLamps(rig);
       rain.setHeadlights(headlights);
       headlights.setNight(lowBeamsOn || inTunnel);
       exhaust = setupExhaust(scene, rig);
@@ -729,9 +773,13 @@ new GLTFLoader().load(
       contactShadow = setupContactShadow(scene, sim.layout);
       contactShadow.setNight(nightMode);
       rearGlow = setupRearGlow(scene);
+      reverseGlow = setupRearGlow(scene, {
+        colour: new THREE.Color(0.95, 0.93, 0.88),
+        idle: 0,
+        name: 'Reversing lamp glow',
+      });
       document.body.dataset.waterGlassMeshes = String(bodyWater.glassMeshes.length);
       document.body.dataset.lowBeams = String(lowBeamsOn);
-      document.body.dataset.paint = 'Black Sapphire Metallic (475)';
       let triangles = 0;
       rig.root.traverse((o) => {
         if (o.isMesh) {
@@ -747,7 +795,9 @@ new GLTFLoader().load(
       // (Before the hidden parts are shown for compiling below: the turn
       // signals, shown only while lit, must stay apart.)
       const signalStrips = [];
-      rig.body.traverse((o) => o.name.startsWith('Turn signal') && signalStrips.push(o));
+      rig.body.traverse(
+        (o) => /^(Turn signal|Reversing lamp)/.test(o.name) && signalStrips.push(o)
+      );
       const body = mergeStaticMeshes(rig.body, [
         interior.interior,
         ...bodyWater.glassMeshes,
@@ -769,7 +819,7 @@ new GLTFLoader().load(
       scene.traverse((o) => {
         if (
           !o.visible &&
-          (o.name.startsWith('Turn signal') ||
+          (/^(Turn signal|Reversing lamp)/.test(o.name) ||
             ['Rear-view mirror', 'Wheel dust', 'Tyre smoke'].includes(o.name))
         )
           later.push(o);
@@ -961,9 +1011,11 @@ renderer.setAnimationLoop((time) => {
       if (pad.camera) setCameraView(nextCameraView(cameraView));
       if (pad.signalLeft) signals.toggle('left');
       if (pad.signalRight) signals.toggle('right');
+      if (pad.hazard) signals.toggleHazard();
       if (pad.restart) restart();
       if (pad.pause) setDriving(!driving);
     }
+    if (pad) setHorn(pad.horn || held.has('KeyG'));
     input.accelerate = Boolean(keyInput.accelerate || touch.accelerate || pad?.accelerate);
     input.brake = Boolean(keyInput.brake || touch.brake || pad?.brake);
     input.left = Boolean(keyInput.left);
@@ -1100,11 +1152,11 @@ renderer.setAnimationLoop((time) => {
     if (relay) vehicleAudio.tick(relay === 'on');
     signalLamps.update(signals);
     instruments.setLamps({
-      left: signals.lit && signals.side === 'left',
-      right: signals.lit && signals.side === 'right',
+      left: signals.lit && signals.flashes('left'),
+      right: signals.lit && signals.flashes('right'),
       high: headlights.high,
     });
-    document.body.dataset.signal = signals.side ?? 'none';
+    document.body.dataset.signal = signals.hazard ? 'hazard' : (signals.side ?? 'none');
     document.body.dataset.highBeam = String(headlights.high);
     for (let i = 0; i < rig.wheels.length; i++) {
       const w = rig.wheels[i],
@@ -1161,6 +1213,9 @@ renderer.setAnimationLoop((time) => {
     const lights = brakeLights.update(dt, pedals.brake, nightMode);
     // Tail lamps light the road behind at dusk and night, more when braking.
     rearGlow.update(sim, light.darkness, lights.intensity / brakeLights.brake);
+    reversingLamps.update(dt, sim.reversing);
+    reverseGlow.update(sim, light.darkness, reversingLamps.level);
+    document.body.dataset.reversingLamps = String(reversingLamps.level > 0.5);
     interior.update(sim);
     interior.setDaylight(1 - light.darkness);
     // Ambient lighting comes up with the dusk.

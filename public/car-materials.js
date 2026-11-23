@@ -1,6 +1,7 @@
 // Material refinements for the imported model: metallic flakes under the
 // paint's clear coat, and separate rubber and alloy response on the wheels.
 // The GLB stays unmodified; shaders are extended at runtime.
+import { wheelUniforms } from './car-look.js';
 
 // Flake cell size in metres. Flakes fade out where a cell becomes smaller
 // than a pixel, so distant paint does not shimmer.
@@ -38,25 +39,31 @@ export function addPaintFlakes(material) {
 }
 
 // Wheels share one texture for alloy and tyre. Dark texels are rubber: matte
-// and a deep grey rather than pure black. Lighter texels are machined alloy.
+// and a deep grey rather than pure black. Lighter texels are machined alloy,
+// in the chosen finish (see car-look.js).
 export function refineWheelMaterial(material) {
   material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, wheelUniforms);
     shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nuniform vec3 wheelTint;\nuniform float wheelMetal;\nuniform float wheelRough;'
+      )
       .replace(
         '#include <roughnessmap_fragment>',
         `#include <roughnessmap_fragment>
         float wheelLuma = dot(diffuseColor.rgb, vec3(.2126, .7152, .0722));
         float rubber = 1. - smoothstep(.035, .11, wheelLuma);
-        roughnessFactor = mix(.34, .92, rubber);
-        diffuseColor.rgb = mix(diffuseColor.rgb, max(diffuseColor.rgb, vec3(.03, .029, .028)), rubber);`
+        roughnessFactor = mix(wheelRough, .92, rubber);
+        diffuseColor.rgb = mix(diffuseColor.rgb * wheelTint, max(diffuseColor.rgb, vec3(.03, .029, .028)), rubber);`
       )
       .replace(
         '#include <metalnessmap_fragment>',
         `#include <metalnessmap_fragment>
-        metalnessFactor = mix(.7, 0., rubber);`
+        metalnessFactor = mix(wheelMetal, 0., rubber);`
       );
   };
-  material.customProgramCacheKey = () => 'm5-wheel-rubber-alloy';
+  material.customProgramCacheKey = () => 'm5-wheel-rubber-alloy-finish';
   material.needsUpdate = true;
 }
 

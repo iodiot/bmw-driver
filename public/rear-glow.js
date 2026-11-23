@@ -14,12 +14,18 @@ export const rearGlowLayout = Object.freeze({
 
 // Glow strength (0…1) for how dark it is and how bright the lamps are
 // (0 = off, 1 = full brake light).
-export function rearGlowStrength(darkness, lamp) {
+// `idle`: the share with the lamps at rest (none for the reversing lamps).
+export function rearGlowStrength(darkness, lamp, idle = 0.35) {
   const dark = Math.max(0, Math.min(1, (darkness - 0.2) / 0.6));
-  return dark * (0.35 + 0.65 * Math.max(0, Math.min(1, lamp)));
+  return dark * (idle + (1 - idle) * Math.max(0, Math.min(1, lamp)));
 }
 
-export function setupRearGlow(scene) {
+// `colour` of the light (red for the tail lamps, white for reversing) and
+// its share at rest.
+export function setupRearGlow(
+  scene,
+  { colour = new THREE.Color(1, 0.06, 0.03), idle = 0.35, name = 'Tail lamp glow' } = {}
+) {
   const { rear, reach, width, lampOffset } = rearGlowLayout;
   const scale = 48,
     w = Math.round(reach * scale),
@@ -52,9 +58,9 @@ export function setupRearGlow(scene) {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   const material = new THREE.MeshBasicMaterial({
-    name: 'Tail lamp glow',
+    name,
     map: texture,
-    color: new THREE.Color(1, 0.06, 0.03),
+    color: colour,
     transparent: true,
     opacity: 0,
     blending: THREE.AdditiveBlending,
@@ -70,7 +76,7 @@ export function setupRearGlow(scene) {
   geometry.translate(-reach / 2, 0, 0);
   geometry.rotateX(-Math.PI / 2);
   const mesh = new THREE.Mesh(geometry, material);
-  mesh.name = 'Tail lamp glow';
+  mesh.name = name;
   mesh.renderOrder = 3;
   mesh.visible = false;
   scene.add(mesh);
@@ -78,7 +84,7 @@ export function setupRearGlow(scene) {
   return {
     mesh,
     update(simulation, darkness, lamp) {
-      const strength = rearGlowStrength(darkness, lamp);
+      const strength = rearGlowStrength(darkness, lamp, idle);
       mesh.visible = strength > 0.005;
       if (!mesh.visible) return;
       material.opacity = 0.45 * strength;

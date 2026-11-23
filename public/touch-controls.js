@@ -6,7 +6,8 @@
 //
 // With a gamepad (standard mapping): left stick steers, right trigger
 // accelerates, left trigger brakes; the shoulder buttons work the turn
-// signals, Y changes the camera, Start restarts and Back pauses.
+// signals, Y changes the camera, B sounds the horn, X the hazards, Start
+// restarts and Back pauses.
 
 const clamp = (v, low, high) => Math.max(low, Math.min(high, v));
 
@@ -32,6 +33,8 @@ export const padButtons = Object.freeze({
   signalRight: 5,
   restart: 9,
   pause: 8,
+  horn: 1,
+  hazard: 2,
 });
 
 // Reads the first connected standard gamepad: steering, pedals, and the
@@ -50,6 +53,8 @@ export function readPad(pad, previous = []) {
     signalRight: tapped(padButtons.signalRight),
     restart: tapped(padButtons.restart),
     pause: tapped(padButtons.pause),
+    horn: pressed(padButtons.horn),
+    hazard: tapped(padButtons.hazard),
     buttons: now,
   };
 }

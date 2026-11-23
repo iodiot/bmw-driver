@@ -62,10 +62,11 @@ test('Paint flakes sit under an untouched clear coat; wheels split rubber and al
   assert.ok(paintFlakes.cell > 0.0005 && paintFlakes.cell < 0.002);
   const wheel = {};
   refineWheelMaterial(wheel);
-  const w = shader();
+  const w = { ...shader(), uniforms: {} };
   wheel.onBeforeCompile(w);
-  assert.match(w.fragmentShader, /roughnessFactor = mix\(\.34, \.92, rubber\)/);
-  assert.match(w.fragmentShader, /metalnessFactor = mix\(\.7, 0\., rubber\)/);
+  assert.match(w.fragmentShader, /roughnessFactor = mix\(wheelRough, \.92, rubber\)/);
+  assert.match(w.fragmentShader, /metalnessFactor = mix\(wheelMetal, 0\., rubber\)/);
+  assert.equal(w.uniforms.wheelMetal.value, 0.7, 'Silver alloy by default');
 });
 
 test('The sun light points where the sun is in the sky photograph', () => {

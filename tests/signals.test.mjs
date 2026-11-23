@@ -57,3 +57,17 @@ test('The high beam lights above the low beam cut-off and keeps the low beam bel
   ])
     assert.ok(highBeamProfile(h, v) >= lowBeamProfile(h, v));
 });
+
+test('Hazards flash both sides over a turn signal, which resumes after', async () => {
+  const signals = new TurnSignals();
+  signals.toggleHazard();
+  assert.ok(signals.active && signals.flashes('left') && signals.flashes('right'));
+  let clicks = 0;
+  for (let t = 0; t < 2.8; t += 0.01) if (signals.step(0.01, 0.3)) clicks++;
+  assert.ok(clicks >= 7, 'The relay ticks');
+  assert.ok(signals.hazard, 'Steering does not cancel hazards');
+  signals.set('left');
+  assert.ok(signals.flashes('right'), 'Still both while the hazards are on');
+  signals.toggleHazard();
+  assert.ok(signals.flashes('left') && !signals.flashes('right'));
+});

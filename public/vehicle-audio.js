@@ -221,6 +221,7 @@ export function setupVehicleAudio({ sound, volume, status }) {
     gains = new Map(),
     filters = new Map(),
     cooldown = { bump: 0, rail: 0, crash: 0 };
+  let hornVoice = null;
   let bumpPeak = 0,
     railPeak = 0,
     crashPeak = 0,
@@ -519,6 +520,49 @@ export function setupVehicleAudio({ sound, volume, status }) {
       body.connect(bodyGain).connect(master);
       body.start(now);
       body.stop(now + 0.06);
+    },
+    // The horn, while `on`: the F10's pair of disc horns, about a major
+    // third apart (near 420 and 510 Hz), buzzing and a little rough.
+    horn(on) {
+      if (!ready || !running()) return;
+      const now = context.currentTime;
+      if (on && !hornVoice) {
+        const gain = context.createGain(),
+          shaper = context.createWaveShaper(),
+          band = context.createBiquadFilter(),
+          presence = context.createBiquadFilter();
+        const curve = new Float32Array(1024);
+        for (let i = 0; i < curve.length; i++) curve[i] = Math.tanh((i / 511.5 - 1) * 2.5);
+        shaper.curve = curve;
+        band.type = 'bandpass';
+        band.frequency.value = 1100;
+        band.Q.value = 0.55;
+        presence.type = 'peaking';
+        presence.frequency.value = 2600;
+        presence.Q.value = 1.2;
+        presence.gain.value = 6;
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.55, now + 0.018);
+        const oscillators = [418, 509].map((frequency) => {
+          const o = context.createOscillator();
+          o.type = 'sawtooth';
+          o.frequency.setValueAtTime(frequency * 0.97, now);
+          o.frequency.exponentialRampToValueAtTime(frequency, now + 0.04);
+          const level = context.createGain();
+          level.gain.value = 0.45;
+          o.connect(level).connect(shaper);
+          o.start(now);
+          return o;
+        });
+        shaper.connect(band).connect(presence).connect(gain).connect(outside);
+        hornVoice = { gain, oscillators };
+      } else if (!on && hornVoice) {
+        const { gain, oscillators } = hornVoice;
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setTargetAtTime(0.0001, now, 0.025);
+        for (const o of oscillators) o.stop(now + 0.2);
+        hornVoice = null;
+      }
     },
     // Thunder from a strike `distance` metres away, `loudness` 0–1: a
     // sharp crack overhead, then a rumble that rolls on for seconds, deeper

@@ -136,6 +136,7 @@ export class Traffic {
       clock: this.random() * 0.7,
       decide: this.random() * 1.5,
       sinceChange: 10,
+      hurried: 0,
       colour: spec.lorry
         ? pick(cabPaints, this.random)
         : pick(type === 'van' ? vanPaints : paints, this.random),
@@ -176,7 +177,8 @@ export class Traffic {
 
   // Speed a vehicle at x wants: its own, less for the bumps and the tunnel.
   limitAt(v) {
-    let desired = v.desired;
+    // Hurried by a horn: a little faster for a while.
+    let desired = v.desired + (v.hurried > 0 ? 3 : 0);
     const front = v.x + v.length / 2;
     desired = Math.min(desired, bumpSpeed(front));
     const { from, to } = structureLayout.tunnel;
@@ -205,6 +207,7 @@ export class Traffic {
     for (const v of this.vehicles) {
       v.clock += dt;
       v.sinceChange += dt;
+      if (v.hurried > 0) v.hurried -= dt;
       // Who is ahead in the lane, or in either lane while crossing.
       let leader = this.neighbour(v, v.lat, users, 1);
       if (v.change) {
@@ -337,6 +340,23 @@ export class Traffic {
   }
 
   // The nearest vehicle ahead of x within `range` m whose lane is within
+  // The car sounds its horn at x, `lat`: the vehicle ahead in its lane,
+  // within 90 m, moves over to the right if it can, or else hurries on for
+  // a while. Returns it, or null.
+  honk(x, lat) {
+    const ahead = this.leaderFor(x, lat);
+    if (!ahead || ahead.gap > 90) return null;
+    const v = ahead.who;
+    if (v.crash || v.change) return v;
+    const users = [...this.vehicles, { x, lat, speed: v.speed, length: 4.9, width: 1.9 }];
+    const spec = vehicleTypes[v.type];
+    if (v.lane < 2 && spec.lanes.includes(v.lane + 1) && this.laneOpen(v, v.lane + 1, users, 12)) {
+      this.begin(v, v.lane + 1);
+      v.sinceChange = 0;
+    } else v.hurried = 8;
+    return v;
+  }
+
   // `band` m of `lat`: its distance (or Infinity).
   distanceAhead(x, lat, range = 400, band = 6) {
     let best = Infinity;

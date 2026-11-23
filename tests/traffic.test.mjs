@@ -113,3 +113,30 @@ test('A vehicle hit hard stops with its hazards on, then drives on', () => {
   assert.equal(v.crash, null, 'and drove on');
   assert.ok(v.speed > 5);
 });
+
+test('A horn moves the car ahead over to the right, or hurries it', async () => {
+  const { Traffic } = await import('../public/traffic.js');
+  const { roadLanes } = await import('../public/road-profile.js');
+  const traffic = new Traffic({ count: 0, random: () => 0.5 });
+  traffic.reset(0, 0);
+  traffic.vehicles.length = 0;
+  const far = { x: -5000, lat: 0, length: 4.9, width: 1.9 };
+  const ahead = traffic.place(40, far, true);
+  const blocker = traffic.place(400, far, true);
+  Object.assign(ahead, { lane: 0, lat: roadLanes[0], type: 'sedan', change: null, crash: null });
+  Object.assign(blocker, { x: -400 });
+  const yielding = traffic.honk(0, roadLanes[0]);
+  assert.equal(yielding, ahead);
+  assert.equal(ahead.change.to, 1, 'Moves one lane right');
+  // Blocked on the right: it hurries instead.
+  Object.assign(blocker, { x: 42, lane: 2, lat: roadLanes[2], type: 'sedan', change: null });
+  Object.assign(ahead, { lane: 1, lat: roadLanes[1], change: null });
+  traffic.honk(0, roadLanes[1]);
+  assert.ok(ahead.hurried > 0 && !ahead.change);
+  // (A slow vehicle, below what the speed bumps allow.)
+  const hurried = traffic.limitAt({ ...ahead, desired: 10 }),
+    calm = traffic.limitAt({ ...ahead, desired: 10, hurried: 0 });
+  assert.ok(hurried > calm, 'A little faster while hurried');
+  assert.equal(traffic.honk(0, roadLanes[1] + 0), ahead);
+  assert.equal(traffic.honk(-200, roadLanes[1]), null, 'Too far to hear');
+});
