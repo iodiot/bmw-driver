@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { roadBranch, roadCenterZ, roadCenterSlope } from './road-profile.js';
 import { roadSeed, seededRandom } from './road-seed.js';
 
@@ -530,6 +531,19 @@ function merged(parts) {
   }
   return out;
 }
+// Grass scatters light through its blades, so a slope away from the sun is
+// not as dark as a bare surface would be: normals leant toward the sky.
+function softenTowardSky(geometry, amount = 0.6) {
+  const n = geometry.attributes.normal,
+    v = new THREE.Vector3();
+  for (let i = 0; i < n.count; i++) {
+    v.fromBufferAttribute(n, i);
+    if (v.y < 0) v.negate();
+    v.lerp(new THREE.Vector3(0, 1, 0), amount).normalize();
+    n.setXYZ(i, v.x, v.y, v.z);
+  }
+  n.needsUpdate = true;
+}
 // Box texture coordinates in metres, so concrete keeps one scale.
 function boxInMetres(w, h, d) {
   const box = new THREE.BoxGeometry(w, h, d);
@@ -560,12 +574,23 @@ function buildBridge(materials) {
   const concrete = [];
   // The deck: its own mesh, as it alone casts a shadow-map shadow, onto the
   // car passing under it (the road shades itself, see bridgeShade).
-  const deckMesh = new THREE.Mesh(
-    merged([
-      { geometry: boxInMetres(width, deck, halfSpan * 2), position: [0, clearance + deck / 2, 0] },
-    ]),
-    materials.concrete
-  );
+  // A slab on five beams, the beams' undersides at the clearance, and an
+  // edge beam (the cornice) along each side, standing a little proud.
+  const slab = 0.36;
+  const deckParts = [
+    { geometry: boxInMetres(width, slab, halfSpan * 2), position: [0, top - slab / 2, 0] },
+  ];
+  for (const x of [-4, -2, 0, 2, 4])
+    deckParts.push({
+      geometry: boxInMetres(0.5, deck - slab + 0.02, halfSpan * 2),
+      position: [x * (width / 10), clearance + (deck - slab) / 2, 0],
+    });
+  for (const side of [-1, 1])
+    deckParts.push({
+      geometry: boxInMetres(0.32, deck + 0.05, halfSpan * 2 + 0.1),
+      position: [side * (width / 2 + 0.1), clearance + (deck + 0.05) / 2 + 0.02, 0],
+    });
+  const deckMesh = new THREE.Mesh(merged(deckParts), materials.concrete);
   deckMesh.name = 'Overpass deck';
   for (const side of [-1, 1]) {
     concrete.push({
@@ -606,57 +631,64 @@ function buildBridge(materials) {
   }
   const steelMesh = new THREE.Mesh(merged(steel), materials.railing);
   steelMesh.name = 'Overpass railings';
-  // The embankments the farm track climbs on each side: grass slopes and the
-  // track's surface on top, falling from deck level to the fields.
+  // The embankments the farm track climbs on each side: smooth mounds with
+  // rounded crests and toes that run out into the fields, and a rounded
+  // spill slope under each end of the deck, falling toward the motorway
+  // and ending well short of the piers. On top, a gravel track 5 m wide
+  // with grass shoulders, widening to the deck at the abutment.
+  const crest = (u) =>
+    u <= halfSpan
+      ? top - 0.05
+      : Math.max(0, top * (1 - smooth(halfSpan, halfSpan + ramp, u)) - 0.05);
+  const trackHalf = (u) => 2.6 + (width / 2 - 0.45 - 2.6) * (1 - smooth(halfSpan, halfSpan + 8, u));
+  const spillReach = 1.5 * top;
+  const ground = (x, u) => {
+    const c = crest(u);
+    const d = Math.max(0, Math.abs(x) - width / 2),
+      e = Math.max(0, halfSpan - u);
+    const q = Math.hypot(d / (2.3 * c + 1.5), e / spillReach);
+    let h = c * (1 - smooth(0, 1, q));
+    // Just under the track, so the two do not fight.
+    if (u > halfSpan) h -= 0.1 * (1 - smooth(trackHalf(u) - 0.1, trackHalf(u) + 0.4, Math.abs(x)));
+    // The toe sinks under the fields.
+    return h - 0.3 * (1 - smooth(0, 0.6, h));
+  };
   const slopes = [],
     surface = [];
-  const steps = 16;
+  const reachX = width / 2 + 2.3 * top + 4;
+  const us = [];
+  for (let u = halfSpan - spillReach - 1; u < halfSpan + 12; u += 1) us.push(u);
+  for (let u = halfSpan + 12; u <= halfSpan + ramp + 4; u += 2.5) us.push(u);
+  const xs = [];
+  for (let x = -reachX; x <= reachX + 0.01; x += Math.abs(x) < width / 2 + 3 ? 0.75 : 1.5)
+    xs.push(x);
   for (const side of [-1, 1]) {
-    for (let i = 0; i < steps; i++) {
-      const at = (k) => {
-        const t = k / steps;
-        const z = side * (halfSpan + t * ramp);
-        const h = top * (1 - t * t * (3 - 2 * t)) - 0.05;
-        return { z, h, spread: width / 2 + 1.6 * h };
-      };
-      const a = at(i),
-        b = at(i + 1);
-      // Each side slope, then the track on top (as two triangles each).
-      for (const s of [-1, 1]) {
-        slopes.push(
-          [s * (width / 2), a.h, a.z],
-          [s * a.spread, -0.3, a.z],
-          [s * b.spread, -0.3, b.z],
-          [s * (width / 2), a.h, a.z],
-          [s * b.spread, -0.3, b.z],
-          [s * (width / 2), b.h, b.z]
-        );
-      }
-      surface.push(
-        [-width / 2, a.h, a.z],
-        [width / 2, a.h, a.z],
-        [width / 2, b.h, b.z],
-        [-width / 2, a.h, a.z],
-        [width / 2, b.h, b.z],
-        [-width / 2, b.h, b.z]
-      );
+    const row = (u) => xs.map((x) => [x, ground(x, u), side * u]);
+    for (let i = 0; i < us.length - 1; i++) {
+      const a = row(us[i]),
+        b = row(us[i + 1]);
+      // Wound so the upper side faces out on both ends of the bridge.
+      for (let j = 0; j < xs.length - 1; j++)
+        if (side > 0) slopes.push(a[j], b[j], a[j + 1], a[j + 1], b[j], b[j + 1]);
+        else slopes.push(a[j], a[j + 1], b[j], a[j + 1], b[j + 1], b[j]);
     }
-    // Under the deck's end the embankment falls toward the motorway in a
-    // grassed slope (1 : 1.2), ending well short of the piers.
-    const h = top - 0.05,
-      foot = width / 2 + 1.6 * h,
-      zTop = side * halfSpan,
-      zFoot = side * (halfSpan - 1.2 * h);
-    slopes.push(
-      [-width / 2, h, zTop],
-      [width / 2, h, zTop],
-      [foot, -0.3, zFoot],
-      [-width / 2, h, zTop],
-      [foot, -0.3, zFoot],
-      [-foot, -0.3, zFoot]
-    );
-    for (const s of [-1, 1])
-      slopes.push([s * (width / 2), h, zTop], [s * foot, -0.3, zTop], [s * foot, -0.3, zFoot]);
+    // The track, from the deck's end down to the fields.
+    for (let i = 0; i < us.length - 1; i++) {
+      const [u0, u1] = [us[i], us[i + 1]];
+      if (u1 <= halfSpan) continue;
+      const [ua, ub] = [Math.max(u0, halfSpan), u1];
+      const [ha, hb] = [crest(ua) + 0.02, crest(ub) + 0.02];
+      const [wa, wb] = [trackHalf(ua), trackHalf(ub)];
+      const [p0, p1, p2, p3] = [
+        [-wa, ha, side * ua],
+        [wa, ha, side * ua],
+        [wb, hb, side * ub],
+        [-wb, hb, side * ub],
+      ];
+      // Its upper side out, on both ends.
+      if (side < 0) surface.push(p0, p1, p2, p0, p2, p3);
+      else surface.push(p0, p2, p1, p0, p3, p2);
+    }
   }
   const triangles = (points) => {
     const g = new THREE.BufferGeometry();
@@ -676,7 +708,14 @@ function buildBridge(materials) {
       if (n.getY(i) < 0) n.setXYZ(i, -n.getX(i), -n.getY(i), -n.getZ(i));
     return g;
   };
-  const embankment = new THREE.Mesh(triangles(slopes), materials.grass);
+  // The mounds as a smooth surface: shared normals across the grid.
+  const mound = (points) => {
+    const g = mergeVertices(triangles(points).deleteAttribute('normal'));
+    g.computeVertexNormals();
+    softenTowardSky(g);
+    return g;
+  };
+  const embankment = new THREE.Mesh(mound(slopes), materials.grass);
   embankment.name = 'Overpass embankments';
   const track = new THREE.Mesh(triangles(surface), materials.track);
   track.name = 'Overpass track';
@@ -938,6 +977,7 @@ function hillGeometry(from, to) {
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
+  softenTowardSky(geometry);
   geometry.computeBoundingSphere();
   return geometry;
 }
@@ -976,18 +1016,26 @@ function layPortal(geometry, x, facing, offset = 0) {
   geometry.computeBoundingSphere();
   return geometry;
 }
-const mouth = () =>
-  new THREE.Path(tunnelProfile().map(([lat, y]) => new THREE.Vector2(lat, Math.max(y, -0.4))));
+// The mouth as a notch up from the shape's foot: along the foot to the
+// left kerb, round the tunnel's profile and back down at the right kerb, so
+// nothing of the portal lies across the road (a closed hole left a strip of
+// concrete there, at the road's level).
+function openMouth(shape) {
+  const profile = tunnelProfile().reverse();
+  shape.lineTo(profile[0][0], -0.4);
+  for (const [lat, y] of profile) shape.lineTo(lat, y);
+  shape.lineTo(profile.at(-1)[0], -0.4);
+}
 function headwallGeometry(x, facing) {
   const shape = new THREE.Shape();
   shape.moveTo(-portalHalfWidth, -0.4);
+  openMouth(shape);
   shape.lineTo(portalHalfWidth, -0.4);
   for (let i = 0; i <= 32; i++) {
     const lat = portalHalfWidth * (1 - (2 * i) / 32);
     shape.lineTo(lat, portalCrest(lat));
   }
   shape.closePath();
-  shape.holes.push(mouth());
   const geometry = new THREE.ExtrudeGeometry(shape, {
     depth: headwallDepth,
     bevelEnabled: false,
@@ -1010,7 +1058,8 @@ function hoodGeometry(x, facing) {
   }
   shape.lineTo(-halfWidth - thick, wall);
   shape.lineTo(-halfWidth - thick, -0.4);
-  shape.holes.push(mouth());
+  openMouth(shape);
+  shape.closePath();
   const geometry = new THREE.ExtrudeGeometry(shape, {
     depth: 0.9,
     bevelEnabled: true,
@@ -1127,7 +1176,45 @@ function buildSign(spec, materials) {
   return group;
 }
 
-export function setupRoadStructures(scene) {
+// Shades a mound's grass as road.js shades the fields: the photograph at two
+// scales and offsets in world space, the same summer tint and the same broad
+// patches of lusher and drier grass, so hills and embankments match the
+// fields they rise from.
+function fieldGrass(material, noiseMap) {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.grassNoise = { value: noiseMap ?? null };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vGrassXZ;')
+      .replace(
+        '#include <begin_vertex>',
+        '#include <begin_vertex>\nvGrassXZ = (modelMatrix * vec4(transformed, 1.)).xz;'
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec2 vGrassXZ;
+        ${noiseMap ? 'uniform sampler2D grassNoise;' : ''}`
+      )
+      .replace(
+        '#include <map_fragment>',
+        `vec2 gdx = dFdx(vGrassXZ), gdy = dFdy(vGrassXZ);
+        vec3 grassNear = textureGrad(map, vGrassXZ / 2.6, gdx / 2.6, gdy / 2.6).rgb;
+        vec3 grassFar = textureGrad(map, vGrassXZ.yx / 8.7 + .31, gdx.yx / 8.7, gdy.yx / 8.7).rgb;
+        vec3 grass = mix(grassNear, grassFar, .4) * vec3(.9, 1.12, .62);
+        ${
+          noiseMap
+            ? `grass *= .78 + .44 * texture2D(grassNoise, vGrassXZ / 23.).r;
+        grass = mix(grass, grass * vec3(1.15, 1.02, .7), smoothstep(.62, .85, texture2D(grassNoise, vGrassXZ / 5.3).r) * .45);`
+            : ''
+        }
+        diffuseColor.rgb *= grass;`
+      );
+  };
+  material.customProgramCacheKey = () => `field-grass-${Boolean(noiseMap)}`;
+  return material;
+}
+export function setupRoadStructures(scene, fields = {}) {
   const loader = typeof document === 'undefined' ? null : new THREE.TextureLoader();
   const grassMap = loader
     ? loader.load(new URL('./assets/ground/grass.jpg', import.meta.url).href)
@@ -1149,14 +1236,17 @@ export function setupRoadStructures(scene) {
       metalness: 0.6,
       roughness: 0.45,
     }),
-    // The same grass photograph as the fields, tinted alike.
-    grass: new THREE.MeshStandardMaterial({
-      name: 'Embankment grass',
-      map: grassMap,
-      color: new THREE.Color(0.82, 1, 0.58),
-      roughness: 1,
-      side: THREE.DoubleSide,
-    }),
+    // The same grass photograph as the fields, shaded alike (see
+    // fieldGrass below).
+    grass: fieldGrass(
+      new THREE.MeshStandardMaterial({
+        name: 'Embankment grass',
+        map: fields.grassMap ?? grassMap,
+        roughness: 1,
+        side: THREE.DoubleSide,
+      }),
+      fields.noiseMap
+    ),
     track: new THREE.MeshStandardMaterial({
       name: 'Overpass asphalt',
       color: 0x55555a,

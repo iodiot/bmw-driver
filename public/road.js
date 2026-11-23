@@ -122,6 +122,8 @@ export function setupRoad(scene, { lite = false } = {}) {
   const roadCenter = { value: new THREE.Vector2() };
   const roadWetness = { value: 0 };
   const asphaltHeight = { value: new THREE.Texture() };
+  // Shared with the grass blades, which take their colour from the fields.
+  const fields = { grassMap: null, noiseMap: null };
   scene.fog = new THREE.Fog(new THREE.Color().setRGB(0.78, 0.88, 0.98), 100, 260);
   if (ground) {
     const wetnessTexture = createRoadWetnessTexture();
@@ -138,6 +140,8 @@ export function setupRoad(scene, { lite = false } = {}) {
     };
     const grassTexture = groundTexture('grass.jpg'),
       gravelTexture = groundTexture('gravel.jpg');
+    fields.grassMap = grassTexture;
+    fields.noiseMap = wetnessTexture;
     ground.geometry.dispose();
     ground.geometry = createRoadGeometry();
     ground.material.map.repeat.set(2800, 2800);
@@ -485,6 +489,7 @@ export function setupRoad(scene, { lite = false } = {}) {
 
   const wetColour = new THREE.Color(0xa3a9af);
   return {
+    fields,
     setRain(enabled) {
       this.setWetness(enabled ? 1 : 0, true);
     },

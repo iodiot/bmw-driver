@@ -24,6 +24,7 @@ import { setupExhaust } from './exhaust.js';
 import { setupRain } from './rain.js';
 import { setupBodyWater } from './body-water.js';
 import { setupWipers } from './wipers.js';
+import { setupGrassBlades } from './grass-blades.js';
 import { setupBrakes } from './brakes.js';
 import { RenderQuality } from './render-quality.js';
 import { setupInstruments } from './instruments.js';
@@ -141,7 +142,10 @@ if (lowPower) sun.castShadow = false;
 document.body.dataset.lowPower = String(lowPower);
 const rain = setupRain(scene);
 const roadside = guardrailsEnabled ? setupRoadside(scene) : null;
-const structures = setupRoadStructures(scene);
+const structures = setupRoadStructures(scene, road.fields);
+// Blades of grass round the camera (not on phones: a few hundred thousand
+// vertices every frame).
+const grassBlades = lowPower ? null : setupGrassBlades(scene, road.fields);
 const sparks = setupSparks(scene);
 const dust = setupDust(scene);
 const tyreSmoke = setupTyreSmoke(scene);
@@ -1110,6 +1114,7 @@ renderer.setAnimationLoop((time) => {
   document.body.dataset.orbit = String(controls.autoRotate);
   document.body.dataset.cameraAzimuth = controls.getAzimuthalAngle().toFixed(4);
   environment.update(dt, camera, rig?.root.position);
+  grassBlades?.update(dt);
   // Bridges, the tunnel and signs stand at their places from the first frame.
   structures.update(
     sim?.x ?? 0,
