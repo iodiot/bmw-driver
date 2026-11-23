@@ -1,5 +1,6 @@
 // Graphics quality and what the viewer remembers between visits: the time
-// of day (and whether it runs), the camera view and the graphics level.
+// of day (and whether it runs), the camera view, the graphics level and the
+// season.
 export const graphicsLevels = Object.freeze(['auto', 'high', 'medium', 'low']);
 // `pixels`: the most the canvas may have (null: the device's default);
 // `adaptive`: lowered while frames run slow; `shadowMap`: the sun's shadow
@@ -53,6 +54,7 @@ export function loadSettings(storage = globalThis.localStorage) {
   }
   return {
     graphics: graphicsLevels.includes(saved.graphics) ? saved.graphics : 'auto',
+    season: saved.season === 'winter' ? 'winter' : 'summer',
     time: Number.isFinite(saved.time) ? ((saved.time % 24) + 24) % 24 : null,
     timeRunning: typeof saved.timeRunning === 'boolean' ? saved.timeRunning : true,
     camera: typeof saved.camera === 'string' ? saved.camera : null,

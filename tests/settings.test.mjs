@@ -18,13 +18,18 @@ test('Graphics level, time of day and camera are remembered', () => {
   const storage = memory();
   assert.deepEqual(loadSettings(storage), {
     graphics: 'auto',
+    season: 'summer',
     time: null,
     timeRunning: true,
     camera: null,
   });
-  saveSettings({ graphics: 'low', time: 25.5, timeRunning: false, camera: 'driver' }, storage);
+  saveSettings(
+    { graphics: 'low', season: 'winter', time: 25.5, timeRunning: false, camera: 'driver' },
+    storage
+  );
   assert.deepEqual(loadSettings(storage), {
     graphics: 'low',
+    season: 'winter',
     time: 1.5,
     timeRunning: false,
     camera: 'driver',

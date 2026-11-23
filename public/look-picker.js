@@ -102,6 +102,10 @@ export function setupLookPicker(container, { look, onChange, graphics = 'auto', 
       level = chosen;
       showGraphics();
     },
+    close() {
+      panel.hidden = true;
+      opener?.setAttribute('aria-expanded', 'false');
+    },
     toggle(button) {
       opener = button;
       panel.hidden = !panel.hidden;

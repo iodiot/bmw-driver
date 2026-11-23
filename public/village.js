@@ -25,7 +25,9 @@ const pick = (random, list) => list[Math.floor(random() * list.length)];
 export function yardKits(index) {
   const random = seeded(index);
   const kit = new Kit(),
-    windows = new Kit();
+    windows = new Kit(),
+    // Sunflowers apart, as there are none in winter.
+    garden = new Kit();
   const wall = pick(random, [0xf2efe6, 0xf4f1e8, 0xe9efe9, 0xf3ead2, 0xdfe9f2]);
   const roof = pick(random, [0x9a3b2c, 0x3f6e4c, 0x3d5a87, 0x7b7f84, 0x8a4a2a]);
   const trim = pick(random, [0x2f6db5, 0x2f6db5, 0x4f8a5a, 0xe9e7e2]);
@@ -121,14 +123,14 @@ export function yardKits(index) {
     if (Math.abs(fx - gate) < 2.2) continue;
     const fz = fence + 0.7 + random() * 0.8,
       tall = 1.6 + random() * 0.6;
-    kit.box(0.05, tall, 0.05, fx, 0, fz, 0x4f7a2e);
-    kit.box(0.45, 0.04, 0.22, fx + 0.15, tall * 0.55, fz, 0x3f6e2a, 0.6);
+    garden.box(0.05, tall, 0.05, fx, 0, fz, 0x4f7a2e);
+    garden.box(0.45, 0.04, 0.22, fx + 0.15, tall * 0.55, fz, 0x3f6e2a, 0.6);
     const head = new THREE.CylinderGeometry(0.24, 0.24, 0.05, 12);
     head.rotateX(-(Math.PI / 2 - 0.35));
-    kit.add(head, 0xf2b81c, new THREE.Matrix4().setPosition(fx, tall + 0.1, fz - 0.03));
+    garden.add(head, 0xf2b81c, new THREE.Matrix4().setPosition(fx, tall + 0.1, fz - 0.03));
     const middle = new THREE.CylinderGeometry(0.12, 0.12, 0.06, 10);
     middle.rotateX(-(Math.PI / 2 - 0.35));
-    kit.add(middle, 0x5a3a1a, new THREE.Matrix4().setPosition(fx, tall + 0.1, fz - 0.06));
+    garden.add(middle, 0x5a3a1a, new THREE.Matrix4().setPosition(fx, tall + 0.1, fz - 0.06));
   }
   // A plank shed behind, with a lean-to roof.
   const sx = hx + (random() - 0.5) * 10,
@@ -163,7 +165,11 @@ export function yardKits(index) {
     kit.add(beak, 0xd2381e, new THREE.Matrix4().setPosition(px + 0.5, 8.72, pz));
     kit.box(0.04, 0.4, 0.04, px - 0.05, 7.95, pz, 0xd2381e);
   }
-  return { solid: kit.geometry(), glass: windows.geometry() };
+  return {
+    solid: kit.geometry(),
+    glass: windows.geometry(),
+    flowers: garden.parts.length ? garden.geometry() : null,
+  };
 }
 
 export function setupVillage(scene) {
@@ -176,22 +182,30 @@ export function setupVillage(scene) {
     emissiveIntensity: 0,
   });
   const yards = villageYards.map((u, i) => {
-    const { solid, glass: panes } = yardKits(i);
+    const { solid, glass: panes, flowers } = yardKits(i);
     const group = new THREE.Group();
     group.name = 'Village yard';
     const body = new THREE.Mesh(solid, material);
     body.castShadow = body.receiveShadow = true;
     const windows = new THREE.Mesh(panes, glass);
     group.add(body, windows);
+    const garden = flowers ? new THREE.Mesh(flowers, material) : null;
+    if (garden) {
+      garden.name = 'Village sunflowers';
+      // (Small, and gone in winter: no shadow of their own.)
+      garden.userData.noShadow = true;
+      group.add(garden);
+    }
     scene.add(group);
-    return { u, group, shadow: groupShadow(scene, group, 'Village yard shadow') };
+    return { u, group, garden, shadow: groupShadow(scene, group, 'Village yard shadow') };
   });
   return {
     yards,
     // Places the yards at their nearest occurrence to x; `night` (0–1)
     // lights the windows; `sun` and `strength` lay their shadows.
-    update(x, night = 0, sun = null, strength = 0) {
+    update(x, night = 0, sun = null, strength = 0, winter = 0) {
       glass.emissiveIntensity = 0.8 * night;
+      for (const yard of yards) if (yard.garden) yard.garden.visible = winter < 0.5;
       for (const yard of yards) {
         const u = nearestOccurrence(x, yard.u);
         // Not drawn at all when far off.

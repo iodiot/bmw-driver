@@ -222,7 +222,8 @@ export class Traffic {
   // Speed a vehicle at x wants: its own, less for the bumps and the tunnel.
   limitAt(v) {
     // Hurried by a horn: a little faster for a while.
-    let desired = v.desired + (v.hurried > 0 ? 3 : 0);
+    // (`speedScale`: slower on winter roads.)
+    let desired = v.desired * (this.speedScale ?? 1) + (v.hurried > 0 ? 3 : 0);
     const front = v.x + v.length / 2;
     desired = Math.min(desired, bumpSpeed(front));
     const { from, to } = structureLayout.tunnel;
@@ -436,6 +437,39 @@ export class Traffic {
 // the two (a lorry hardly gives), a side hit pushes the car off sideways;
 // the contact goes where a guardrail strike's would, for sparks, the sound
 // and the scrape marks. Returns the contact, or null.
+// How a vehicle's body rides the road's speed bumps, humps and potholes:
+// its heave (m), pitch (nose up, rad) and roll (rad, its right side up) follow
+// what its four wheels stand on through a stiff, lightly damped suspension,
+// so it rocks a moment after a bump. `heightAt(x, lat)` is the road's
+// height under a point; the state is kept on `v.ride`.
+export const rideSuspension = Object.freeze({ frequency: 1.7, damping: 0.32 });
+export function rideOver(v, dt, heightAt) {
+  const ride = (v.ride ??= { y: 0, vy: 0, pitch: 0, vp: 0, roll: 0, vr: 0 });
+  const axle = v.length * 0.32,
+    track = v.width * 0.42;
+  const fl = heightAt(v.x + axle, v.lat - track),
+    fr = heightAt(v.x + axle, v.lat + track),
+    rl = heightAt(v.x - axle, v.lat - track),
+    rr = heightAt(v.x - axle, v.lat + track);
+  const targets = [
+    ['y', 'vy', (fl + fr + rl + rr) / 4],
+    ['pitch', 'vp', Math.atan2(fl + fr - rl - rr, 4 * axle)],
+    ['roll', 'vr', Math.atan2(fr + rr - fl - rl, 4 * track)],
+  ];
+  const w = 2 * Math.PI * rideSuspension.frequency,
+    k = w * w,
+    c = 2 * rideSuspension.damping * w;
+  // Small steps, as the spring is stiff.
+  const steps = Math.max(1, Math.ceil(Math.min(dt, 0.1) / 0.01)),
+    h = Math.min(dt, 0.1) / steps;
+  for (const [key, rate, target] of targets)
+    for (let i = 0; i < steps; i++) {
+      ride[rate] += (k * (target - ride[key]) - c * ride[rate]) * h;
+      ride[key] += ride[rate] * h;
+    }
+  return ride;
+}
+
 export const playerBox = Object.freeze({ halfLength: 2.45, halfWidth: 0.95 });
 export function collideWithTraffic(sim, traffic) {
   const lat = sim.z - roadCenterZ(sim.x);

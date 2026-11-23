@@ -44,6 +44,7 @@ export const photoSkyMix = { value: 0 };
 export const skyWeather = {
   fog: { value: 0 },
   storm: { value: 0 },
+  winter: { value: 0 },
   flash: { value: 0 },
   // The fog's colour as displayed (sRGB), which the sky fades to.
   fogColor: { value: new THREE.Vector3(0.82, 0.83, 0.82) },
@@ -86,6 +87,7 @@ export function createSky(night = { value: 0 }, rain = { value: 0 }, sunset = { 
         uniform vec3 moonDirection;
         uniform float fog;
         uniform float storm;
+        uniform float winter;
         uniform float flash;
         uniform vec3 fogColor;
         varying vec3 dir;
@@ -185,12 +187,21 @@ export function createSky(night = { value: 0 }, rain = { value: 0 }, sunset = { 
             color = mix(color, moonColor, moonDisc * night * (1. - cloud * .45) * (1. - rain * .35));
           }
           if (photoSkyMix > .001) color = mix(color, photoColor(d), photoSkyMix);
+          // Winter: a pale, cold sky, whitest low down.
+          if (winter > .001) {
+            vec3 cold = mix(vec3(.84, .88, .93), vec3(.58, .68, .82), pow(h, .5));
+            cold = mix(cold, cold * vec3(.32, .36, .48), night);
+            color = mix(color, cold, winter * .6 * (1. - storm));
+          }
           // A thunderstorm: low, heavy cloud, darkest overhead, lit from
           // within by lightning.
           if (storm > .001) {
             float heavy = fbm(p * .55 + vec3(0., 0., cloudDrift * 3.));
             vec3 slate = mix(vec3(.30, .33, .38), vec3(.11, .12, .15), smoothstep(.0, .6, h));
             slate *= .75 + .5 * heavy;
+            // A blizzard instead: a white-out, greyer overhead.
+            vec3 whiteout = mix(vec3(.86, .89, .93), vec3(.68, .72, .79), smoothstep(.0, .6, h));
+            slate = mix(slate, whiteout * (.94 + .12 * heavy), winter);
             slate = mix(slate, slate * vec3(.35, .38, .48), night);
             color = mix(color, slate, storm);
             color += vec3(.8, .84, 1.) * flash * (.6 + 1.4 * heavy) * (.5 + .5 * smoothstep(0., .5, h));
@@ -324,10 +335,11 @@ export function setupEnvironment(scene, renderer, sun, { refresh = 1.5 } = {}) {
     // `isRain`: true or false, or how far rain has set in (0 to 1).
     // `weather`: how far fog and a storm have set in (0 to 1), and a
     // lightning flash's brightness.
-    setConditions(light, isRain, { fog = 0, storm = 0, flash = 0 } = {}) {
+    setConditions(light, isRain, { fog = 0, storm = 0, flash = 0, winter = 0 } = {}) {
       const wet = Math.max(0, Math.min(1, Number(isRain)));
       skyWeather.fog.value = fog;
       skyWeather.storm.value = storm;
+      skyWeather.winter.value = winter;
       skyWeather.flash.value = flash;
       night.value = light.darkness;
       rain.value = wet;
@@ -339,7 +351,7 @@ export function setupEnvironment(scene, renderer, sun, { refresh = 1.5 } = {}) {
       lightDirection = light.sunUp
         ? sky.material.uniforms.sunDirection.value
         : celestialDirections.moon;
-      const key = `${Number(light.night)}-${Number(wet > 0.5)}-${Number(fog > 0.5)}${Number(storm > 0.5)}`;
+      const key = `${Number(light.night)}-${Number(wet > 0.5)}-${Number(fog > 0.5)}${Number(storm > 0.5)}${Number(winter > 0.5)}`;
       // One cached reflection per dark/light and dry/wet combination; it is
       // refreshed as the sky changes.
       if (key !== currentReflection) {
@@ -364,13 +376,24 @@ export function setupEnvironment(scene, renderer, sun, { refresh = 1.5 } = {}) {
         horizon = mixRGB(horizon, [0.86, 0.56, 0.38], light.sunset * 0.45);
         // The photograph's horizon: distant fields and tree lines.
         horizon = mixRGB(horizon, [0.45, 0.46, 0.3], photoSkyMix.value);
-        // A storm's horizon is dark under its clouds, and flashes with them.
+        // A storm's horizon is dark under its clouds, and flashes with them;
+        // a blizzard's is white.
         horizon = mixRGB(
           horizon,
-          mixRGB([0.3, 0.33, 0.38], [0.1, 0.11, 0.14], light.darkness),
+          mixRGB(
+            mixRGB([0.3, 0.33, 0.38], [0.86, 0.89, 0.93], winter),
+            [0.1, 0.11, 0.14],
+            light.darkness
+          ),
           storm
         );
         horizon = horizon.map((v) => v + 0.8 * flash);
+        // Winter's haze is white over the snow.
+        horizon = mixRGB(
+          horizon,
+          mixRGB([0.84, 0.88, 0.93], [0.13, 0.15, 0.2], light.darkness),
+          winter * 0.6 * (1 - storm)
+        );
         // Morning fog: light grey, warm in a low sun, dark at night.
         const mist = mixRGB(
           mixRGB([0.84, 0.85, 0.84], [0.92, 0.84, 0.74], light.sunset * 0.6),

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Traffic, collideWithTraffic, trafficLayout } from '../public/traffic.js';
+import { Traffic, collideWithTraffic, rideOver, trafficLayout } from '../public/traffic.js';
 import { roadCenterZ, roadLanes } from '../public/road-profile.js';
 
 function seeded(seed) {
@@ -157,4 +157,35 @@ test("A lorry's shadow falls on the car beside it, not on one in front", async (
   // A low hatchback casts no shadow up to a lorry's windows.
   const hatch = { type: 'hatch', x, lat: 0, yaw: 0, ...vehicleTypes.hatch };
   assert.equal(trafficShade([hatch], [[x, 1.6, roadCenterZ(x) + 2.5]], shift), 0);
+});
+
+test('a car rides up over a speed bump nose first, rocks and settles', () => {
+  // A bump 10 cm high and 1 m long across the road at x = 20.
+  const bump = (x) => (Math.abs(x - 20) < 0.5 ? 0.1 * Math.cos(Math.PI * (x - 20)) : 0);
+  const v = { x: 0, lat: 0, length: 4.6, width: 1.8 };
+  let highest = 0,
+    noseUp = 0,
+    noseDown = 0;
+  for (let t = 0; t < 6; t += 1 / 60) {
+    v.x += 25 / 3.6 / 60;
+    const ride = rideOver(v, 1 / 60, (x) => bump(x));
+    highest = Math.max(highest, ride.y);
+    if (v.x < 20.5) noseUp = Math.max(noseUp, ride.pitch);
+    noseDown = Math.min(noseDown, ride.pitch);
+  }
+  assert.ok(highest > 0.01 && highest < 0.1, `heave ${highest}`);
+  assert.ok(noseUp > 0.005, `nose up ${noseUp}`);
+  assert.ok(noseDown < -0.005, `nose down ${noseDown}`);
+  assert.ok(Math.abs(v.ride.y) < 0.002 && Math.abs(v.ride.pitch) < 0.001, 'settled');
+});
+
+test('a pothole under one side rolls the car toward it', () => {
+  const hole = (x, lat) => (Math.abs(x - 10) < 0.4 && lat > 0.3 ? -0.06 : 0);
+  const v = { x: 0, lat: 0, length: 4.6, width: 1.8 };
+  let roll = 0;
+  for (let t = 0; t < 3; t += 1 / 60) {
+    v.x += 5 / 60;
+    roll = Math.min(roll, rideOver(v, 1 / 60, hole).roll);
+  }
+  assert.ok(roll < -0.003, `roll ${roll}`);
 });

@@ -32,6 +32,10 @@ const waterFunctions = `
   uniform float waterTime;
   uniform float waterWind;
   uniform float waterGlass;
+  // Snow instead of rain: flakes that stick rather than beads that run, lit
+  // by snowLight (the light falling on the car).
+  uniform float bodySnow;
+  uniform float snowLight;
   uniform vec3 waterFlow;
   uniform vec3 waterVelocity;
   varying vec3 vWaterPosition;
@@ -85,7 +89,8 @@ const waterFunctions = `
     vec2 pinned = beadLayer(coordinate, mix(.032, .036, waterGlass), velocity, false);
     vec2 running = beadLayer(coordinate - flow * mix(1., 1.3, waterGlass),
                              mix(.09, .18, waterGlass), velocity, true);
-    return mix(pinned, running, mix(.35, .5, waterGlass) + waterWind * mix(.55, .4, waterGlass));
+    return mix(pinned, running,
+      (mix(.35, .5, waterGlass) + waterWind * mix(.55, .4, waterGlass)) * (1. - bodySnow));
   }
 
   vec2 bodyWater(vec3 p, vec3 n) {
@@ -123,6 +128,8 @@ export function setupBodyWater(rig) {
   defaultWipeMap.needsUpdate = true;
   const uniforms = {
     bodyWetness: { value: 0 },
+    bodySnow: { value: 0 },
+    snowLight: { value: 1 },
     waterTime: { value: 0 },
     waterWind: { value: 0 },
     waterFlow: { value: state.flow },
@@ -217,7 +224,12 @@ export function setupBodyWater(rig) {
         vec2 surfaceWater = bodyWater(vWaterPosition, vWaterNormal);
         surfaceWater *= mix(1., vWaterWindow, waterGlass);
         surfaceWater *= remainingWindshieldWater(vWaterPosition);
-        roughnessFactor = mix(roughnessFactor, .10, surfaceWater.y * .8);
+        roughnessFactor = mix(roughnessFactor, mix(.10, .95, bodySnow), surfaceWater.y * .8);
+        // Flakes on the paint: white specks lying on the bonnet, roof and boot
+        // lid, few holding on the sides.
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.9, .92, .96),
+          surfaceWater.y * bodySnow * (1. - waterGlass) * .9 *
+          mix(.12, 1., smoothstep(.35, .8, normalize(vWaterNormal).y)));
         diffuseColor.rgb *= 1. - bodyWetness * .025 * (1. - waterGlass);
         diffuseColor.a += (1. - diffuseColor.a) * surfaceWater.y * waterGlass * .3;
       `
@@ -236,7 +248,11 @@ export function setupBodyWater(rig) {
           float waterRim = surfaceWater.y * (1. - smoothstep(.00008, .00065, surfaceWater.x));
           vec3 waterLight = reflectedLight.directSpecular + reflectedLight.indirectSpecular;
           outgoingLight = outgoingLight * (1. - surfaceWater.y * .10) +
-                          (waterLight + vec3(.012)) * waterRim * .55;
+                          (waterLight + vec3(.012)) * waterRim * .55 * (1. - bodySnow);
+          // Snowflakes on the glass: white and all but opaque.
+          float flakes = surfaceWater.y * bodySnow;
+          outgoingLight = mix(outgoingLight, vec3(.88, .91, .95) * snowLight, flakes * .9);
+          diffuseColor.a = mix(diffuseColor.a, 1., flakes * .85);
           #include <opaque_fragment>
         `
         );
@@ -300,6 +316,9 @@ export function setupBodyWater(rig) {
         float rim = 1. - smoothstep(.00008, .0006, water.x);
         vec3 colour = mix(vec3(.03, .035, .04), vec3(.82, .86, .9), lit);
         float alpha = cover * (.16 + .42 * rim + .5 * lit);
+        // Snowflakes from inside: pale, lit through, nearly opaque.
+        colour = mix(colour, vec3(.8, .83, .88) * snowLight * .85, bodySnow);
+        alpha = mix(alpha, cover * .85, bodySnow);
         gl_FragColor = vec4(colour, min(alpha, .8));
         #include <colorspace_fragment>
       }
@@ -327,7 +346,11 @@ export function setupBodyWater(rig) {
       uniforms.windshieldBounds.value.copy(bounds);
     },
     // `cabin`: seen from the driver's seat (the beads show on the inside).
-    update(dt, { raining, speed, cabin = false }) {
+    // `snow` (0–1): it falls as snow; `light`: how bright the light on the
+    // car is, for the flakes.
+    update(dt, { raining, speed, cabin = false, snow = 0, light = 1 }) {
+      uniforms.bodySnow.value = snow;
+      uniforms.snowLight.value = light;
       inside.value = cabin ? 1 : 0;
       rig.body.updateWorldMatrix(true, false);
       inverseRotation.extractRotation(rig.body.matrixWorld).invert();

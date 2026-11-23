@@ -23,6 +23,10 @@ export function setupRain(scene) {
   unlitPattern.needsUpdate = true;
   const uniforms = {
     rainTime: { value: 0 },
+    // 0…1: snow instead of rain (winter); `wind` drives it sideways in a
+    // blizzard.
+    snowfall: { value: 0 },
+    wind: { value: 0 },
     // 0…1: how hard it rains, for rain that sets in and eases off.
     rainAmount: { value: 1 },
     // 0…1: how far the camera is under cover (in the tunnel), no rain there.
@@ -83,15 +87,20 @@ export function setupRain(scene) {
       varying float vVisibility;
       varying float vBeam;
 
+      uniform float snowfall;
+      uniform float wind;
       void main() {
-        float fallSpeed = 10. + rainSeed.z * 5.;
-        vec2 drift = vec2(.7, .22) * rainTime;
+        // Raindrops fall at 10–15 m/s; snowflakes drift down at 1–2 and
+        // flutter, blown along by the wind in a blizzard.
+        float fallSpeed = mix(10. + rainSeed.z * 5., 1.1 + rainSeed.z * .9, snowfall);
+        vec2 drift = vec2(.7 + wind, .22 + wind * .3) * rainTime +
+          snowfall * .35 * vec2(sin(rainTime * 1.7 + rainSeed.x * 40.), cos(rainTime * 1.3 + rainSeed.y * 40.));
         // Keep more drops close enough to read at the normal driving-camera distance.
         vec2 offset = mod(rainSeed.xz * 48. + drift - cameraPosition.xz + 24., 48.) - 24.;
         vec3 drop = vec3(cameraPosition.x + offset.x,
                          fract(rainSeed.y - rainTime * fallSpeed / 16.) * 16.,
                          cameraPosition.z + offset.y);
-        vec3 velocity = vec3(.7, -fallSpeed, .22) - cameraVelocity;
+        vec3 velocity = vec3(.7 + wind, -fallSpeed, .22 + wind * .3) - cameraVelocity;
         // Heights above the land, drawn lifted by it (see terrain.js).
         vec3 dropWorld = drop + vec3(0., terrainLift(drop.x), 0.);
         vec4 head = viewMatrix * vec4(dropWorld, 1.);
@@ -99,7 +108,7 @@ export function setupRain(scene) {
         vec2 axis = normalize(tail.xy - head.xy + vec2(.00001));
         vec2 sideways = vec2(axis.y, -axis.x);
         vec4 viewPosition = mix(head, tail, uv.y);
-        viewPosition.xy += sideways * position.x * max(.007, -head.z * .0016);
+        viewPosition.xy += sideways * position.x * max(.007, -head.z * .0016) * (1. + 2.2 * snowfall);
         gl_Position = projectionMatrix * viewPosition;
 
         vec2 local = localToCar(drop.xz);
@@ -118,6 +127,7 @@ export function setupRain(scene) {
       uniform float night;
       uniform float rainAmount;
       uniform float shelter;
+      uniform float snowfall;
       uniform vec3 rainColor;
       varying vec2 vUv;
       varying float vVisibility;
@@ -126,8 +136,11 @@ export function setupRain(scene) {
       void main() {
         float crossSection = 1. - smoothstep(.16, .5, abs(vUv.x - .5));
         float ends = smoothstep(0., .12, vUv.y) * (1. - smoothstep(.7, 1., vUv.y));
-        float alpha = crossSection * ends * vVisibility * mix(.60, .38 + vBeam * .42, night) *
-          rainAmount * (1. - shelter);
+        // A snowflake is a soft round fleck rather than a streak.
+        float flake = 1. - smoothstep(.2, .5, length(vUv - .5));
+        float shape = mix(crossSection * ends, flake, snowfall);
+        float alpha = shape * vVisibility * mix(.60, .38 + vBeam * .42, night) *
+          mix(1., 1.5, snowfall) * rainAmount * (1. - shelter);
         if (alpha < .001) discard;
         vec3 color = mix(rainColor, vec3(1., .93, .82), vBeam * night * .85);
         gl_FragColor = vec4(color, alpha);
@@ -169,6 +182,7 @@ export function setupRain(scene) {
       uniform float night;
       uniform float rainAmount;
       uniform float shelter;
+      uniform float snowfall;
       uniform vec3 rainColor;
       varying vec2 vUv;
       varying float vVisibility;
@@ -177,7 +191,9 @@ export function setupRain(scene) {
       void main() {
         float radius = length((vUv - .5) * 2.);
         float ring = 1. - smoothstep(.04, .15, abs(radius - .72));
-        float alpha = ring * vVisibility * mix(.32, .18 + vBeam * .32, night) * rainAmount * (1. - shelter);
+        // (No ripples where snow falls.)
+        float alpha = ring * vVisibility * mix(.32, .18 + vBeam * .32, night) * rainAmount *
+          (1. - shelter) * (1. - snowfall);
         if (alpha < .001) discard;
         gl_FragColor = vec4(mix(rainColor, vec3(1., .93, .82), night * vBeam), alpha);
         #include <colorspace_fragment>
@@ -223,6 +239,11 @@ export function setupRain(scene) {
         group.visible = enabled;
       } else if (enabled && !wasEnabled) uniforms.rainAmount.value = 0;
       wasEnabled = enabled;
+    },
+    // Snow instead of rain (0–1), and the wind (m/s across) for a blizzard.
+    setSnow(amount, wind = 0) {
+      uniforms.snowfall.value = amount;
+      uniforms.wind.value = wind;
     },
     setShelter(amount) {
       uniforms.shelter.value = amount;

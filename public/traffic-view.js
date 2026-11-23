@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { roadCenterZ, roadCenterSlope } from './road-profile.js';
+import { roadCenterZ, roadCenterSlope, roadHeight } from './road-profile.js';
 import { tunnelCover, bridgeShade, structureUniforms } from './road-structures.js';
-import { Traffic, vehicleTypes } from './traffic.js';
+import { Traffic, rideOver, vehicleTypes } from './traffic.js';
 import { roadSeed, seededRandom } from './road-seed.js';
 
 // The traffic's vehicles, drawn: each type a few instanced meshes (paint,
@@ -701,6 +701,7 @@ export function setupTraffic(scene, { count } = {}) {
   shadow.name = 'Traffic shadows';
   group.add(shadow);
 
+  const rideRange = 220;
   const matrix = new THREE.Matrix4(),
     position = new THREE.Vector3(),
     rotation = new THREE.Quaternion(),
@@ -733,8 +734,9 @@ export function setupTraffic(scene, { count } = {}) {
     // Draws the vehicles; `night` 0–1 lights their lamps, `playerCover`
     // how far the car is under the tunnel's roof (the scene is dimmed for
     // it already); `sun` points toward the sun and `sunlight` (0–1) is how
-    // strong its shadows are.
-    update({ night = 0, playerCover = 0, sun = null, sunlight = 0 } = {}) {
+    // strong its shadows are. Those within `rideRange` of `x` ride the
+    // road's bumps and potholes (dt in seconds).
+    update({ night = 0, playerCover = 0, sun = null, sunlight = 0, x = 0, dt = 0 } = {}) {
       // Flatten onto the road (y = 0.02) along the sun's direction, the sun
       // kept off the horizon so shadows stay a sensible length.
       const showShadows = Boolean(sun) && sunlight > 0.02;
@@ -759,15 +761,20 @@ export function setupTraffic(scene, { count } = {}) {
           -Math.atan(roadCenterSlope(v.x)) -
           Math.atan2(v.latSpeed, Math.max(v.speed, 1)) +
           (v.yaw ?? 0);
+        // Bumps and potholes rock it (the far ones are not worth the work).
+        const ride =
+          Math.abs(v.x - x) < rideRange
+            ? rideOver(v, dt, (rx, lat) => roadHeight(rx, roadCenterZ(rx) + lat))
+            : null;
         // The nose dips under braking and lifts a little accelerating; the
         // body leans out of a lane change.
         euler.set(
-          THREE.MathUtils.clamp(v.latSpeed * 0.012, -0.03, 0.03),
+          THREE.MathUtils.clamp(v.latSpeed * 0.012, -0.03, 0.03) - (ride?.roll ?? 0),
           heading,
-          THREE.MathUtils.clamp(v.accel * -0.004, -0.02, 0.012)
+          THREE.MathUtils.clamp(v.accel * 0.004, -0.02, 0.012) + (ride?.pitch ?? 0)
         );
         rotation.setFromEuler(euler);
-        position.set(v.x, 0, z);
+        position.set(v.x, ride?.y ?? 0, z);
         matrix.compose(position, rotation, one);
         // In the tunnel, darker than the daylight the scene is lit by.
         const cover = Math.max(0, tunnelCover(v.x, v.lat) - playerCover);

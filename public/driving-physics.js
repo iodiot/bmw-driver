@@ -205,7 +205,8 @@ export class DrivingSimulation {
       grip += (kind.grip + (kind.wetGrip - kind.grip) * wet) / (1 + (0.536 - 1) * wet);
       rolling += kind.rolling;
     }
-    this.surfaceGrip = grip / this.wheels.length;
+    // (`gripScale`: less on snow and ice in winter.)
+    this.surfaceGrip = (grip / this.wheels.length) * (this.gripScale ?? 1);
     this.surfaceRolling = rolling / this.wheels.length;
     this.surfaceName = at ? at(this.x, this.z) : 'asphalt';
   }

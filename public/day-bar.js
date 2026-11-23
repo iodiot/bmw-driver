@@ -74,6 +74,14 @@ const skyColours = {
     [168, 172, 176],
     [196, 198, 199],
   ],
+  snow: [
+    [150, 162, 178],
+    [196, 205, 216],
+  ],
+  blizzard: [
+    [92, 102, 118],
+    [140, 150, 164],
+  ],
 };
 const mixRgb = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
 // `weather`: 'clear', 'rain', 'storm' or 'fog' (true and false stand for
@@ -104,6 +112,9 @@ const icons = {
   storm:
     '<path d="M5 10.5h8a3 3 0 0 0 .3-6 4.2 4.2 0 0 0-8.1 1A2.6 2.6 0 0 0 5 10.5z"/><path d="M9.8 10.5 8 13.5h2.4L8.8 17"/>',
   fog: '<path d="M2.5 6h13M4.5 9h11M2.5 12h12M5 15h9"/>',
+  snow: '<path d="M5 10.5h8a3 3 0 0 0 .3-6 4.2 4.2 0 0 0-8.1 1A2.6 2.6 0 0 0 5 10.5z"/><path d="M6 13.2v2.6M4.7 14.5h2.6M12 13.2v2.6M10.7 14.5h2.6M9 14.6v2.4M7.8 15.8h2.4"/>',
+  blizzard:
+    '<path d="M5 9.5h8a3 3 0 0 0 .3-6 4.2 4.2 0 0 0-8.1 1A2.6 2.6 0 0 0 5 9.5z"/><path d="M2.5 12.5h9M5 15h10M8 12.2v1M13 14.7v1"/>',
   pause: '<path d="M6.5 4.5v9M11.5 4.5v9"/>',
   play: '<path d="M6.5 4.2v9.6L14 9z"/>',
   restart: '<path d="M3.8 9a5.2 5.2 0 1 0 1.6-3.8M3.6 2.8v2.6h2.6"/>',
@@ -116,16 +127,21 @@ const icons = {
     '<path d="M2.5 7h2.8l3.7-3.2v10.4L5.3 11H2.5z"/><path d="M11.8 6.8l4.4 4.4M16.2 6.8l-4.4 4.4"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 18 18" aria-hidden="true">${icons[name]}</svg>`;
-const weatherNames = { clear: 'clear', rain: 'rain', storm: 'thunderstorm', fog: 'fog' };
-const nextKind = (kind) => {
-  const kinds = Object.keys(weatherNames);
-  return kinds[(kinds.indexOf(kind) + 1) % kinds.length];
+// A weather's icon (clear, rain, storm, fog, snow, blizzard).
+export const weatherIcon = (kind) => icon(icons[kind] ? kind : 'clear');
+const weatherNames = {
+  clear: 'clear',
+  rain: 'rain',
+  storm: 'thunderstorm',
+  fog: 'fog',
+  snow: 'snow',
+  blizzard: 'blizzard',
 };
 const presetLabels = { day: 'Day (13:00)', sunset: 'Sunset (18:54)', night: 'Night (23:00)' };
 
 export function setupDayBar(
   container,
-  { setTime, nextWeather, toggleRunning, restart, toggleSound, nextCamera, openLook, nextGraphics }
+  { setTime, openWeather, toggleRunning, restart, toggleSound, nextCamera, openLook, nextGraphics }
 ) {
   container.innerHTML = `
     <div class="day-graph" title="Time of day: click or drag to change">
@@ -154,7 +170,7 @@ export function setupDayBar(
           )
           .join('')}
       </div>
-      <button type="button" class="day-rain" aria-label="Weather: clear" title="Weather: clear" aria-pressed="false">${icon('clear')}</button>
+      <button type="button" class="day-rain" aria-label="Weather and season" title="Weather and season" aria-pressed="false" aria-expanded="false">${icon('clear')}</button>
       <button type="button" class="day-run" aria-label="Pause time" title="Pause time" aria-pressed="false">${icon('pause')}</button>
       <button type="button" class="day-paint" aria-label="Paint, wheels and graphics" title="Paint, wheels and graphics" aria-expanded="false">${icon('paint')}</button>
       <button type="button" class="day-camera" aria-label="Camera: Chase (C)" title="Camera: Chase (C)">${icon('camera')}</button>
@@ -177,7 +193,7 @@ export function setupDayBar(
     cameraButton = container.querySelector('.day-camera');
   for (const button of presets)
     button.onclick = () => setTime(dayCycle.presets[button.dataset.preset]);
-  rain.onclick = nextWeather;
+  rain.onclick = () => openWeather?.(rain);
   run.onclick = toggleRunning;
   container.querySelector('.day-restart').onclick = () => restart?.();
   soundButton.onclick = () => toggleSound?.();
@@ -270,7 +286,7 @@ export function setupDayBar(
         rain.dataset.weather = weather;
         rain.innerHTML = icon(weather);
         rain.title =
-          rain.ariaLabel = `Weather: ${weatherNames[weather]} (click for ${weatherNames[nextKind(weather)]})`;
+          rain.ariaLabel = `Weather: ${weatherNames[weather]} (click to choose, and the season)`;
       }
       rain.setAttribute('aria-pressed', String(weather !== 'clear'));
       run.setAttribute('aria-pressed', String(!running));

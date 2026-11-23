@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { seasonUniforms } from './season.js';
 import { structuresGLSL, structureUniforms } from './road-structures.js';
 import { roadProfileGLSL } from './road-profile.js';
 
@@ -179,6 +180,7 @@ export function setupRoad(scene, { lite = false } = {}) {
     ground.material.onBeforeCompile = (shader) => {
       shader.uniforms.roadCenter = roadCenter;
       shader.uniforms.roadWetness = roadWetness;
+      shader.uniforms.winterCover = seasonUniforms.winterCover;
       shader.uniforms.roadWetnessMap = { value: wetnessTexture };
       shader.uniforms.grassMap = { value: grassTexture };
       shader.uniforms.gravelMap = { value: gravelTexture };
@@ -220,7 +222,7 @@ export function setupRoad(scene, { lite = false } = {}) {
         '#include <worldpos_vertex>\nvRoadXZ = (modelMatrix * vec4(transformed, 1.0)).xz;'
       );
       shader.fragmentShader =
-        'varying vec2 vRoadXZ;\nuniform float roadWetness;\nuniform sampler2D roadWetnessMap;\nuniform sampler2D grassMap;\nuniform sampler2D gravelMap;\nuniform sampler2D asphaltHeight;\nuniform float asphaltUvPerMetre;\n' +
+        'varying vec2 vRoadXZ;\nuniform float roadWetness;\nuniform float winterCover;\nuniform sampler2D roadWetnessMap;\nuniform sampler2D grassMap;\nuniform sampler2D gravelMap;\nuniform sampler2D asphaltHeight;\nuniform float asphaltUvPerMetre;\n' +
         visibleProfile +
         structuresGLSL +
         `vec4 asphaltTexel(sampler2D t, vec2 uv, vec4 fallback, bool on, vec2 shift, vec2 dx, vec2 dy) {
@@ -375,6 +377,24 @@ export function setupRoad(scene, { lite = false } = {}) {
         diffuseColor.rgb *= 1. - .14 * wheelTrack;
         diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * (.8 + .08 * midNoise), repairPatch);
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.035), sealedCrack * .85);
+        // Winter: snow over the fields and verges, rutted where the country
+        // road runs; on the carriageway banked along the edges, a dusting
+        // between the wheel tracks and the tracks themselves dark and wet.
+        float laneSnow = 0.;
+        if (winterCover > 0.) {
+          vec3 snow = vec3(.86, .89, .94) * (.88 + .1 * broadNoise + .05 * fineNoise);
+          float trackRuts = hasBranch * exp(-pow((abs(branchLat) - .85) / .32, 2.)) *
+            (1. - smoothstep(1.6, 2.4, branchLateral));
+          vec3 rutted = mix(snow, snow * vec3(.62, .6, .58), trackRuts * .75);
+          roadside = mix(roadside, rutted, winterCover * (.9 + .1 * midNoise));
+          // (Between the wheel tracks: a thin, broken film of packed snow.)
+          float betweenTracks = smoothstep(.2, .55, abs(laneOffset)) * (1. - smoothstep(1.25, 1.6, abs(laneOffset)));
+          laneSnow = winterCover * onCarriageway *
+            max(smoothstep(4.4, 5.3, lateral) * (.55 + .45 * midNoise),
+                betweenTracks * .22 * smoothstep(.55, .8, midNoise) * (.6 + .4 * fineNoise));
+          diffuseColor.rgb *= 1. - .25 * winterCover * wheelTrack;
+          diffuseColor.rgb = mix(diffuseColor.rgb, snow * .96, laneSnow);
+        }
         diffuseColor.rgb = mix(diffuseColor.rgb, roadside, offRoad);
         float roadAAZ = max(fwidth(roadLat), 0.002);
         float roadAAX = max(fwidth(vRoadXZ.x), 0.002);
@@ -393,7 +413,7 @@ export function setupRoad(scene, { lite = false } = {}) {
         float paintVisibility = 1.0 - smoothstep(65.0, 170.0, length(cameraPosition.xz - vRoadXZ));
         // Paint is worn unevenly and most where tyres run.
         float paintWear = (.72 + .28 * fineNoise) * (1. - .35 * wheelTrack);
-        float paintMask = max(lanePaint * dashPaint, edgePaint) * paintVisibility * paintWear;
+        float paintMask = max(lanePaint * dashPaint, edgePaint) * paintVisibility * paintWear * (1. - laneSnow);
         // Colour comes from the full obstacle profile, not the displaced
         // height (which fades in from 60 m), so bumps and holes do not pop
         // into colour as they approach; the geometry rises smoothly under it.

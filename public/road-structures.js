@@ -85,16 +85,17 @@ export const structureLayout = Object.freeze({
     }),
     Object.freeze({ at: roadBranch.start + 130, kind: 'gore' }),
     // The fuel station on the country road: a blue service sign a kilometre
-    // before, and one where the country road leaves the motorway.
+    // before, and one just before the country road leaves the motorway.
     Object.freeze({
       at: clearOfBridges(2650),
       kind: 'fuel',
       distance: roadBranch.period + fuelStationPlace.at - clearOfBridges(2650),
     }),
+    // (Before the country road leaves, so there is time to move over.)
     Object.freeze({
-      at: roadBranch.start + 40,
+      at: roadBranch.start - 120,
       kind: 'fuelTurn',
-      distance: fuelStationPlace.at - roadBranch.start - 40,
+      distance: fuelStationPlace.at - roadBranch.start + 120,
     }),
   ]),
 });

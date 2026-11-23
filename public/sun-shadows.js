@@ -45,7 +45,7 @@ export function groupShadow(scene, group, name) {
   const toGroup = new THREE.Matrix4().copy(group.matrixWorld).invert();
   const pieces = [];
   group.traverse((o) => {
-    if (!o.isMesh || o.material?.transparent) return;
+    if (!o.isMesh || o.material?.transparent || o.userData.noShadow) return;
     const g = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(
       new THREE.Matrix4().multiplyMatrices(toGroup, o.matrixWorld)
     );

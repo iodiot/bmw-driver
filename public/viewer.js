@@ -34,6 +34,7 @@ import { setupBusStops } from './bus-stops.js';
 import { FuelTank, atPump, fuelPrice, setupFuelStation } from './fuel-station.js';
 import { setupVillage } from './village.js';
 import { DriftScore, driftRules } from './drift.js';
+import { seasonUniforms, snowOnScene, stepSeason, winterDriving } from './season.js';
 import { setupToasts } from './toasts.js';
 import { setupGrassBlades } from './grass-blades.js';
 import { setupBrakes } from './brakes.js';
@@ -49,12 +50,13 @@ import { setupContactShadow } from './contact-shadow.js';
 import { refineCarMaterials } from './car-materials.js';
 import { applyLook, loadLook, saveLook } from './car-look.js';
 import { setupLookPicker } from './look-picker.js';
+import { setupWeatherPicker } from './weather-picker.js';
 import { graphicsPresets, loadSettings, nextGraphics, saveSettings } from './settings.js';
 import { laneKeepingSteer, nearestLane, curveSpeed, bumpSpeed } from './lane-keeping.js';
 import { setupSparks } from './sparks.js';
 import { setupMinimap } from './minimap.js';
 import { setMirrorInterval, setupMirrors, setupRearViewMirror } from './mirrors.js';
-import { createWeatherCycle, isWet, nextWeather, weatherCycle } from './weather-cycle.js';
+import { createWeatherCycle, isWet, weatherCycle } from './weather-cycle.js';
 import { setupLightning } from './lightning.js';
 import { daylight, dayCycle, wrapHours } from './time-of-day.js';
 import { setupDayBar } from './day-bar.js';
@@ -198,7 +200,18 @@ const grassBlades = lowPower ? null : setupGrassBlades(scene, road.fields);
 // whether it adapts to the frame rate, the sun's shadow map round the car,
 // the grass blades, the projected sun shadows and the mirrors' refresh.
 let graphics = remembered.graphics,
-  projectedShadows = true;
+  projectedShadows = true,
+  grassWanted = true;
+// The season (summer or winter, in the paint panel): `winterLevel` eases
+// between them as the snow comes or goes.
+let season = remembered.season,
+  winterLevel = season === 'winter' ? 1 : 0,
+  // The weather panel (season, weather, whether it changes by itself).
+  weatherPicker = null;
+seasonUniforms.winterCover.value = winterLevel;
+// Rain that wets the road and the car: in winter it falls as snow.
+const wetWeather = () => rainMode && winterLevel < 0.5;
+document.body.dataset.season = season;
 function applyGraphics(level) {
   graphics = level;
   const preset = graphicsPresets[level];
@@ -221,7 +234,8 @@ function applyGraphics(level) {
     sun.shadow.map?.dispose();
     sun.shadow.map = null;
   }
-  if (grassBlades) grassBlades.mesh.visible = preset.grass ?? true;
+  grassWanted = preset.grass ?? true;
+  if (grassBlades) grassBlades.mesh.visible = grassWanted && winterLevel < 0.5;
   projectedShadows = preset.projected;
   document.body.dataset.graphics = level;
   remembered.graphics = level;
@@ -332,6 +346,13 @@ function chooseGraphics(level) {
   applyMirrors();
   lookPicker.setGraphics(level);
   dayBar.setGraphics(graphicsPresets[level].label);
+}
+function chooseSeason(chosen) {
+  season = chosen;
+  remembered.season = chosen;
+  rememberSettings();
+  weatherPicker.set({ season: chosen });
+  document.body.dataset.season = chosen;
 }
 const lookPicker = setupLookPicker(document.body, {
   look,
@@ -687,7 +708,7 @@ function keepCameraInTunnel() {
 }
 // Continuous changes for the current time and weather.
 function applyDaylight() {
-  const conditions = { fog: fogLevel, storm: stormLevel };
+  const conditions = { fog: fogLevel, storm: stormLevel, winter: winterLevel };
   light = daylight(timeOfDay, rainLevel, conditions);
   environment.setConditions(light, rainLevel, { ...conditions, flash: lightningFlash });
   ambient.intensity = light.ambient;
@@ -696,7 +717,7 @@ function applyDaylight() {
   sun.color.setRGB(...light.directColour);
   fill.intensity = light.fill;
   document.body.dataset.timeOfDay = timeOfDay.toFixed(3);
-  dayBar.update(light, { running: timeRunning, weather: weatherKind });
+  dayBar.update(light, { running: timeRunning, weather: shownWeather() });
   if (light.night !== nightMode || light.lowBeams !== lowBeamsOn) {
     nightMode = light.night;
     lowBeamsOn = light.lowBeams;
@@ -715,8 +736,14 @@ addEventListener('pagehide', () => {
   remembered.time = timeOfDay;
   rememberSettings();
 });
+// The weather as named and shown: rain and storms fall as snow in winter.
+function shownWeather() {
+  if (winterLevel < 0.5) return weatherKind;
+  return { rain: 'snow', storm: 'blizzard' }[weatherKind] ?? weatherKind;
+}
 function setWeather(kind, fade = 0) {
   weatherKind = kind;
+  weatherPicker?.set({ weather: kind });
   rainMode = isWet(kind);
   applyWeather(fade);
   applyDaylight();
@@ -724,12 +751,27 @@ function setWeather(kind, fade = 0) {
 function setRain(value, fade = 0) {
   setWeather(value ? (weatherKind === 'storm' ? 'storm' : 'rain') : 'clear', fade);
 }
+// (The weather panel opens from the top panel's weather button.)
+queueMicrotask(() => {
+  weatherPicker = setupWeatherPicker(document.body, {
+    season,
+    weather: weatherKind,
+    auto: $('#weather-cycle').checked,
+    onSeason: (chosen) => chooseSeason(chosen),
+    onWeather(kind) {
+      weather.set(kind);
+      setWeather(kind, rainEase);
+    },
+    onAuto(on) {
+      $('#weather-cycle').checked = on;
+    },
+  });
+});
 const dayBar = setupDayBar($('#day-bar'), {
   setTime: setTimeOfDay,
-  nextWeather() {
-    const kind = nextWeather(weatherKind);
-    weather.set(kind);
-    setWeather(kind, rainEase);
+  openWeather(button) {
+    lookPicker.close();
+    weatherPicker.toggle(button);
   },
   toggleRunning() {
     timeRunning = !timeRunning;
@@ -741,7 +783,10 @@ const dayBar = setupDayBar($('#day-bar'), {
   restart: () => restart(),
   toggleSound: () => vehicleAudio.toggle(),
   nextCamera: () => setCameraView(nextCameraView(cameraView)),
-  openLook: (button) => lookPicker.toggle(button),
+  openLook(button) {
+    weatherPicker.close();
+    lookPicker.toggle(button);
+  },
   nextGraphics() {
     const level = nextGraphics(graphics);
     chooseGraphics(level);
@@ -1028,6 +1073,8 @@ new GLTFLoader().load(
       // The car is placed on the land as a whole: its parts are not lifted
       // (set before the programs are compiled).
       keepUnlifted(rig.root);
+      // Snow lies on everything standing on the land in winter, not the car.
+      snowOnScene(scene, [rig.root]);
       shadeCarFromSun(rig.root);
       await renderer.compileAsync(scene, camera);
       for (const o of later) o.visible = false;
@@ -1057,6 +1104,13 @@ new GLTFLoader().load(
       // ?time=17.5 sets the time of day (hours).
       if (query.has('time') && Number.isFinite(Number(query.get('time'))))
         setTimeOfDay(Number(query.get('time')));
+      // ?season=winter (or summer) for a picture, at once and not kept.
+      if (['winter', 'summer'].includes(query.get('season'))) {
+        season = query.get('season');
+        winterLevel = seasonUniforms.winterCover.value = season === 'winter' ? 1 : 0;
+        if (grassBlades) grassBlades.mesh.visible = grassWanted && winterLevel < 0.5;
+        applyDaylight();
+      }
       // ?weather=fog (or rain, storm) sets in that weather at once.
       if (['rain', 'storm', 'fog'].includes(query.get('weather'))) {
         weather.set(query.get('weather'));
@@ -1194,7 +1248,17 @@ renderer.setAnimationLoop((time) => {
   if (!document.hidden) stepWeather(dt);
   // Lightning lights the sky and the scene for a moment; its thunder comes
   // after.
-  const flash = lightning.update(dt, camera, stormLevel, cameraShelter);
+  // The season eases in or out; snow falls instead of rain in winter, driven
+  // by the wind in a blizzard, and there is no lightning.
+  const previousWinter = winterLevel;
+  winterLevel = stepSeason(dt, season === 'winter');
+  if (winterLevel !== previousWinter) {
+    if (grassBlades) grassBlades.mesh.visible = grassWanted && winterLevel < 0.5;
+    if (!(timeRunning && !document.hidden)) applyDaylight();
+  }
+  document.body.dataset.winter = winterLevel.toFixed(2);
+  rain.setSnow(winterLevel, winterLevel * stormLevel * 7);
+  const flash = lightning.update(dt, camera, stormLevel * (1 - winterLevel), cameraShelter);
   const flashChanged = flash !== lightningFlash;
   lightningFlash = flash;
   document.body.dataset.lightning = String(lightning.strikes);
@@ -1247,7 +1311,9 @@ renderer.setAnimationLoop((time) => {
         : Infinity;
       // (In fog it keeps to about 70 km/h.)
       input.cruiseSpeed = Math.min(
-        autopilotSpeed * (1 - 0.22 * fogLevel),
+        autopilotSpeed *
+          (1 - 0.22 * fogLevel) *
+          (1 - (1 - winterDriving.autopilotSpeed) * winterLevel),
         follow,
         curveSpeed(sim.x, keptLane, { lateral: rainMode ? 2.5 : 3.5 }),
         bumpSpeed(sim.x)
@@ -1258,7 +1324,10 @@ renderer.setAnimationLoop((time) => {
       delete input.cruiseSpeed;
     }
     document.body.dataset.autopilot = String(autopilot);
-    sim.step(dt, input, driving, { raining: rainMode });
+    // Snow and ice: less grip all round.
+    sim.gripScale = 1 - (1 - winterDriving.grip) * winterLevel;
+    traffic.speedScale = 1 - (1 - winterDriving.trafficSpeed) * winterLevel;
+    sim.step(dt, input, driving, { raining: wetWeather() });
     if (driving) {
       const lat = roadLateral(sim.x, sim.z);
       traffic.step(
@@ -1456,7 +1525,7 @@ renderer.setAnimationLoop((time) => {
     skidMarks.update(dt, sim, {
       enabled: driving,
       braking: pedals.brake,
-      raining: rainMode,
+      raining: wetWeather(),
     });
     const lights = brakeLights.update(dt, pedals.brake, nightMode);
     // Tail lamps light the road behind at dusk and night, more when braking.
@@ -1473,14 +1542,15 @@ renderer.setAnimationLoop((time) => {
     cockpitCluster.update(dt, sim, nightMode, inCabin);
     centreDisplay.update(dt, sim, {
       hours: timeOfDay,
-      weather: weatherKind,
+      weather: shownWeather(),
+      winter: winterLevel > 0.5,
       night: nightMode,
       visible: inCabin,
     });
     brakes.update(dt, {
       energy: sim.brakeEnergy - previousBrakeEnergy,
       speed: driving ? sim.speed : 0,
-      raining: rainMode,
+      raining: wetWeather(),
     });
     document.body.dataset.brakeTemperatures = brakes.heat.discs
       .map((d) => d.surface.toFixed(1))
@@ -1493,16 +1563,19 @@ renderer.setAnimationLoop((time) => {
       surfaces: sim.wheels.map((w) => w.surface),
       speed: sim.speed,
       wetness: sim.tyres.wetness,
-      raining: rainMode,
+      raining: wetWeather(),
       running: driving,
     });
     document.body.dataset.bodyDust = dirt.dust.toFixed(3);
     document.body.dataset.bodyMud = dirt.mud.toFixed(3);
     document.body.dataset.bodyWetness = bodyWater
       .update(dt, {
-        raining: rainMode,
+        // Snow settles on the car as rain does, and the wipers clear it.
+        raining: rainMode && cameraShelter < 0.5,
         speed: driving ? sim.speed : 0,
         cabin: cameraView === 'driver',
+        snow: winterLevel,
+        light: Math.min(1.1, 0.25 + 0.5 * light.ambient + 0.12 * light.direct),
       })
       .toFixed(4);
     const exhaustParticles = exhaust.update(dt, sim, {
@@ -1554,7 +1627,7 @@ renderer.setAnimationLoop((time) => {
   minimap.update(dt, sim, traffic.vehicles);
   vehicleAudio.update(dt, sim, {
     driving,
-    raining: rainLevel * (1 - cameraShelter),
+    raining: rainLevel * (1 - cameraShelter) * (1 - winterLevel),
     accelerate: Boolean(sim?.reversing ? input.brake : input.accelerate),
     brake: Boolean(sim?.reversing ? input.accelerate : input.brake),
     distance: cameraView !== 'chase' ? 4 : rig ? camera.position.distanceTo(rig.root.position) : 8,
@@ -1595,6 +1668,8 @@ renderer.setAnimationLoop((time) => {
     playerCover: cameraShelter,
     sun: sunDirection,
     sunlight,
+    x: sim?.x ?? 0,
+    dt,
   });
   document.body.dataset.traffic = String(traffic.vehicles.length);
   speedCameras.update(sim?.x ?? 0, dt, sunDirection, sunlight);
@@ -1602,6 +1677,6 @@ renderer.setAnimationLoop((time) => {
   busStops.update(sim?.x ?? 0, sunDirection, sunlight);
   const evening = Math.min(1, Math.max(0, (light.darkness - 0.25) / 0.5));
   fuelStation.update(sim?.x ?? 0, evening, sunDirection, sunlight);
-  village.update(sim?.x ?? 0, evening, sunDirection, sunlight);
+  village.update(sim?.x ?? 0, evening, sunDirection, sunlight, winterLevel);
   renderer.render(scene, camera);
 });
