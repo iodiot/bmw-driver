@@ -1676,6 +1676,7 @@ renderer.setAnimationLoop((time) => {
         cabin: cameraView === 'driver',
         snow: winterLevel,
         light: Math.min(1.1, 0.25 + 0.5 * light.ambient + 0.12 * light.direct),
+        night: light.darkness,
       })
       .toFixed(4);
     const frost = bodyWater.frost.update(dt, {

@@ -36,6 +36,9 @@ const waterFunctions = `
   // by snowLight (the light falling on the car).
   uniform float bodySnow;
   uniform float snowLight;
+  // How dark the night is (0 by day): the glass still gives back the sky's
+  // faint glow, and the beads on it glint.
+  uniform float nightGlow;
   // Frost on the glass on a winter's morning: the windscreen's (cleared by
   // the defroster from the bottom up) and the other windows'.
   uniform float screenFrost;
@@ -184,6 +187,7 @@ export function setupBodyWater(rig) {
     bodyWetness: { value: 0 },
     bodySnow: { value: 0 },
     snowLight: { value: 1 },
+    nightGlow: { value: 0 },
     screenFrost: { value: 0 },
     glassFrost: { value: 0 },
     edgeIce: { value: 0 },
@@ -310,6 +314,12 @@ export function setupBodyWater(rig) {
           float flakes = surfaceWater.y * bodySnow;
           outgoingLight = mix(outgoingLight, vec3(.88, .91, .95) * snowLight, flakes * .9);
           diffuseColor.a = mix(diffuseColor.a, 1., flakes * .85);
+          // At night: the sky's faint glow on the glass, more at a glancing
+          // angle, so the wipers and the beads read against it; the beads'
+          // rims catch it.
+          float glance = pow(1. - abs(dot(normalize(vViewPosition), normal)), 3.);
+          outgoingLight += vec3(.045, .055, .075) * nightGlow * (.4 + .6 * glance);
+          outgoingLight += vec3(.13, .14, .17) * nightGlow * waterRim * (1. - bodySnow);
           // Frost: a white, crystalline film, all but opaque.
           vec2 frost = glassFrostAt(vWaterPosition) * vec2(1., vWaterWindow);
           outgoingLight = mix(outgoingLight, vec3(.88, .92, .97) * snowLight * frost.x, frost.y * .95);
@@ -413,8 +423,10 @@ export function setupBodyWater(rig) {
     // `cabin`: seen from the driver's seat (the beads show on the inside).
     // `snow` (0–1): it falls as snow; `light`: how bright the light on the
     // car is, for the flakes.
-    update(dt, { raining, speed, cabin = false, snow = 0, light = 1 }) {
+    // `night`: how dark it is (0–1).
+    update(dt, { raining, speed, cabin = false, snow = 0, light = 1, night = 0 }) {
       uniforms.bodySnow.value = snow;
+      uniforms.nightGlow.value = night;
       uniforms.snowLight.value = light;
       inside.value = cabin ? 1 : 0;
       rig.body.updateWorldMatrix(true, false);
