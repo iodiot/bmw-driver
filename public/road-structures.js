@@ -234,6 +234,56 @@ function concreteTexture() {
     g.fillRect(0, 0, w, h);
   });
 }
+// Rough stone cladding for the portals and their wing walls: courses of
+// grey-brown blocks of uneven length in dark mortar (4 m to the tile).
+function stoneTexture() {
+  return canvasTexture(512, 512, (g, w, h) => {
+    let seed = 11;
+    const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    g.fillStyle = '#5e5951';
+    g.fillRect(0, 0, w, h);
+    const rows = [0];
+    while (rows.at(-1) < h) rows.push(rows.at(-1) + 38 + Math.round(random() * 26));
+    rows[rows.length - 1] = h;
+    for (let r = 0; r < rows.length - 1; r++) {
+      const top = rows[r],
+        bottom = rows[r + 1];
+      let x = -Math.round(random() * 60);
+      while (x < w) {
+        const width = 64 + Math.round(random() * 76);
+        const tone = 104 + random() * 38,
+          warm = 4 + random() * 12;
+        const fill = `rgb(${tone + warm},${tone + warm * 0.6},${tone - 6})`;
+        // Wrap round the tile's edge so it repeats without a seam.
+        for (const dx of [0, w]) {
+          g.fillStyle = fill;
+          g.beginPath();
+          g.roundRect(x + 3 - dx, top + 3, width - 6, bottom - top - 6, 7);
+          g.fill();
+        }
+        // A little light on each block's upper face, shade below.
+        const face = g.createLinearGradient(0, top, 0, bottom);
+        face.addColorStop(0, 'rgba(255,255,255,0.05)');
+        face.addColorStop(0.6, 'rgba(0,0,0,0)');
+        face.addColorStop(1, 'rgba(0,0,0,0.12)');
+        g.fillStyle = face;
+        for (const dx of [0, w]) g.fillRect(x + 3 - dx, top + 3, width - 6, bottom - top - 6);
+        x += width;
+      }
+    }
+    for (let i = 0; i < 5000; i++) {
+      const v = 90 + random() * 120;
+      g.fillStyle = `rgba(${v},${v - 4},${v - 10},0.18)`;
+      g.fillRect(random() * w, random() * h, 1 + random() * 2, 1 + random() * 2);
+    }
+    // Rain streaks down from the coping.
+    const stain = g.createLinearGradient(0, 0, 0, h);
+    stain.addColorStop(0, 'rgba(40,38,34,0.22)');
+    stain.addColorStop(0.25, 'rgba(40,38,34,0)');
+    g.fillStyle = stain;
+    g.fillRect(0, 0, w, h);
+  });
+}
 // Light ceramic tiles on the tunnel's lower walls, dark paint above.
 function tunnelWallTexture() {
   return canvasTexture(256, 256, (g, w, h) => {
@@ -725,7 +775,7 @@ function hillHeight(x, lat, from, to, inside = x >= from && x <= to) {
   const { hill, halfWidth } = structureLayout.tunnel;
   // Just under the portal's top at each portal, rising to the hill's full
   // height over the tunnel and falling away into the fields outside.
-  const shoulder = portalTop - 0.6;
+  const shoulder = portalCrest(lat) - 0.2;
   const rise = inside ? smooth(from, from + 90, x) * (1 - smooth(to - 90, to, x)) : 0;
   const along = inside
     ? shoulder + (hill - shoulder) * rise
@@ -755,7 +805,51 @@ function hillHeight(x, lat, from, to, inside = x >= from && x <= to) {
 // The wing walls beside each portal hold the cutting's slopes: from the
 // portal's top down to the verge over `wingLength` metres.
 function wingWallTop(before) {
-  return 0.5 + (portalTop - 0.9) * (1 - smooth(0, wingLength, before));
+  return 0.5 + (wingStart - 0.5) * (1 - smooth(0, wingLength, before));
+}
+// A concrete coping along the top of each wing wall, standing a little
+// proud of its face.
+function wingCopings(x, facing) {
+  const positions = [],
+    steps = 24;
+  const point = new THREE.Vector3();
+  const at = (before, lat, y) => onRoad(x + before, lat, y, point).toArray();
+  for (const side of [-1, 1])
+    for (let i = 0; i < steps; i++) {
+      const b0 = (i / steps) * wingLength,
+        b1 = ((i + 1) / steps) * wingLength;
+      const t0 = wingWallTop(b0),
+        t1 = wingWallTop(b1);
+      const front = side * (portalHalfWidth - 0.2),
+        back = side * (portalHalfWidth + 0.35);
+      // Top, then the face toward the road.
+      const quads = [
+        [
+          at(facing * b0, front, t0 + 0.14),
+          at(facing * b1, front, t1 + 0.14),
+          at(facing * b0, back, t0 + 0.14),
+          at(facing * b1, back, t1 + 0.14),
+        ],
+        [
+          at(facing * b0, front, t0 - 0.16),
+          at(facing * b1, front, t1 - 0.16),
+          at(facing * b0, front, t0 + 0.14),
+          at(facing * b1, front, t1 + 0.14),
+        ],
+      ];
+      for (const [a, b, c, d] of quads) positions.push(...a, ...b, ...c, ...b, ...d, ...c);
+    }
+  return metresGeometry(positions, x);
+}
+function metresGeometry(positions, x) {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  const uv = [];
+  for (let i = 0; i < positions.length; i += 3)
+    uv.push((positions[i] - x + positions[i + 2]) / 4, positions[i + 1] / 4);
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geometry.computeVertexNormals();
+  return geometry;
 }
 function wingWalls(x, facing) {
   const positions = [],
@@ -848,39 +942,115 @@ function hillGeometry(from, to) {
   return geometry;
 }
 
-// A portal: a concrete frame round the tunnel's mouth at x along the road,
-// standing out from the hill toward the traffic (facing −1 at the entry).
+// A portal at x along the road, facing the traffic (−1 at the entry): a
+// stone-clad headwall whose top curves over the tunnel's mouth, an arched
+// concrete hood standing out round the mouth, and a coping along the
+// headwall's crest. The hill's grass comes down to the crest.
 const portalHalfWidth = 12,
-  portalTop = structureLayout.tunnel.crown + 2.6;
-function portalGeometry(x, facing) {
-  const shape = new THREE.Shape();
-  shape.moveTo(-portalHalfWidth, -0.4);
-  shape.lineTo(portalHalfWidth, -0.4);
-  shape.lineTo(portalHalfWidth, portalTop);
-  shape.lineTo(-portalHalfWidth, portalTop);
-  shape.closePath();
-  shape.holes.push(
-    new THREE.Path(tunnelProfile().map(([lat, y]) => new THREE.Vector2(lat, Math.max(y, -0.4))))
-  );
-  const geometry = new THREE.ExtrudeGeometry(shape, {
-    depth: 1.4,
-    bevelEnabled: false,
-    curveSegments: 8,
-  });
-  const p = geometry.attributes.position,
-    uv = geometry.attributes.uv;
+  // The headwall's top: low at its ends, where the wing walls carry on, and
+  // highest over the crown.
+  wingStart = structureLayout.tunnel.wall + 2.8,
+  crestTop = structureLayout.tunnel.crown + 2.3,
+  headwallDepth = 1;
+function portalCrest(lat) {
+  const t = Math.min(1, Math.abs(lat) / portalHalfWidth);
+  return wingStart + (crestTop - wingStart) * Math.pow(1 - Math.pow(t, 2.4), 1 / 2.4);
+}
+// Extruded in the portal's frame (lateral, height, depth toward the
+// traffic), then laid onto the road at x.
+function layPortal(geometry, x, facing, offset = 0) {
+  const p = geometry.attributes.position;
   const point = new THREE.Vector3();
+  const uv = new Float32Array(p.count * 2);
   for (let i = 0; i < p.count; i++) {
     const lat = p.getX(i),
       y = p.getY(i),
-      depth = p.getZ(i);
+      depth = p.getZ(i) + offset;
     onRoad(x + facing * depth, lat, y, point);
     p.setXYZ(i, point.x, point.y, point.z);
-    uv.setXY(i, (lat + depth) / 4, y / 4);
+    uv[i * 2] = (lat + depth) / 4;
+    uv[i * 2 + 1] = y / 4;
   }
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
   return geometry;
+}
+const mouth = () =>
+  new THREE.Path(tunnelProfile().map(([lat, y]) => new THREE.Vector2(lat, Math.max(y, -0.4))));
+function headwallGeometry(x, facing) {
+  const shape = new THREE.Shape();
+  shape.moveTo(-portalHalfWidth, -0.4);
+  shape.lineTo(portalHalfWidth, -0.4);
+  for (let i = 0; i <= 32; i++) {
+    const lat = portalHalfWidth * (1 - (2 * i) / 32);
+    shape.lineTo(lat, portalCrest(lat));
+  }
+  shape.closePath();
+  shape.holes.push(mouth());
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: headwallDepth,
+    bevelEnabled: false,
+    curveSegments: 8,
+  });
+  return layPortal(geometry, x, facing);
+}
+// The hood: a ring a metre thick round the mouth, its edges rounded, in
+// front of the headwall.
+function hoodGeometry(x, facing) {
+  const { halfWidth, wall, crown } = structureLayout.tunnel;
+  const thick = 1.05,
+    segments = 24;
+  const shape = new THREE.Shape();
+  shape.moveTo(halfWidth + thick, -0.4);
+  shape.lineTo(halfWidth + thick, wall);
+  for (let i = 1; i < segments; i++) {
+    const a = (i / segments) * Math.PI;
+    shape.lineTo(Math.cos(a) * (halfWidth + thick), wall + Math.sin(a) * (crown - wall + thick));
+  }
+  shape.lineTo(-halfWidth - thick, wall);
+  shape.lineTo(-halfWidth - thick, -0.4);
+  shape.holes.push(mouth());
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.9,
+    bevelEnabled: true,
+    bevelThickness: 0.14,
+    bevelSize: 0.14,
+    bevelSegments: 3,
+    curveSegments: 8,
+  });
+  return layPortal(geometry, x, facing, headwallDepth);
+}
+// The coping along the headwall's crest: overhanging its face a little.
+function crestCopingGeometry(x, facing) {
+  const positions = [],
+    steps = 40;
+  const point = new THREE.Vector3();
+  const at = (depth, lat, y) => onRoad(x + facing * depth, lat, y, point).toArray();
+  for (let i = 0; i < steps; i++) {
+    const l0 = -portalHalfWidth + (2 * portalHalfWidth * i) / steps,
+      l1 = -portalHalfWidth + (2 * portalHalfWidth * (i + 1)) / steps;
+    const y0 = portalCrest(l0),
+      y1 = portalCrest(l1);
+    const front = headwallDepth + 0.2,
+      back = -0.35;
+    const quads = [
+      [
+        at(front, l0, y0 + 0.14),
+        at(front, l1, y1 + 0.14),
+        at(back, l0, y0 + 0.14),
+        at(back, l1, y1 + 0.14),
+      ],
+      [
+        at(front, l0, y0 - 0.16),
+        at(front, l1, y1 - 0.16),
+        at(front, l0, y0 + 0.14),
+        at(front, l1, y1 + 0.14),
+      ],
+    ];
+    for (const [a, b, c, d] of quads) positions.push(...a, ...b, ...c, ...b, ...d, ...c);
+  }
+  return metresGeometry(positions, x);
 }
 
 // A sign on two posts, its face toward the traffic (−x in its frame).
@@ -1047,7 +1217,19 @@ export function setupRoadStructures(scene) {
   portals.name = 'Tunnel portals';
   portals.material = materials.concrete.clone();
   portals.material.side = THREE.DoubleSide;
-  group.add(lining, lamps, hill, portals);
+  const stoneMap = stoneTexture();
+  stoneMap.wrapS = stoneMap.wrapT = THREE.RepeatWrapping;
+  const cladding = new THREE.Mesh(
+    new THREE.BufferGeometry(),
+    new THREE.MeshStandardMaterial({
+      name: 'Portal stone',
+      map: stoneMap,
+      roughness: 0.95,
+      side: THREE.DoubleSide,
+    })
+  );
+  cladding.name = 'Tunnel portal cladding';
+  group.add(lining, lamps, hill, portals, cladding);
   let tunnelAt = NaN;
   function placeTunnel(start) {
     const { from, to } = structureLayout.tunnel;
@@ -1058,21 +1240,26 @@ export function setupRoadStructures(scene) {
     hill.geometry.dispose();
     hill.geometry = hillGeometry(a, b);
     portals.geometry.dispose();
-    const entry = portalGeometry(a, -1),
-      exit = portalGeometry(b, 1);
-    const wingsIn = wingWalls(a, -1),
-      wingsOut = wingWalls(b, 1);
-    portals.geometry = merged([
-      { geometry: entry },
-      { geometry: exit },
-      { geometry: wingsIn },
-      { geometry: wingsOut },
-    ]);
-    wingsIn.dispose();
-    wingsOut.dispose();
+    const stone = [
+      headwallGeometry(a, -1),
+      headwallGeometry(b, 1),
+      wingWalls(a, -1),
+      wingWalls(b, 1),
+    ];
+    const trim = [
+      hoodGeometry(a, -1),
+      hoodGeometry(b, 1),
+      crestCopingGeometry(a, -1),
+      crestCopingGeometry(b, 1),
+      wingCopings(a, -1),
+      wingCopings(b, 1),
+    ];
+    cladding.geometry.dispose();
+    cladding.geometry = merged(stone.map((geometry) => ({ geometry })));
+    cladding.geometry.computeBoundingSphere();
+    portals.geometry = merged(trim.map((geometry) => ({ geometry })));
     portals.geometry.computeBoundingSphere();
-    entry.dispose();
-    exit.dispose();
+    for (const g of [...stone, ...trim]) g.dispose();
     const matrix = new THREE.Matrix4(),
       q = new THREE.Quaternion(),
       p = new THREE.Vector3(),
