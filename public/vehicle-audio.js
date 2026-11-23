@@ -62,11 +62,21 @@ export const surfaceAudio = Object.freeze({
   grass: Object.freeze({ roll: 0.08, rollFreq: 120, crunch: 0.03, swish: 0.17, squeal: 0 }),
 });
 
+// Snow under the tyres in winter (gains at full speed): packed snow
+// squeaking and crunching, thickest off the asphalt; on the motorway the
+// tyres hiss through slush instead.
+export const snowAudio = Object.freeze({ asphalt: 0.03, gravel: 0.3, dirt: 0.3, grass: 0.32 });
+
 // Synthesised layers from the motion: the road under the tyres (by the
 // share of wheels on each surface; wheels in the air add nothing), spray off
 // a wet road, cornering squeal on asphalt, and metal scraping along a rail.
 // In the driver's seat (`inside` 0–1) the outside world is muffled and
 // quieter, and the engine is heard through the bulkhead.
+// Gusts (0.25–1): two slow swells of unrelated periods.
+export function windGusts(t) {
+  return clamp(0.62 + 0.25 * Math.sin(t * 0.43) + 0.18 * Math.sin(t * 1.27 + 1.9), 0.25, 1);
+}
+
 export function roadAudioMix({
   speed = 0,
   lateralVelocity = 0,
@@ -78,8 +88,10 @@ export function roadAudioMix({
   driving = true,
   distance = 8,
   inside = 0,
+  winter = 0,
 } = {}) {
   const v = driving ? Math.hypot(speed, lateralVelocity) : 0;
+  const cold = clamp(winter, 0, 1);
   const perspective = clamp(Math.sqrt(8 / Math.max(4, distance)), 0.35, 1.25);
   const rolling = smooth(1, 30, v),
     loose = smooth(0.5, 18, v);
@@ -88,6 +100,7 @@ export function roadAudioMix({
     crunch = 0,
     swish = 0,
     squealable = 0,
+    snowy = 0,
     contact = 0;
   for (const [name, share] of Object.entries(surfaces)) {
     const s = surfaceAudio[name];
@@ -97,6 +110,7 @@ export function roadAudioMix({
     crunch += s.crunch * share * loose;
     swish += s.swish * share * loose;
     squealable += s.squeal * share;
+    snowy += (snowAudio[name] ?? 0) * share;
     contact += share;
   }
   rollFreq = contact > 0 ? rollFreq / contact : 150;
@@ -105,14 +119,23 @@ export function roadAudioMix({
     0,
     1
   );
-  const squeal = 0.24 * slide * smooth(6, 15, v) * squealable * (1 - 0.65 * Number(wet));
+  const squeal =
+    0.24 * slide * smooth(6, 15, v) * squealable * (1 - 0.65 * Number(wet)) * (1 - 0.6 * cold);
+  // Under snow the stones and the grass are muffled.
+  crunch *= 1 - 0.7 * cold;
+  swish *= 1 - cold;
+  // (A faint hiss: most of the motorway's lanes are clear and wet.)
+  const slush = cold * 0.025 * (surfaces.asphalt ?? 0) * smooth(8, 35, v);
   return {
     roll: roll * perspective,
     rollFreq: rollFreq + v * 2.5,
     crunch: crunch * perspective,
     crunchRate: 0.55 + clamp(v / 30, 0, 1),
     swish: swish * perspective,
-    spray: Number(wet) * (0.08 + 0.12 * squealable) * smooth(3, 30, v) * contact * perspective,
+    spray:
+      (Number(wet) * (0.08 + 0.12 * squealable) * smooth(3, 30, v) * contact + slush) * perspective,
+    snow: Math.min(0.5, cold * snowy * loose) * perspective,
+    snowRate: 0.7 + clamp(v / 25, 0, 1) * 0.5,
     squeal: squeal * perspective,
     squealRate: 0.85 + 0.25 * slide - 0.1 * Number(wet),
     scrape: driving ? 0.42 * smooth(0.2, 10, scrape) * perspective : 0,
@@ -216,7 +239,8 @@ export function obstacleAt(x, lateral, list = obstacles) {
 export function setupVehicleAudio({ sound, volume, status }) {
   let context, master, engineBus, engineFilter, cabin, outside, noiseBuffer, loading;
   let ready = false,
-    elapsed = 0;
+    elapsed = 0,
+    windTime = 0;
   const sources = new Map(),
     gains = new Map(),
     filters = new Map(),
@@ -312,6 +336,14 @@ export function setupVehicleAudio({ sound, volume, status }) {
     layer('crunch', crunchBuffer, [['highpass', 700, 0.5]]);
     layer('swish', noiseBuffer, [['bandpass', 3200, 0.9]]);
     layer('spray', noiseBuffer, [['highpass', 2600, 0.5]]);
+    // Packed snow: the crackle, pitched down and narrowed to a squeak.
+    layer('snow', crunchBuffer, [
+      ['bandpass', 1900, 0.8],
+      ['highpass', 500, 0.5],
+    ]);
+    // Wind: a low roar and a howl whose pitch rises with the gusts.
+    layer('wind', noiseBuffer, [['lowpass', 420, 0.5]]);
+    layer('howl', noiseBuffer, [['bandpass', 700, 5]]);
     // Metal on metal: two narrow resonances over the noise.
     layer('scrape', noiseBuffer, [
       ['bandpass', 1700, 7],
@@ -625,7 +657,13 @@ export function setupVehicleAudio({ sound, volume, status }) {
       sound.checked = !sound.checked;
       sound.dispatchEvent(new Event('change'));
     },
-    update(dt, simulation, { driving, raining, accelerate, brake, distance, inside = 0 }) {
+    // `winter` (0–1): snow on the ground; `wind` (0–1): how hard it blows.
+    update(
+      dt,
+      simulation,
+      { driving, raining, accelerate, brake, distance, inside = 0, winter = 0, wind = 0 }
+    ) {
+      windTime += dt;
       // Knocks are caught every frame; the mix itself updates 30 times a second.
       if (simulation && driving) {
         const c = Math.cos(simulation.heading),
@@ -680,7 +718,9 @@ export function setupVehicleAudio({ sound, volume, status }) {
         driving,
         distance,
         inside,
+        winter,
       });
+      const gusts = windGusts(windTime);
       const audible = sound.checked && !document.hidden;
       const tyres = Math.max(mix.tyres, road.squeal);
       const data = document.body.dataset;
@@ -689,7 +729,7 @@ export function setupVehicleAudio({ sound, volume, status }) {
       data.audioRpm = String(Math.round(mix.rpm));
       data.audioRainGain = (audible ? mix.rain : 0).toFixed(3);
       data.audioTyresGain = (audible ? tyres : 0).toFixed(3);
-      data.audioRoad = [road.roll, road.crunch, road.swish, road.spray, road.scrape]
+      data.audioRoad = [road.roll, road.crunch, road.swish, road.spray, road.scrape, road.snow]
         .map((v) => (audible ? v : 0).toFixed(3))
         .join(',');
       const bump = bumpPeak,
@@ -727,6 +767,11 @@ export function setupVehicleAudio({ sound, volume, status }) {
       level('crunch', road.crunch);
       level('swish', road.swish);
       level('spray', road.spray);
+      level('snow', road.snow);
+      level('wind', 0.3 * wind * gusts);
+      level('howl', 0.11 * wind * gusts * gusts);
+      pitch('snow', road.snowRate, 0.1);
+      tune('howl', 520 + 520 * gusts);
       gains.get('scrape').gain.setTargetAtTime(road.scrape, now, 0.03);
       pitch('engine-idle', mix.idleRate);
       pitch('engine-low', mix.lowRate);

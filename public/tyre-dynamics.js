@@ -39,7 +39,10 @@ export class TyreDynamics {
     const mu = (1.12 - 0.52 * this.wetness) * (state.surfaceGrip ?? 1);
     const speed = state.speed;
     const dynamic = smooth(2, 6, speed);
-    const throttle = input.accelerate && !input.brake;
+    const throttle = input.accelerate && !input.brake && !input.handbrake;
+    // The handbrake locks the rear wheels: they slide, braking the car and
+    // giving up nearly all their side grip, so the tail swings out.
+    const handbrake = input.handbrake && speed > 0.5 ? 1 : 0;
     const weight = this.mass * 9.81;
     const rearFraction = clamp(
       this.front / this.wheelbase + (requestedAcceleration * 0.55) / (9.81 * this.wheelbase),
@@ -68,9 +71,14 @@ export class TyreDynamics {
     // kick the tail out (power oversteer), as on the real rear-drive car.
     const spin =
       state.dscOff && throttle ? Math.min(requestedAcceleration * this.mass, mu * rearNormal) : 0;
-    const rearLongitudinal = input.brake
-      ? longitudinal * rearFraction
-      : Math.max(0, longitudinal, spin);
+    const rearLongitudinal = handbrake
+      ? mu * rearNormal
+      : input.brake
+        ? longitudinal * rearFraction
+        : Math.max(0, longitudinal, spin);
+    if (handbrake)
+      this.acceleration =
+        Math.min(this.acceleration, 0) - mu * 9.81 * rearFraction * 0.8 * smooth(0.5, 3, speed);
     let frontSupport = 0,
       rearSupport = 0,
       frontCount = 0,
@@ -124,7 +132,8 @@ export class TyreDynamics {
     // not trimmed in a slide: the car can be held in a drift.
     // (Past about 35° it still catches a slide that is turning into a spin,
     // as a driver's instinct would, so a drift stays a drift.)
-    const dsc = state.dscOff ? 0 : 1;
+    // (It barely holds back a handbrake turn.)
+    const dsc = state.dscOff ? 0 : 1 - 0.85 * handbrake;
     const slipCorrection = 150000 - this.wetness * (input.brake ? 95000 : 115000);
     const support = clamp((frontSupport + rearSupport) / (frontCount + rearCount), 0, 1);
     const correction =
@@ -134,7 +143,7 @@ export class TyreDynamics {
         18000
       ) *
       support *
-      (state.dscOff ? 2.2 * smooth(0.6, 1.1, Math.abs(beta)) : 1);
+      (state.dscOff ? 2.2 * smooth(0.6, 1.1, Math.abs(beta)) : 1 - 0.85 * handbrake);
     const lateralAcceleration = (frontForce * Math.cos(state.steer) + rearForce) / this.mass;
     this.lateralVelocity += (lateralAcceleration - speed * this.yawRate) * dt * dynamic;
     this.yawRate +=

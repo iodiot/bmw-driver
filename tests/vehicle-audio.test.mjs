@@ -8,6 +8,7 @@ import {
   noiseSamples,
   obstacleAt,
   roadAudioMix,
+  windGusts,
   vehicleAudioMix,
 } from '../public/vehicle-audio.js';
 
@@ -132,4 +133,19 @@ test('Synthesised loops are deterministic, bounded, and crunch clicks never cros
   assert.ok(Math.abs(peak - 0.9) < 1e-6);
   assert.ok(clicks > 200, 'Hundreds of stones per second');
   assert.ok(Math.abs(crunch[0]) < 0.05 && Math.abs(crunch.at(-1)) < 0.05);
+});
+
+test('winter: snow crunches off the asphalt, slush hisses on it, grass is muffled', () => {
+  const field = roadAudioMix({ speed: 15, surfaces: { grass: 1 }, winter: 1 });
+  const summerField = roadAudioMix({ speed: 15, surfaces: { grass: 1 } });
+  assert.ok(field.snow > 0.2 && summerField.snow === 0);
+  assert.equal(field.swish, 0);
+  const motorway = roadAudioMix({ speed: 25, surfaces: { asphalt: 1 }, winter: 1 });
+  const dry = roadAudioMix({ speed: 25, surfaces: { asphalt: 1 } });
+  assert.ok(motorway.spray > dry.spray && motorway.snow < field.snow);
+  // Gusts swell and ease but never drop out.
+  for (let t = 0; t < 60; t += 0.5) {
+    const g = windGusts(t);
+    assert.ok(g >= 0.25 && g <= 1);
+  }
 });

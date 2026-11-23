@@ -34,6 +34,7 @@ import { setupBusStops } from './bus-stops.js';
 import { FuelTank, atPump, fuelPrice, setupFuelStation } from './fuel-station.js';
 import { setupVillage } from './village.js';
 import { setupFoxes } from './foxes.js';
+import { collideWithSolids } from './obstacles.js';
 import { DriftScore, driftRules } from './drift.js';
 import { seasonUniforms, snowOnScene, stepSeason, winterDriving } from './season.js';
 import { setupToasts } from './toasts.js';
@@ -884,6 +885,9 @@ const actions = {
   KeyS: 'brake',
   KeyA: 'left',
   KeyD: 'right',
+  // Shift: the handbrake, held.
+  ShiftLeft: 'handbrake',
+  ShiftRight: 'handbrake',
 };
 // Doors (O), bonnet (B) and boot (K): only while the car stands (or is
 // paused).
@@ -1319,6 +1323,7 @@ renderer.setAnimationLoop((time) => {
     input.brake = Boolean(keyInput.brake || touch.brake || pad?.brake);
     input.left = Boolean(keyInput.left);
     input.right = Boolean(keyInput.right);
+    input.handbrake = Boolean(keyInput.handbrake);
     input.steerAxis = touch.steer || pad?.steer || 0;
     if (touch.accelerate || touch.brake || pad?.accelerate || pad?.brake || input.steerAxis)
       autopilot = false;
@@ -1360,7 +1365,11 @@ renderer.setAnimationLoop((time) => {
         dt,
         Math.abs(lat) < 7.6 && !sim.reversing ? { x: sim.x, lat, speed: sim.speed } : null
       );
-      const hit = collideWithTraffic(sim, traffic);
+      // Traffic, and the buildings, fences and poles by the country road.
+      const solid = collideWithSolids(sim);
+      const trafficHit = collideWithTraffic(sim, traffic);
+      const hit =
+        solid && (!trafficHit || solid.strength > trafficHit.strength) ? solid : trafficHit;
       if (hit && (!sim.railContact || hit.strength > sim.railContact.strength))
         sim.railContact = hit;
       // Drift points while driving by hand.
@@ -1519,7 +1528,9 @@ renderer.setAnimationLoop((time) => {
           speed =
             (sim.forwardSpeed + sim.yawRate * w.z) * Math.cos(a) +
             (sim.lateralVelocity + sim.yawRate * w.x) * Math.sin(a);
-        w.spin.rotation.z = (w.spin.rotation.z - (speed / w.r) * dt) % (2 * Math.PI);
+        // (The handbrake holds the rear wheels still.)
+        if (!(input.handbrake && w.x < 0))
+          w.spin.rotation.z = (w.spin.rotation.z - (speed / w.r) * dt) % (2 * Math.PI);
       }
       peaks.compression = Math.max(peaks.compression, state.compression);
       peaks.extension = Math.max(peaks.extension, -state.compression);
@@ -1668,6 +1679,9 @@ renderer.setAnimationLoop((time) => {
   vehicleAudio.update(dt, sim, {
     driving,
     raining: rainLevel * (1 - cameraShelter) * (1 - winterLevel),
+    winter: winterLevel,
+    // A blizzard howls; a summer storm's wind is gentler. None in the tunnel.
+    wind: stormLevel * (0.35 + 0.65 * winterLevel) * (1 - cameraShelter),
     accelerate: Boolean(sim?.reversing ? input.brake : input.accelerate),
     brake: Boolean(sim?.reversing ? input.accelerate : input.brake),
     distance: cameraView !== 'chase' ? 4 : rig ? camera.position.distanceTo(rig.root.position) : 8,
@@ -1717,7 +1731,7 @@ renderer.setAnimationLoop((time) => {
   busStops.update(sim?.x ?? 0, sunDirection, sunlight);
   const evening = Math.min(1, Math.max(0, (light.darkness - 0.25) / 0.5));
   fuelStation.update(sim?.x ?? 0, evening, sunDirection, sunlight);
-  village.update(sim?.x ?? 0, evening, sunDirection, sunlight, winterLevel);
+  village.update(sim?.x ?? 0, evening, sunDirection, sunlight, winterLevel, dt);
   foxes.update(driving ? dt : 0, sim?.x ?? 0, sim?.z ?? 0, winterLevel);
   renderer.render(scene, camera);
 });

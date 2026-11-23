@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { branchOffset, roadBranch, roadCenterSlope, roadCenterZ } from './road-profile.js';
 import { nearestOccurrence } from './road-structures.js';
-import { Kit } from './build-kit.js';
+import { Kit, canvasTexture } from './build-kit.js';
 import { groupShadow } from './sun-shadows.js';
 
 // A village along the country road's far side, past the fuel station and
@@ -33,6 +33,9 @@ export function yardKits(index) {
   const trim = pick(random, [0x2f6db5, 0x2f6db5, 0x4f8a5a, 0xe9e7e2]);
   const fenceColour = pick(random, [0x4d78b0, 0x6f9a55, 0x8a6b4a, 0xd9d4c7]);
   const fence = 4.5;
+  // What the car runs into, in the yard's frame: [x, z, half length, half
+  // depth] boxes.
+  const colliders = [];
   // The picket fence along the track, a gate in it.
   const gate = (random() - 0.5) * 10;
   for (let x = -plot / 2 + 0.2; x < plot / 2 - 0.2; x += 0.24) {
@@ -79,6 +82,19 @@ export function yardKits(index) {
   } else kit.gable(w, d, rise, hx, h, hz, roof, 0.5);
   // The chimney.
   kit.box(0.6, 1.6, 0.6, hx + w * 0.22, h + 0.6, hz + d * 0.15, 0xb24c3a);
+  const chimney = [hx + w * 0.22, h + 2.25, hz + d * 0.15];
+  // In every other yard a street lamp by the gate: a concrete pole with an
+  // arm reaching over the track and a lamp that glows warm at night.
+  let lamp = null;
+  if (index % 2 === 0) {
+    const lx = gate + (gate > 0 ? -4.2 : 4.2),
+      lz = 1.3;
+    kit.cylinder(0.09, 6.4, lx, 0, lz, 0x9a9a94, 8);
+    kit.box(0.08, 0.08, 2.2, lx, 6.1, lz - 1.05, 0x6f706c);
+    windows.box(0.3, 0.12, 0.5, lx, 5.98, lz - 2.05, 0xfff1d6);
+    lamp = [lx, -1.8];
+    colliders.push([lx, lz, 0.12, 0.12]);
+  }
   // Windows toward the track, framed and shuttered.
   const count = w > 10.5 ? 4 : 3;
   for (let i = 0; i < count; i++) {
@@ -135,6 +151,12 @@ export function yardKits(index) {
   // A plank shed behind, with a lean-to roof.
   const sx = hx + (random() - 0.5) * 10,
     sz = hz + d / 2 + 4 + random() * 3;
+  colliders.push([hx, hz, (w + 0.2) / 2, (d + 0.2) / 2], [sx, sz, 2.25, 1.6]);
+  // The fence either side of the gate.
+  colliders.push(
+    [(gate - 1.6 - plot / 2) / 2, fence, (gate - 1.6 + plot / 2) / 2, 0.1],
+    [(gate + 1.6 + plot / 2) / 2, fence, (plot / 2 - gate - 1.6) / 2, 0.1]
+  );
   kit.box(4.5, 2.3, 3.2, sx, 0, sz, 0x7a5a3c);
   const shedRoof = new THREE.BoxGeometry(5, 0.1, 3.8);
   shedRoof.rotateX(-0.18);
@@ -143,6 +165,7 @@ export function yardKits(index) {
   if (random() < 0.45) {
     const wx = hx - end * (w / 2 + 3),
       wz = fence + 3.2;
+    colliders.push([wx, wz, 0.55, 0.55]);
     kit.box(1.1, 0.8, 1.1, wx, 0, wz, 0x7d7368);
     kit.box(0.15, 3.4, 0.15, wx + 1.2, 0, wz, 0x5a4634);
     const sweep = new THREE.BoxGeometry(6.5, 0.1, 0.1);
@@ -153,6 +176,7 @@ export function yardKits(index) {
   if (index === 3) {
     const px = hx + end * -(w / 2 + 5),
       pz = fence + 1.2;
+    colliders.push([px, pz, 0.15, 0.15]);
     kit.cylinder(0.13, 7.5, px, 0, pz, 0x7d7368);
     kit.cylinder(0.75, 0.45, px, 7.5, pz, 0x6b5536, 12);
     const body = new THREE.SphereGeometry(0.28, 10, 8);
@@ -169,7 +193,17 @@ export function yardKits(index) {
     solid: kit.geometry(),
     glass: windows.geometry(),
     flowers: garden.parts.length ? garden.geometry() : null,
+    chimney,
+    lamp,
+    colliders,
   };
+}
+
+// Each yard's colliders (see yardKits), kept when the village is built.
+const colliderCache = [];
+export function yardColliders(index) {
+  colliderCache[index] ??= yardKits(index).colliders;
+  return colliderCache[index];
 }
 
 export function setupVillage(scene) {
@@ -181,8 +215,46 @@ export function setupVillage(scene) {
     emissive: 0xffc77a,
     emissiveIntensity: 0,
   });
+  // The street lamps' light on the track at night: a warm pool laid on it.
+  const poolMaterial = new THREE.MeshBasicMaterial({
+    map: canvasTexture(128, 128, (g, w) => {
+      const grd = g.createRadialGradient(w / 2, w / 2, 2, w / 2, w / 2, w / 2);
+      grd.addColorStop(0, 'rgba(255,226,170,1)');
+      grd.addColorStop(0.5, 'rgba(255,220,160,0.45)');
+      grd.addColorStop(1, 'rgba(255,220,160,0)');
+      g.fillStyle = grd;
+      g.fillRect(0, 0, w, w);
+    }),
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -4,
+    polygonOffsetUnits: -4,
+  });
+  const poolShape = new THREE.PlaneGeometry(11, 11);
+  poolShape.rotateX(-Math.PI / 2);
+  // Smoke from the chimneys in winter: a few soft puffs rising and drifting
+  // off, one small cloud of points per yard.
+  const puffs = 14,
+    puffLife = 7;
+  const smokeMaterial = new THREE.PointsMaterial({
+    map: canvasTexture(64, 64, (g, w) => {
+      const grd = g.createRadialGradient(w / 2, w / 2, 1, w / 2, w / 2, w / 2);
+      grd.addColorStop(0, 'rgba(255,255,255,0.9)');
+      grd.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = grd;
+      g.fillRect(0, 0, w, w);
+    }),
+    size: 2.6,
+    transparent: true,
+    depthWrite: false,
+    vertexColors: true,
+  });
   const yards = villageYards.map((u, i) => {
-    const { solid, glass: panes, flowers } = yardKits(i);
+    const { solid, glass: panes, flowers, chimney, lamp, colliders } = yardKits(i);
+    colliderCache[i] = colliders;
     const group = new THREE.Group();
     group.name = 'Village yard';
     const body = new THREE.Mesh(solid, material);
@@ -196,15 +268,52 @@ export function setupVillage(scene) {
       garden.userData.noShadow = true;
       group.add(garden);
     }
+    let pool = null;
+    if (lamp) {
+      pool = new THREE.Mesh(poolShape, poolMaterial);
+      pool.position.set(lamp[0], 0.05, lamp[1]);
+      pool.name = 'Village lamp pool';
+      pool.userData.noShadow = true;
+      group.add(pool);
+    }
+    const smokeGeometry = new THREE.BufferGeometry();
+    smokeGeometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(new Float32Array(puffs * 3), 3)
+    );
+    smokeGeometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(puffs * 4), 4));
+    const smoke = new THREE.Points(smokeGeometry, smokeMaterial);
+    smoke.name = 'Chimney smoke';
+    smoke.frustumCulled = false;
+    smoke.userData.noShadow = true;
+    smoke.visible = false;
+    group.add(smoke);
     scene.add(group);
-    return { u, group, garden, shadow: groupShadow(scene, group, 'Village yard shadow') };
+    return {
+      u,
+      group,
+      garden,
+      pool,
+      smoke,
+      chimney,
+      seed: i * 1.37,
+      shadow: groupShadow(scene, group, 'Village yard shadow'),
+    };
   });
+  let time = 0;
   return {
     yards,
     // Places the yards at their nearest occurrence to x; `night` (0–1)
     // lights the windows; `sun` and `strength` lay their shadows.
-    update(x, night = 0, sun = null, strength = 0, winter = 0) {
-      glass.emissiveIntensity = 0.8 * night;
+    // `dt` moves the chimney smoke (in winter).
+    update(x, night = 0, sun = null, strength = 0, winter = 0, dt = 0) {
+      // Windows light up earlier and warmer on a winter's evening.
+      const evening = winter >= 0.5 ? Math.min(1, night * 1.6) : night;
+      glass.emissiveIntensity = (0.8 + 0.5 * winter) * evening;
+      poolMaterial.opacity = 0.7 * night;
+      time += dt;
+      // Grey smoke by day, darker at night.
+      const shade = 0.82 - 0.55 * night;
       for (const yard of yards) if (yard.garden) yard.garden.visible = winter < 0.5;
       for (const yard of yards) {
         const u = nearestOccurrence(x, yard.u);
@@ -219,6 +328,27 @@ export function setupVillage(scene) {
         yard.group.position.set(u, 0, roadCenterZ(u) + edge);
         yard.group.rotation.y = -Math.atan(roadCenterSlope(u));
         yard.shadow.update(sun, strength);
+        if (yard.pool) yard.pool.visible = night > 0.02;
+        yard.smoke.visible = winter >= 0.5;
+        if (yard.smoke.visible) {
+          const position = yard.smoke.geometry.attributes.position,
+            colour = yard.smoke.geometry.attributes.color;
+          const [cx, cy, cz] = yard.chimney;
+          for (let k = 0; k < puffs; k++) {
+            // Each puff's age through its life, staggered.
+            const age = (time / puffLife + k / puffs + yard.seed) % 1;
+            const rise = age * puffLife * 0.55;
+            position.setXYZ(
+              k,
+              cx + rise * 0.7 + Math.sin(k * 2.1 + time * 0.5) * age * 0.6,
+              cy + rise,
+              cz + Math.cos(k * 1.7 + time * 0.4) * age * 0.6
+            );
+            const alpha = 0.7 * Math.sin(Math.PI * Math.min(1, age * 1.15)) * (1 - age);
+            colour.setXYZW(k, shade, shade, shade * 1.02, alpha);
+          }
+          position.needsUpdate = colour.needsUpdate = true;
+        }
       }
     },
   };

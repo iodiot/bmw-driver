@@ -220,10 +220,12 @@ export function setupBodyDirt(rig, paintMaterials) {
           // where the wheels throw it.
           float slushMask = bodySlush * clamp(1.1 * low + 1.5 * splash + .3 * tail, 0., 1.6);
           float film = clamp(slushMask, 0., 1.) * low * .5 * (.6 + .4 * coarse);
-          float snowEdge = .76 - .16 * clamp(slushMask, 0., 1.);
+          // Specks only low on the body and behind the wheels, few and soft.
+          float snowEdge = .82 - .08 * clamp(slushMask, 0., 1.);
           float clumps = max(
-            smoothstep(snowEdge, snowEdge + .05, grain) * clamp(slushMask * 1.2, 0., 1.),
-            smoothstep(.62, .75, slushMask * (.4 + .45 * coarse + .3 * fine)) * low);
+            smoothstep(snowEdge, snowEdge + .06, grain) * clamp(slushMask, 0., 1.) *
+              max(low, splash) * .7,
+            smoothstep(.68, .8, slushMask * (.4 + .45 * coarse + .3 * fine)) * low);
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.4, .39, .37), film);
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.78, .8, .83), clumps);
           roughnessFactor = mix(roughnessFactor, .85, max(film, clumps));
@@ -296,9 +298,10 @@ export function setupBodyDirt(rig, paintMaterials) {
           `#include <metalnessmap_fragment>
           if (bodySlush > .002) {
             float rim = length(vWheelPosition.xy) / wheelRadius;
-            float packed = bodySlush * smoothstep(.74, .92, rim) *
-              (.3 + .6 * dirtNoise(vWheelPosition * 14.) + .3 * dirtNoise(vWheelPosition * 45.));
-            float snowOn = smoothstep(.45, .65, packed);
+            // A few clumps in the tread, not a white ring round the tyre.
+            float packed = bodySlush * smoothstep(.82, .96, rim) *
+              dirtNoise(vWheelPosition * vec3(9., 9., 4.));
+            float snowOn = smoothstep(.42, .6, packed) * .85;
             diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.8, .82, .86), snowOn);
             roughnessFactor = mix(roughnessFactor, .9, snowOn);
             metalnessFactor = mix(metalnessFactor, 0., snowOn);

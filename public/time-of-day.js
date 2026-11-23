@@ -91,8 +91,9 @@ export function daylight(hours, raining = false, { fog = 0, storm = 0, winter = 
       mix(mix(1, 1.05, wet), mix(0.3, 0.25, wet), dim) *
       mix(1, 1.15, misty) *
       mix(1, 0.5, gloom) *
-      // Snow throws the light back up into the shade.
-      mix(1, 1.12, snowy),
+      // Snow throws the light back up into the shade, and at night the
+      // snow-covered land stays pale under the sky's glow.
+      mix(1, 1.12 + 0.7 * dim, snowy),
     ambientColour: mixColour(
       mixColour(
         mixColour([0.86, 0.93, 1], [1, 0.8, 0.68], sunset * 0.5),

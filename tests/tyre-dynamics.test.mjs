@@ -146,3 +146,23 @@ test('Weather grip blends gradually; airborne tyres cannot create cornering or D
   tyres.step(1 / 240, sim, {}, false, 0);
   assert.ok(tyres.wetness < wetness && tyres.wetness > wetness * 0.99);
 });
+
+test('the handbrake swings the tail out in a turn and slows the car', () => {
+  const run = (handbrake) => {
+    const sim = simulation(16);
+    for (let i = 0; i < 60; i++) sim.step(1 / 60, {}, true, {});
+    let slip = 0;
+    for (let i = 0; i < 60; i++) {
+      sim.step(1 / 60, { left: true, handbrake }, true, {});
+      slip = Math.max(slip, Math.abs(sim.slipAngle));
+    }
+    return { slip, speed: sim.speed };
+  };
+  const plain = run(false),
+    pulled = run(true);
+  assert.ok(
+    pulled.slip > plain.slip * 2 && pulled.slip > 0.12,
+    `slip ${plain.slip} → ${pulled.slip}`
+  );
+  assert.ok(pulled.speed < plain.speed - 3, `speed ${plain.speed} → ${pulled.speed}`);
+});
