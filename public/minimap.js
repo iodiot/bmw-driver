@@ -9,6 +9,7 @@ import {
   guardrailsEnabled,
 } from './road-profile.js';
 import { railLines } from './roadside.js';
+import { structureLayout, nearestOccurrence } from './road-structures.js';
 
 // Road-ahead schematic in the top left corner, like a navigation display.
 // Up is the road's direction at the car; the road ahead is drawn with its
@@ -82,7 +83,8 @@ export function setupMinimap(container) {
       trail.length = 0;
       trailDistance = -Infinity;
     },
-    update(dt, simulation) {
+    // `vehicles`: the traffic (see traffic.js), drawn as small blocks.
+    update(dt, simulation, vehicles = []) {
       if (!simulation || container.offsetWidth === 0) return;
       if (simulation.distance - trailDistance > 3 || simulation.distance < trailDistance) {
         trailDistance = simulation.distance;
@@ -144,6 +146,57 @@ export function setupMinimap(container) {
           ctx.lineTo(bx, by);
           ctx.stroke();
         }
+      // Tunnels: the road under the hill as a dark roofed stretch, its
+      // portals marked.
+      const { tunnel, bridges, bridge, period } = structureLayout;
+      for (let base = nearestOccurrence(from, tunnel.from) - period; base < to; base += period) {
+        const a = Math.max(from, base),
+          b = Math.min(to, base + (tunnel.to - tunnel.from));
+        if (b <= a) continue;
+        const roof = (x) => (x >= a && x <= b ? 0 : null);
+        line(roof, (2 * tunnel.halfWidth + 3) / lateralMetresPerPixel, 'rgba(18,22,28,0.82)');
+        line(roof, (2 * roadEdge) / lateralMetresPerPixel, 'rgba(120,128,140,0.35)');
+        for (const x of [base, base + (tunnel.to - tunnel.from)]) {
+          if (x < from || x > to) continue;
+          const z = roadCenterZ(x);
+          const [ax, ay] = at(x, z - tunnel.halfWidth - 3),
+            [bx, by] = at(x, z + tunnel.halfWidth + 3);
+          ctx.beginPath();
+          ctx.moveTo(ax, ay);
+          ctx.lineTo(bx, by);
+          ctx.lineWidth = 2.5;
+          ctx.strokeStyle = 'rgba(200,190,170,0.95)';
+          ctx.stroke();
+        }
+      }
+      // Bridges: a deck across the road, from embankment to embankment.
+      for (const u of bridges)
+        for (let x = nearestOccurrence(from, u) - period; x < to; x += period) {
+          if (x < from || x > to) continue;
+          const z = roadCenterZ(x);
+          const [ax, ay] = at(x, z - bridge.halfSpan),
+            [bx, by] = at(x, z + bridge.halfSpan);
+          ctx.beginPath();
+          ctx.moveTo(ax, ay);
+          ctx.lineTo(bx, by);
+          ctx.lineCap = 'round';
+          ctx.lineWidth = 5;
+          ctx.strokeStyle = 'rgba(10,14,18,0.6)';
+          ctx.stroke();
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(226,230,234,0.95)';
+          ctx.stroke();
+          ctx.lineCap = 'butt';
+        }
+      // The traffic, each vehicle a small block in its lane.
+      for (const v of vehicles) {
+        if (v.x < from || v.x > to) continue;
+        const [vx, vy] = at(v.x, roadCenterZ(v.x) + v.lat);
+        const tall = Math.max(3, v.length / minimapView.forwardMetresPerPixel + 2),
+          wide = Math.max(2.5, v.width / lateralMetresPerPixel - 0.4);
+        ctx.fillStyle = v.lorry ? 'rgba(255,214,140,0.95)' : 'rgba(236,240,244,0.9)';
+        ctx.fillRect(vx - wide / 2, vy - tall / 2, wide, tall);
+      }
       // Recent path.
       if (trail.length > 1) {
         ctx.beginPath();

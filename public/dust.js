@@ -42,23 +42,44 @@ export function puffMaterial() {
       uniform float pixelScale;
       varying float vAlpha;
       varying vec3 vColor;
+      varying float vSeed;
       void main() {
         vec4 view = modelViewMatrix * vec4(position, 1.);
         gl_Position = projectionMatrix * view;
         gl_PointSize = size * pixelScale / max(-view.z, .1);
         vAlpha = alpha;
         vColor = color;
+        // Each puff its own shape and turn (its slot in the buffer).
+        vSeed = fract(float(gl_VertexID) * .618034);
       }
     `,
     fragmentShader: `
       uniform float light;
       varying float vAlpha;
       varying vec3 vColor;
+      varying float vSeed;
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+      }
+      float noise(vec2 p) {
+        vec2 i = floor(p), f = fract(p);
+        f = f * f * (3. - 2. * f);
+        return mix(mix(hash(i), hash(i + vec2(1., 0.)), f.x),
+                   mix(hash(i + vec2(0., 1.)), hash(i + vec2(1., 1.)), f.x), f.y);
+      }
       void main() {
-        float r = length(gl_PointCoord - .5) * 2.;
-        float a = vAlpha * (1. - smoothstep(.2, 1., r));
+        // A ragged, lumpy puff rather than a disc: noise at two scales,
+        // turned by the puff's seed, eats into its edge and thins it.
+        vec2 p = gl_PointCoord - .5;
+        float angle = vSeed * 6.2832;
+        vec2 q = mat2(cos(angle), -sin(angle), sin(angle), cos(angle)) * p;
+        float n = noise(q * 3.2 + vSeed * 37.) * .62 + noise(q * 7.5 - vSeed * 19.) * .38;
+        float r = length(p) * 2. + (n - .5) * .55;
+        float a = vAlpha * (1. - smoothstep(.15, 1., r)) * (.45 + .75 * n);
         if (a < .003) discard;
-        gl_FragColor = vec4(vColor * light, a);
+        // Lit from above: lighter at the top, greyer underneath.
+        float shade = mix(1.06, .72, gl_PointCoord.y) * (.9 + .2 * n);
+        gl_FragColor = vec4(vColor * light * shade, a);
         #include <colorspace_fragment>
       }
     `,

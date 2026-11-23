@@ -24,6 +24,8 @@ import { setupExhaust } from './exhaust.js';
 import { setupRain } from './rain.js';
 import { setupBodyWater } from './body-water.js';
 import { setupWipers } from './wipers.js';
+import { setupTraffic } from './traffic-view.js';
+import { collideWithTraffic } from './traffic.js';
 import { setupGrassBlades } from './grass-blades.js';
 import { setupBrakes } from './brakes.js';
 import { RenderQuality } from './render-quality.js';
@@ -94,7 +96,8 @@ const scene = new THREE.Scene();
 // multisampling (their dense screens hide the edges), a smaller shadow map
 // and less frequent mirrors, for a steady frame rate on their GPUs.
 const lowPower = matchMedia('(pointer: coarse)').matches;
-const renderer = new THREE.WebGLRenderer({ antialias: !lowPower });
+// A stencil buffer for the traffic's sun shadows (see traffic-view.js).
+const renderer = new THREE.WebGLRenderer({ antialias: !lowPower, stencil: true });
 renderer.setSize(innerWidth, innerHeight);
 const renderQuality = lowPower
   ? new RenderQuality(devicePixelRatio, 1_400_000, { minPixels: 900_000 })
@@ -146,6 +149,9 @@ const structures = setupRoadStructures(scene, road.fields);
 // Blades of grass round the camera (not on phones: a few hundred thousand
 // vertices every frame).
 const grassBlades = lowPower ? null : setupGrassBlades(scene, road.fields);
+// Cars, vans and lorries on the motorway (see traffic.js).
+const trafficView = setupTraffic(scene, { count: lowPower ? 10 : 16 }),
+  traffic = trafficView.traffic;
 const sparks = setupSparks(scene);
 const dust = setupDust(scene);
 const tyreSmoke = setupTyreSmoke(scene);
@@ -533,6 +539,7 @@ function restart(x = 0) {
   sim.x = x;
   sim.z = roadCenterZ(x);
   sim.heading = -Math.atan(roadCenterSlope(x));
+  trafficView.reset(x, 0);
   rig.wheels.forEach((w) => {
     w.spin.rotation.z = 0;
     w.mount.rotation.y = 0;
@@ -746,6 +753,7 @@ new GLTFLoader().load(
       if (query.has('time') && Number.isFinite(Number(query.get('time'))))
         setTimeOfDay(Number(query.get('time')));
       setDriving(query.get('paused') !== '1');
+      if (!traffic.vehicles.length) trafficView.reset(sim.x, roadLateral(sim.x, sim.z));
       // The loading screen fades once the scene has drawn in full.
       // (A hidden tab draws no frames: then on a timer.)
       const reveal = () => $('#status').classList.add('done');
@@ -787,6 +795,38 @@ controls.addEventListener('start', () => {
 });
 // The self-driving cruise speed: 90 km/h.
 const autopilotSpeed = 25;
+// The self-driving car in traffic: overtakes on the left when held up by
+// something slower, then moves back right when there is room, signalling
+// each change (a lane is a constant offset; lane keeping steers there).
+let autopilotPlan = 0;
+function autopilotTraffic(dt) {
+  const lat = roadLateral(sim.x, sim.z);
+  const settled = Math.abs(lat - keptLane) < 0.4;
+  if (settled && signals.side) signals.set(null);
+  autopilotPlan -= dt;
+  if (autopilotPlan > 0 || !settled) return;
+  autopilotPlan = 1;
+  const leader = traffic.leaderFor(sim.x, keptLane);
+  const left = keptLane - 3.6,
+    right = keptLane + 3.6;
+  if (
+    leader &&
+    leader.gap < 70 &&
+    leader.speed < autopilotSpeed - 1.5 &&
+    left >= -3.61 &&
+    traffic.laneClearFor(sim.x, sim.speed, left, 4.9, 1.9, 30)
+  ) {
+    keptLane = left;
+    signals.set('left');
+  } else if (
+    right <= 3.61 &&
+    (!leader || leader.gap > 90) &&
+    traffic.laneClearFor(sim.x, sim.speed, right, 4.9, 1.9, 90)
+  ) {
+    keptLane = right;
+    signals.set('right');
+  }
+}
 let cameraFollowHeading = 0,
   keptLane = null,
   autopilot = true;
@@ -865,10 +905,17 @@ renderer.setAnimationLoop((time) => {
     // manual with no assistance.
     if (autopilot && driving) {
       keptLane ??= nearestLane(roadLateral(sim.x, sim.z));
+      autopilotTraffic(dt);
       input.steerAngle = laneKeepingSteer(sim, keptLane);
-      // Cruise at motorway pace, easing off for the bends and speed bumps.
+      // Cruise at motorway pace, easing off for the bends and speed bumps,
+      // and keeping its distance behind slower traffic.
+      const leader = traffic.leaderFor(sim.x, roadLateral(sim.x, sim.z));
+      const follow = leader
+        ? Math.max(0, leader.speed + 0.35 * (leader.gap - (6 + 1.4 * leader.speed)))
+        : Infinity;
       input.cruiseSpeed = Math.min(
         autopilotSpeed,
+        follow,
         curveSpeed(sim.x, keptLane, { lateral: rainMode ? 2.5 : 3.5 }),
         bumpSpeed(sim.x)
       );
@@ -879,6 +926,16 @@ renderer.setAnimationLoop((time) => {
     }
     document.body.dataset.autopilot = String(autopilot);
     sim.step(dt, input, driving, { raining: rainMode });
+    if (driving) {
+      const lat = roadLateral(sim.x, sim.z);
+      traffic.step(
+        dt,
+        Math.abs(lat) < 7.6 && !sim.reversing ? { x: sim.x, lat, speed: sim.speed } : null
+      );
+      const hit = collideWithTraffic(sim, traffic);
+      if (hit && (!sim.railContact || hit.strength > sim.railContact.strength))
+        sim.railContact = hit;
+    }
     // In reverse the brake key drives backward and the accelerator brakes:
     // the pedals as the car feels them, for lamps, sound and smoke.
     const pedals = sim.reversing
@@ -937,6 +994,7 @@ renderer.setAnimationLoop((time) => {
         speed: sim.speed,
         raining: rainMode,
         enabled: highBeamAssistOn,
+        trafficDistance: traffic.distanceAhead(sim.x, roadLateral(sim.x, sim.z)),
       })
     );
     headlights.update(dt);
@@ -1092,7 +1150,7 @@ renderer.setAnimationLoop((time) => {
   }
   instruments.update(dt, sim, Boolean(headlights?.lit), driving);
   suspensionDisplay.update(dt, sim);
-  minimap.update(dt, sim);
+  minimap.update(dt, sim, traffic.vehicles);
   vehicleAudio.update(dt, sim, {
     driving,
     raining: rainLevel * (1 - cameraShelter),
@@ -1121,5 +1179,14 @@ renderer.setAnimationLoop((time) => {
     sunDirection.subVectors(sun.position, sun.target.position).normalize()
   );
   applyStructureLight();
+  trafficView.update({
+    night: lowBeamsOn ? 1 : 0,
+    playerCover: cameraShelter,
+    sun: sunDirection,
+    // Sun shadows by day, fainter in rain and gone once the sun is down.
+    sunlight:
+      (1 - light.darkness) * (1 - 0.7 * rainLevel) * Math.min(1, Math.max(0, sunDirection.y * 6)),
+  });
+  document.body.dataset.traffic = String(traffic.vehicles.length);
   renderer.render(scene, camera);
 });

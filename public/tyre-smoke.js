@@ -9,10 +9,11 @@ export const smokeSettings = Object.freeze({
   capacity: 520,
   // Puffs per second from one tyre at full slide.
   rate: 70,
-  // Axle slip angle (rad) where smoke starts, and where it is at its thickest.
-  slipFrom: 0.07,
-  slipFull: 0.2,
-  colour: Object.freeze([0.88, 0.88, 0.9]),
+  // Axle slip angle (rad) where smoke starts, and where it is at its
+  // thickest: a real slide or drift, not a brisk lane change.
+  slipFrom: 0.13,
+  slipFull: 0.32,
+  colour: Object.freeze([0.8, 0.81, 0.84]),
   // Half-size of the body in car space (x along, z across): puffs inside it
   // are hidden, so smoke never shows through the bodywork.
   body: Object.freeze({ along: 2.45, across: 0.93, height: 1.42 }),
@@ -28,7 +29,7 @@ export function smokeRate(wheel, { speed = 0, tractionLoss = 0, wet = false } = 
   if (!wheel?.contact || wheel.surface !== 'asphalt') return 0;
   const slide = smooth(smokeSettings.slipFrom, smokeSettings.slipFull, wheel.slip ?? 0);
   // Wheelspin: the driven rear tyres losing traction.
-  const spin = wheel.x < 0 ? smooth(0.25, 0.8, tractionLoss) : 0;
+  const spin = wheel.x < 0 ? smooth(0.4, 0.9, tractionLoss) : 0;
   const amount = Math.max(slide * smooth(4, 12, speed), spin * smooth(1, 4, speed));
   return smokeSettings.rate * amount * (wet ? 0.15 : 1);
 }
@@ -162,8 +163,11 @@ export function setupTyreSmoke(scene) {
         const gap = bodyGap(dx * c - dz * s, dx * s + dz * c, p.y);
         // Hidden inside the body, and kept small close to it, so no puff
         // reaches across the bodywork.
-        size[i] = Math.min(0.6 + 4.2 * Math.sqrt(t), 0.35 + 2.5 * Math.max(0, gap));
-        alpha[i] = 0.42 * Math.min(1, t * 6) * (1 - t) * (1 - t) * smooth(0, 0.25, gap);
+        size[i] = Math.min(0.5 + 4.6 * Math.sqrt(t), 0.35 + 2.5 * Math.max(0, gap));
+        // Rising as it spreads, so a puff's lower edge does not cut into the
+        // road; thin at first, thickest a moment later, fading slowly.
+        position[i * 3 + 1] = Math.max(p.y, size[i] * 0.32);
+        alpha[i] = 0.36 * Math.min(1, t * 4) * Math.pow(1 - t, 1.6) * smooth(0, 0.25, gap);
       }
       points.visible = active > 0;
       if (active > 0)
