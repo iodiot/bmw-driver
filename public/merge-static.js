@@ -48,6 +48,8 @@ export function mergeStaticMeshes(root, keep = []) {
     groups.get(key).push(o);
   });
   const matrix = new THREE.Matrix4();
+  const removed = new Set(),
+    added = [];
   for (const meshes of groups.values()) {
     if (meshes.length < 2) continue;
     const geometries = meshes.map((mesh) => {
@@ -68,9 +70,17 @@ export function mergeStaticMeshes(root, keep = []) {
     mesh.receiveShadow = first.receiveShadow;
     mesh.renderOrder = first.renderOrder;
     mesh.frustumCulled = first.frustumCulled;
-    for (const m of meshes) m.removeFromParent();
-    root.add(mesh);
+    for (const m of meshes) removed.add(m);
+    added.push(mesh);
   }
+  // A joined mesh's own children that stay apart (a headliner laid on a
+  // pillar's trim) move to the root, where they stand as before, rather than
+  // leaving with it.
+  for (const m of removed) {
+    for (const child of [...m.children]) if (!removed.has(child)) root.attach(child);
+    m.removeFromParent();
+  }
+  for (const mesh of added) root.add(mesh);
   let after = 0;
   root.traverse((o) => o.isMesh && after++);
   return { before, after };

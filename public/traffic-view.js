@@ -190,8 +190,9 @@ function car({ length: L, width: W }, profile) {
   if (profile.rails)
     for (const side of [-1, 1])
       parts.trim.push(
+        // (Within the roof, short of each end.)
         box(
-          rearTop[0] - screenTop[0] - 0.3,
+          screenTop[0] - rearTop[0] - 0.3,
           0.05,
           0.05,
           (rearTop[0] + screenTop[0]) / 2,

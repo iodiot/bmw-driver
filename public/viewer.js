@@ -28,6 +28,8 @@ import { setupTraffic } from './traffic-view.js';
 import { collideWithTraffic } from './traffic.js';
 import { RunTimer, describeRun } from './runs.js';
 import { setupSpeedCameras, camerasPassed, fineFor } from './speed-cameras.js';
+import { setupPowerLines } from './power-lines.js';
+import { setupBusStops } from './bus-stops.js';
 import { setupToasts } from './toasts.js';
 import { setupGrassBlades } from './grass-blades.js';
 import { setupBrakes } from './brakes.js';
@@ -162,6 +164,8 @@ const trafficView = setupTraffic(scene, { count: lowPower ? 10 : 16 }),
 const toasts = setupToasts(document.body),
   runTimer = new RunTimer(),
   speedCameras = setupSpeedCameras(scene);
+const powerLines = setupPowerLines(scene),
+  busStops = setupBusStops(scene);
 let finesToday = 0,
   lastCameraX = NaN;
 function cameraFlash() {
@@ -1254,6 +1258,7 @@ renderer.setAnimationLoop((time) => {
       .update(dt, {
         raining: rainMode,
         speed: driving ? sim.speed : 0,
+        cabin: cameraView === 'driver',
       })
       .toFixed(4);
     const exhaustParticles = exhaust.update(dt, sim, {
@@ -1330,20 +1335,23 @@ renderer.setAnimationLoop((time) => {
     sunDirection.subVectors(sun.position, sun.target.position).normalize()
   );
   applyStructureLight();
+  // Sun shadows by day, fainter in rain or fog and gone once the sun is
+  // down or under a storm's clouds.
+  const sunlight =
+    (1 - light.darkness) *
+    (1 - 0.7 * rainLevel) *
+    (1 - 0.8 * fogLevel) *
+    (1 - stormLevel) *
+    Math.min(1, Math.max(0, sunDirection.y * 6));
   trafficView.update({
     night: lowBeamsOn ? 1 : 0,
     playerCover: cameraShelter,
     sun: sunDirection,
-    // Sun shadows by day, fainter in rain or fog and gone once the sun is
-    // down or under a storm's clouds.
-    sunlight:
-      (1 - light.darkness) *
-      (1 - 0.7 * rainLevel) *
-      (1 - 0.8 * fogLevel) *
-      (1 - stormLevel) *
-      Math.min(1, Math.max(0, sunDirection.y * 6)),
+    sunlight,
   });
   document.body.dataset.traffic = String(traffic.vehicles.length);
-  speedCameras.update(sim?.x ?? 0, dt);
+  speedCameras.update(sim?.x ?? 0, dt, sunDirection, sunlight);
+  powerLines.update(sim?.x ?? 0, sunDirection, sunlight);
+  busStops.update(sim?.x ?? 0, sunDirection, sunlight);
   renderer.render(scene, camera);
 });

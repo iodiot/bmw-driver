@@ -60,3 +60,25 @@ test('Parts under a group marked to keep (the wipers) are never joined', () => {
   assert.equal(after, 3, 'the two trim parts became one; the arms stay');
   for (const arm of arms) assert.equal(arm.parent, wipers);
 });
+
+test('A joined mesh leaves its own unjoined children in place', async () => {
+  const THREE = await import('three');
+  const { mergeStaticMeshes } = await import('../public/merge-static.js');
+  const root = new THREE.Group();
+  const material = new THREE.MeshStandardMaterial(),
+    other = new THREE.MeshStandardMaterial();
+  const a = new THREE.Mesh(new THREE.BoxGeometry(), material),
+    b = new THREE.Mesh(new THREE.BoxGeometry(), material);
+  a.position.set(2, 0, 0);
+  const lining = new THREE.Mesh(new THREE.BoxGeometry(), other);
+  lining.name = 'Headliner';
+  lining.position.set(0, 1, 0);
+  a.add(lining);
+  root.add(a, b);
+  mergeStaticMeshes(root);
+  const kept = root.getObjectByName('Headliner');
+  assert.ok(kept, 'Still in the scene');
+  kept.updateMatrixWorld(true);
+  const p = new THREE.Vector3().setFromMatrixPosition(kept.matrixWorld);
+  assert.deepEqual(p.toArray(), [2, 1, 0], 'Where it stood');
+});

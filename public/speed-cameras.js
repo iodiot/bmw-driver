@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { roadCenterZ, roadCenterSlope } from './road-profile.js';
 import { structureLayout, nearestOccurrence } from './road-structures.js';
+import { groupShadow } from './sun-shadows.js';
 
 // Speed cameras on the right verge, as on Ukrainian motorways: one before
 // the tunnel's mouth, in its 100 km/h zone, and one on the open road at 120.
@@ -105,16 +106,24 @@ export function setupSpeedCameras(scene) {
       group.add(m);
     }
     scene.add(group);
-    return { camera, group, flash, glow: 0 };
+    return {
+      camera,
+      group,
+      flash,
+      glow: 0,
+      shadow: groupShadow(scene, group, 'Speed camera shadow'),
+    };
   });
   return {
     units,
-    // Places each at its nearest occurrence to x; dt fades a flash.
-    update(x, dt) {
+    // Places each at its nearest occurrence to x; dt fades a flash. `sun`
+    // and `strength` (0–1) lay their shadows.
+    update(x, dt, sun = null, strength = 0) {
       for (const unit of units) {
         const at = nearestOccurrence(x, unit.camera.at);
         unit.group.position.set(at, 0, roadCenterZ(at) + cameraLateral);
         unit.group.rotation.y = -Math.atan(roadCenterSlope(at));
+        unit.shadow.update(sun, strength);
         unit.glow = Math.max(0, unit.glow - dt * 6);
         const v = 0.25 + 8 * unit.glow;
         unit.flash.material.color.setRGB(v, v, v * 1.05);

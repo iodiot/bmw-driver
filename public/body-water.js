@@ -255,6 +255,63 @@ export function setupBodyWater(rig) {
     material.needsUpdate = true;
   }
 
+  // The same water seen from the cabin: the glass's inner faces drawn
+  // again with the beads alone, as they look from inside against the sky,
+  // each a little dark lens with a dark rim and the light of the sky
+  // gathered in its lower half. Shown only from the driver's seat.
+  const inside = { value: 0 };
+  const insideMaterial = new THREE.ShaderMaterial({
+    uniforms: { ...uniforms, waterGlass: { value: 1 }, insideView: inside },
+    side: THREE.BackSide,
+    transparent: true,
+    depthWrite: false,
+    vertexShader: `
+      attribute vec3 waterPosition;
+      attribute vec3 waterNormal;
+      attribute float waterWindscreen;
+      varying vec3 vWaterPosition;
+      varying vec3 vWaterNormal;
+      varying float vWaterWindow;
+      varying float vWaterWindscreen;
+      void main() {
+        vWaterPosition = waterPosition;
+        vWaterNormal = waterNormal;
+        vWaterWindscreen = waterWindscreen;
+        vWaterWindow = step(.30, waterPosition.y) * (1. - step(1.4, waterPosition.x));
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.);
+      }
+    `,
+    fragmentShader:
+      'uniform float insideView;\nvarying float vWaterWindow;\n' +
+      waterFunctions +
+      `
+      void main() {
+        if (insideView < .5) discard;
+        vec2 water = bodyWater(vWaterPosition, vWaterNormal) * vWaterWindow;
+        water *= remainingWindshieldWater(vWaterPosition);
+        float cover = water.y;
+        if (cover < .01) discard;
+        // Which way the bead's surface slopes on screen: the sky's light
+        // gathers where it rises upward (below its middle).
+        vec2 slope = vec2(dFdx(water.x), dFdy(water.x));
+        float steep = length(slope);
+        float lower = steep > 1e-9 ? slope.y / steep : 0.;
+        float lit = smoothstep(.1, .9, lower) * steep / (steep + .00004);
+        float rim = 1. - smoothstep(.00008, .0006, water.x);
+        vec3 colour = mix(vec3(.03, .035, .04), vec3(.82, .86, .9), lit);
+        float alpha = cover * (.16 + .42 * rim + .5 * lit);
+        gl_FragColor = vec4(colour, min(alpha, .8));
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+  for (const mesh of glassMeshes) {
+    const drops = new THREE.Mesh(mesh.geometry, insideMaterial);
+    drops.name = 'Glass water inside';
+    drops.renderOrder = 6;
+    mesh.add(drops);
+  }
+
   const inverseRotation = new THREE.Matrix4();
   const gravity = new THREE.Vector3();
   return {
@@ -264,12 +321,14 @@ export function setupBodyWater(rig) {
     setWipers({ texture, clock, origin, up, bounds }) {
       defaultWipeMap.dispose();
       uniforms.windshieldWipeMap.value = texture;
-      uniforms.wipeClock = clock;
+      uniforms.wipeClock = insideMaterial.uniforms.wipeClock = clock;
       uniforms.windshieldOrigin.value.copy(origin);
       uniforms.windshieldUp.value.copy(up);
       uniforms.windshieldBounds.value.copy(bounds);
     },
-    update(dt, { raining, speed }) {
+    // `cabin`: seen from the driver's seat (the beads show on the inside).
+    update(dt, { raining, speed, cabin = false }) {
+      inside.value = cabin ? 1 : 0;
       rig.body.updateWorldMatrix(true, false);
       inverseRotation.extractRotation(rig.body.matrixWorld).invert();
       gravity.set(0, -1, 0).transformDirection(inverseRotation);

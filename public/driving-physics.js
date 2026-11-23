@@ -18,7 +18,7 @@ export const suspensionSpecifications = Object.freeze({
 });
 // Reverse gear: up to 25 km/h, pulling away at about 3 m/s²; selected by
 // pressing the brake again at a standstill, or holding it this long.
-export const reverseGear = Object.freeze({ topSpeed: 25 / 3.6, acceleration: 3.2, engage: 1 });
+export const reverseGear = Object.freeze({ topSpeed: 25 / 3.6, acceleration: 3.2, engage: 0.25 });
 export const wheelLayout = [
   { name: 'Steering_Left', x: 1.482, z: 0.8135, r: 0.34675 },
   { name: 'Steering_Right', x: 1.482, z: -0.8135, r: 0.34675 },
@@ -207,9 +207,10 @@ export class DrivingSimulation {
     this.surfaceRolling = rolling / this.wheels.length;
     this.surfaceName = at ? at(this.x, this.z) : 'asphalt';
   }
-  // Reverse, selected as with the M DCT's lever: at a standstill, pressing
-  // the brake again selects R (or keeping it held for a second after
-  // stopping); the accelerator at a standstill selects D again.
+  // Reverse, as in a driving game: holding the brake brings the car to a
+  // stop and, a moment later, backs it up; the accelerator brakes it and
+  // then drives forward again. (A fresh press at a standstill switches at
+  // once.)
   selectDirection(dt, input) {
     const pedal = this.reversing
       ? input.accelerate && !input.brake

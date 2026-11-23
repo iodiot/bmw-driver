@@ -39,7 +39,7 @@ test('Pressing the brake again at a standstill selects reverse and backs the car
   assert.ok(sim.speed > 5 && sim.gearLabel.startsWith('D'));
 });
 
-test('Holding the brake after stopping selects reverse after a second; steering turns the other way', () => {
+test('Holding the brake after stopping selects reverse a moment later; steering turns the other way', () => {
   const sim = stopped();
   run(sim, reverseGear.engage + 0.05, { brake: true });
   assert.equal(sim.reversing, true);

@@ -44,8 +44,11 @@ test('Automatic DCT uses all seven gears, kicks down, and returns to D1 at a sto
   for (let i = 0; i < 30; i++) sim.step(1 / 60, { accelerate: true });
   assert.equal(sim.powertrain.gear, 4, 'Full throttle must kick down from D7');
   assert.ok(sim.powertrain.rpm > cruisingRpm);
-  for (let i = 0; i < 360; i++) sim.step(1 / 60, { brake: true });
+  // (Braking to the stop only: held on, it would back up.)
+  for (let i = 0; i < 360 && sim.speed > 0; i++) sim.step(1 / 60, { brake: true });
+  for (let i = 0; i < 60; i++) sim.step(1 / 60, {});
   assert.equal(sim.speed, 0);
+  assert.equal(sim.reversing, false);
   assert.equal(sim.powertrain.gear, 1);
   assert.equal(sim.powertrain.rpm, 800);
   for (let i = 0; i < 60; i++) sim.step(1 / 60, {});
