@@ -255,6 +255,28 @@ export const surfaces = Object.freeze({
   dirt: Object.freeze({ grip: 0.68, wetGrip: 0.36, rolling: 0.03, roughness: 0.018 }),
   grass: Object.freeze({ grip: 0.5, wetGrip: 0.3, rolling: 0.06, roughness: 0.028 }),
 });
+// The fuel station's forecourt beside the country road (see
+// fuel-station.js), paved: `at` into each section, `length` along the road,
+// from `from` to `from + depth` metres beyond the track's far edge.
+export const fuelStationPlace = Object.freeze({ at: 700, length: 56, from: 0.6, depth: 27 });
+// How far beyond the track's far edge a point is, on the forecourt's
+// stretch of road; null off it.
+export function forecourtDepth(x, lateral) {
+  const { at, length } = fuelStationPlace,
+    period = roadBranch.period;
+  const u = ((((((x - at) % period) + period) % period) + period / 2) % period) - period / 2;
+  if (Math.abs(u) > length / 2) return null;
+  const branch = branchOffset(x);
+  return branch === null ? null : lateral - branch - roadBranch.halfWidth;
+}
+function onForecourt(x, lateral) {
+  const d = forecourtDepth(x, lateral);
+  return (
+    d !== null &&
+    d > fuelStationPlace.from - 0.6 &&
+    d < fuelStationPlace.from + fuelStationPlace.depth
+  );
+}
 // The surface at a world point: the carriageway and its asphalt shoulders,
 // the country road's packed dirt, the gravel strips beside the motorway and
 // grass everywhere else.
@@ -263,6 +285,7 @@ export function surfaceAt(x, z) {
   if (Math.abs(lateral) < 6.15) return 'asphalt';
   const branch = branchOffset(x);
   if (branch !== null && Math.abs(lateral - branch) < roadBranch.halfWidth) return 'dirt';
+  if (onForecourt(x, lateral)) return 'asphalt';
   if (Math.abs(lateral) < 7.7) return 'gravel';
   return 'grass';
 }

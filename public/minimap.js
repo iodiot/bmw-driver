@@ -6,6 +6,8 @@ import {
   roadPeriod,
   obstacles,
   branchOffset,
+  fuelStationPlace,
+  roadBranch,
 } from './road-profile.js';
 import { structureLayout, nearestOccurrence } from './road-structures.js';
 import { elevationPeriod, roadElevation, roadGrade } from './terrain.js';
@@ -238,7 +240,31 @@ export function setupMinimap(container) {
         ctx.fillRect(0, py, w, Math.max(0.6, scale * 4));
       }
       // The country road: an unpaved track.
-      strip(branchOffset, 2.6, 'rgba(220,184,124,0.6)', 0.7);
+      // (A band of its own, in runs where it exists, so it is drawn evenly.)
+      let run = [];
+      const track = () => {
+        if (run.length > 1) {
+          ctx.beginPath();
+          run.forEach((x, i) => {
+            const [px, py] = P(x, drawnLateral(branchOffset(x) - 1.5));
+            if (i) ctx.lineTo(px, py);
+            else ctx.moveTo(px, py);
+          });
+          for (let i = run.length - 1; i >= 0; i--) {
+            const [px, py] = P(run[i], drawnLateral(branchOffset(run[i]) + 1.5));
+            ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          ctx.fillStyle = 'rgba(220,184,124,0.6)';
+          ctx.fill();
+        }
+        run = [];
+      };
+      for (const x of samples) {
+        if (branchOffset(x) === null) track();
+        else run.push(x);
+      }
+      track();
       // The motorway: a dark casing, the light see-through asphalt, its
       // edge lines and the lane dashes, fixed to the road so they run.
       band(-roadEdge - 1.4, roadEdge + 1.4, 'rgba(6,10,16,0.5)');
@@ -305,6 +331,23 @@ export function setupMinimap(container) {
           decks.push(x);
           across(x, roadEdge + 9, 10, 'rgba(236,240,244,0.92)', 'rgba(10,14,18,0.6)');
         }
+      // The fuel station beside the country road: a green pump sign.
+      const station = nearestOccurrence(simulation.x, fuelStationPlace.at);
+      for (const at of [station - roadBranch.period, station, station + roadBranch.period]) {
+        if (at < from || at > to) continue;
+        const branch = branchOffset(at);
+        if (branch === null) continue;
+        const [sx, sy, scale] = P(at, drawnLateral(branch + 16));
+        const r = Math.max(4, Math.min(8, scale * 6));
+        roundRect(sx - r, sy - r, 2 * r, 2 * r, r * 0.4);
+        ctx.fillStyle = 'rgba(22,132,71,0.95)';
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = font(700, r * 1.25);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('⛽', sx, sy + 0.5);
+      }
       // The traffic, each vehicle a block of its size in its lane.
       for (const v of vehicles) {
         if (v.x < from || v.x > to) continue;

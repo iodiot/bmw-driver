@@ -31,6 +31,8 @@ import { RunTimer, describeRun } from './runs.js';
 import { setupSpeedCameras, camerasPassed, fineFor } from './speed-cameras.js';
 import { setupPowerLines } from './power-lines.js';
 import { setupBusStops } from './bus-stops.js';
+import { FuelTank, atPump, fuelPrice, setupFuelStation } from './fuel-station.js';
+import { setupVillage } from './village.js';
 import { setupToasts } from './toasts.js';
 import { setupGrassBlades } from './grass-blades.js';
 import { setupBrakes } from './brakes.js';
@@ -233,7 +235,32 @@ const toasts = setupToasts(document.body),
   runTimer = new RunTimer(),
   speedCameras = setupSpeedCameras(scene);
 const powerLines = setupPowerLines(scene),
-  busStops = setupBusStops(scene);
+  busStops = setupBusStops(scene),
+  fuelStation = setupFuelStation(scene),
+  village = setupVillage(scene);
+// The car's tank: it empties as the car drives and fills at a pump, a
+// meter showing the litres and the cost running up meanwhile.
+let fuelTank = new FuelTank(),
+  fuelDistance = 0;
+const refuelMeter = document.createElement('div');
+refuelMeter.className = 'refuel-meter';
+refuelMeter.hidden = true;
+refuelMeter.setAttribute('aria-live', 'off');
+refuelMeter.innerHTML =
+  '<span class="pump">⛽</span><span><b class="litres">0.00</b> <small>L</small></span>' +
+  '<span><b class="cost">0.00</b> <small>₴</small></span><span class="bar"><i></i></span>';
+document.body.append(refuelMeter);
+const meterLitres = refuelMeter.querySelector('.litres'),
+  meterCost = refuelMeter.querySelector('.cost'),
+  meterBar = refuelMeter.querySelector('.bar i');
+function showRefuel() {
+  const filling = fuelTank.filling;
+  refuelMeter.hidden = !filling;
+  if (!filling) return;
+  meterLitres.textContent = filling.litres.toFixed(2);
+  meterCost.textContent = (filling.litres * fuelPrice).toFixed(2);
+  meterBar.style.width = `${((100 * fuelTank.litres) / fuelTank.capacity).toFixed(1)}%`;
+}
 let finesToday = 0,
   lastCameraX = NaN;
 function cameraFlash() {
@@ -736,6 +763,8 @@ $('#pause').onclick = () => setDriving(!driving);
 function restart(x = 0) {
   if (!sim) return;
   sim.reset();
+  fuelTank = new FuelTank();
+  fuelDistance = 0;
   cameraFollowHeading = 0;
   keptLane = null;
   autopilot = true;
@@ -1196,6 +1225,18 @@ renderer.setAnimationLoop((time) => {
       const hit = collideWithTraffic(sim, traffic);
       if (hit && (!sim.railContact || hit.strength > sim.railContact.strength))
         sim.railContact = hit;
+      // Fuel: burnt as the car goes, filled while it stands at a pump.
+      fuelTank.burn(sim.distance - fuelDistance);
+      const filled = fuelTank.step(dt, atPump(sim.x, sim.z, sim.speed));
+      if (filled)
+        toasts.show({
+          label: 'Fuel',
+          shown: `+${filled.litres.toFixed(1)} L`,
+          note: `${Math.round(filled.cost).toLocaleString('uk-UA')} ₴ · ${(filled.cost / filled.litres).toFixed(2)} ₴/L`,
+        });
+      document.body.dataset.fuel = fuelTank.litres.toFixed(2);
+      document.body.dataset.refuelling = String(Boolean(fuelTank.filling));
+      showRefuel();
       // Timed runs while you drive.
       const manual = !autopilot && !sim.reversing;
       for (const result of runTimer.update(dt, Math.max(0, sim.forwardSpeed ?? sim.speed), manual))
@@ -1438,7 +1479,8 @@ renderer.setAnimationLoop((time) => {
       });
     }
   }
-  instruments.update(dt, sim, Boolean(headlights?.lit), driving);
+  if (sim) fuelDistance = sim.distance;
+  instruments.update(dt, sim, Boolean(headlights?.lit), driving, fuelTank);
   suspensionDisplay.update(dt, sim);
   minimap.update(dt, sim, traffic.vehicles);
   vehicleAudio.update(dt, sim, {
@@ -1489,5 +1531,8 @@ renderer.setAnimationLoop((time) => {
   speedCameras.update(sim?.x ?? 0, dt, sunDirection, sunlight);
   powerLines.update(sim?.x ?? 0, sunDirection, sunlight);
   busStops.update(sim?.x ?? 0, sunDirection, sunlight);
+  const evening = Math.min(1, Math.max(0, (light.darkness - 0.25) / 0.5));
+  fuelStation.update(sim?.x ?? 0, evening, sunDirection, sunlight);
+  village.update(sim?.x ?? 0, evening, sunDirection, sunlight);
   renderer.render(scene, camera);
 });

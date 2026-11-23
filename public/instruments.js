@@ -237,7 +237,8 @@ export function setupInstruments(container) {
       dsc.setAttribute('visibility', 'hidden');
     },
     // `lowBeams`: the headlamps are lit (at dusk, at night and in the tunnel).
-    update(dt, simulation, lowBeams, driving = true) {
+    // `fuel`: the tank (see fuel-station.js), for the range.
+    update(dt, simulation, lowBeams, driving = true, fuel = null) {
       if (!simulation) return;
       motion.update(dt, simulation.speed, simulation.powertrain.rpm);
       warning.update(dt, driving && simulation.dscActive);
@@ -246,13 +247,13 @@ export function setupInstruments(container) {
       container.dataset.dscVisible = String(warning.visible);
       speedNeedle.style.transform = `rotate(${gaugeAngle(motion.speed, speedometerMaximum).toFixed(2)}deg)`;
       rpmNeedle.style.transform = `rotate(${gaugeAngle(motion.rpm, 8000).toFixed(2)}deg)`;
-      const fuel = fuelState(simulation.distance);
+      const range = fuel ? fuel.rangeKm : fuelState(simulation.distance).rangeKm;
       textTime -= dt;
       if (textTime <= 0) {
         textTime = 0.1;
         const gear = simulation.gearLabel ?? `D${simulation.powertrain.gear}`;
         gearText.textContent = gear;
-        rangeText.textContent = `${Math.round(fuel.rangeKm)} km`;
+        rangeText.textContent = `${Math.round(range)} km`;
         lowBeamLamp.setAttribute('visibility', lowBeams ? 'visible' : 'hidden');
         svg.setAttribute(
           'aria-label',

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import { roadBranch, roadCenterZ, roadCenterSlope } from './road-profile.js';
+import { fuelStationPlace, roadBranch, roadCenterZ, roadCenterSlope } from './road-profile.js';
 import { roadSeed, seededRandom } from './road-seed.js';
 
 // Structures along the motorway, repeating with the country road every
@@ -84,6 +84,18 @@ export const structureLayout = Object.freeze({
       distance: roadBranch.period + roadBranch.start - places.exitAt,
     }),
     Object.freeze({ at: roadBranch.start + 130, kind: 'gore' }),
+    // The fuel station on the country road: a blue service sign a kilometre
+    // before, and one where the country road leaves the motorway.
+    Object.freeze({
+      at: clearOfBridges(2650),
+      kind: 'fuel',
+      distance: roadBranch.period + fuelStationPlace.at - clearOfBridges(2650),
+    }),
+    Object.freeze({
+      at: roadBranch.start + 40,
+      kind: 'fuelTurn',
+      distance: fuelStationPlace.at - roadBranch.start - 40,
+    }),
   ]),
 });
 
@@ -338,6 +350,30 @@ function routeShield(g, x, y, label = 'E40') {
   g.fillText(label, x + 60, y + 31);
   g.textAlign = 'left';
 }
+// The fuel pump pictogram, black, centred at x, y.
+function fuelPump(g, x, y, scale) {
+  g.save();
+  g.translate(x, y);
+  g.scale(scale, scale);
+  g.fillStyle = '#111111';
+  g.fillRect(-48, -62, 64, 118);
+  g.fillStyle = '#ffffff';
+  g.fillRect(-38, -50, 44, 34);
+  g.fillStyle = '#111111';
+  g.fillRect(-60, 52, 88, 14);
+  // The hose and nozzle.
+  g.lineWidth = 9;
+  g.strokeStyle = '#111111';
+  g.beginPath();
+  g.moveTo(16, -30);
+  g.lineTo(42, -30);
+  g.lineTo(42, 30);
+  g.quadraticCurveTo(42, 44, 54, 44);
+  g.lineTo(54, -34);
+  g.lineTo(40, -50);
+  g.stroke();
+  g.restore();
+}
 function arrow(g, x, y, angle, length = 70, width = 16) {
   g.save();
   g.translate(x, y);
@@ -481,6 +517,49 @@ const signFaces = {
       g.fillText(`${distance} м`, w - 40, 370);
       g.textAlign = 'left';
       arrow(g, 740, 250, Math.PI / 4, 120, 18);
+    },
+  }),
+  // Fuel: the white pump on blue, and how far (with an arrow off to the
+  // right where the country road leaves).
+  fuel: ({ distance }) => ({
+    size: [1.5, 1.95],
+    canvas: [300, 390],
+    draw(g, w, h) {
+      roundedPanel(g, 4, 4, w - 8, h - 8, 18, informationBlue, '#ffffff', 7);
+      roundedPanel(g, 40, 34, w - 80, w - 80, 10, '#ffffff');
+      fuelPump(g, w / 2, 34 + (w - 80) / 2, 1);
+      g.fillStyle = '#ffffff';
+      g.textAlign = 'center';
+      g.textBaseline = 'alphabetic';
+      g.font = signFont(46);
+      g.fillText('АЗС', w / 2, 300);
+      g.font = signFont(52);
+      g.fillText(
+        distance >= 1000
+          ? `${(distance / 1000).toFixed(1).replace('.', ',')} км`
+          : `${Math.round(distance / 50) * 50} м`,
+        w / 2,
+        362
+      );
+      g.textAlign = 'left';
+    },
+  }),
+  fuelTurn: ({ distance }) => ({
+    size: [2.2, 1.4],
+    canvas: [440, 280],
+    draw(g, w, h) {
+      roundedPanel(g, 4, 4, w - 8, h - 8, 18, informationBlue, '#ffffff', 7);
+      roundedPanel(g, 26, 30, 150, 150, 10, '#ffffff');
+      fuelPump(g, 101, 105, 0.68);
+      g.fillStyle = '#ffffff';
+      g.textBaseline = 'alphabetic';
+      g.font = signFont(46);
+      g.fillText('АЗС', 30, 245);
+      g.font = signFont(44, 600);
+      g.textAlign = 'right';
+      g.fillText(`${Math.round(distance / 50) * 50} м`, w - 30, 245);
+      g.textAlign = 'left';
+      arrow(g, 320, 170, Math.PI / 4, 120, 18);
     },
   }),
   // At the start of the slip road.
