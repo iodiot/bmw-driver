@@ -237,6 +237,9 @@ export function obstacleAt(x, lateral, list = obstacles) {
 }
 
 export function setupVehicleAudio({ sound, volume, status }) {
+  // What goes to the speakers, for a recording to take too.
+  let output = null,
+    recording = null;
   let context, master, engineBus, engineFilter, cabin, outside, noiseBuffer, loading;
   let ready = false,
     elapsed = 0,
@@ -284,6 +287,7 @@ export function setupVehicleAudio({ sound, volume, status }) {
     limiter.attack.value = 0.003;
     limiter.release.value = 0.18;
     master.connect(limiter).connect(context.destination);
+    output = limiter;
     engineFilter = context.createBiquadFilter();
     engineFilter.type = 'lowpass';
     engineFilter.frequency.value = 1800;
@@ -519,6 +523,16 @@ export function setupVehicleAudio({ sound, volume, status }) {
     if (context) void context.close();
   });
   return {
+    // The car's sound as a stream (for a video), or null before it has
+    // started.
+    recordingStream() {
+      if (!context || !output) return null;
+      if (!recording) {
+        recording = context.createMediaStreamDestination();
+        output.connect(recording);
+      }
+      return recording.stream;
+    },
     // On, and the browser lets it play.
     get audible() {
       return sound.checked && running();

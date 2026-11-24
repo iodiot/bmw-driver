@@ -41,6 +41,7 @@ import { setupRouteCard } from './route-card.js';
 import { DriftScore, driftRules } from './drift.js';
 import { seasonUniforms, snowOnScene, stepSeason, winterDriving } from './season.js';
 import { setupToasts } from './toasts.js';
+import { setupClipRecorder, setupCaptureMenu, savePhoto } from './clip-recorder.js';
 import { setupGrassBlades } from './grass-blades.js';
 import { setupBrakes } from './brakes.js';
 import { RenderQuality } from './render-quality.js';
@@ -826,6 +827,7 @@ const dayBar = setupDayBar($('#day-bar'), {
   setTime: setTimeOfDay,
   openWeather(button) {
     lookPicker.close();
+    captureMenu.close();
     weatherPicker.toggle(button);
   },
   toggleRunning() {
@@ -838,8 +840,16 @@ const dayBar = setupDayBar($('#day-bar'), {
   restart: () => restart(),
   toggleSound: () => vehicleAudio.toggle(),
   nextCamera: () => setCameraView(nextCameraView(cameraView)),
+  openCapture(button) {
+    // While a video runs the button stops it (and saves it).
+    if (clipRecorder.recording) return clipRecorder.toggle();
+    weatherPicker.close();
+    lookPicker.close();
+    captureMenu.toggle(button);
+  },
   openLook(button) {
     weatherPicker.close();
+    captureMenu.close();
     lookPicker.toggle(button);
   },
   nextGraphics() {
@@ -847,6 +857,20 @@ const dayBar = setupDayBar($('#day-bar'), {
     chooseGraphics(level);
     toasts.show({ label: 'Graphics', shown: graphicsPresets[level].label }, 2);
   },
+});
+// Photos and ten-second videos of the drive, from the capture button's menu
+// (or P and V), saved where the browser saves downloads.
+let photoWanted = false;
+const clipRecorder = setupClipRecorder({
+  canvas: renderer.domElement,
+  sound: () => vehicleAudio.recordingStream(),
+  onChange: (state) => dayBar.setCapture(state),
+  onSaved: (name) => toasts.show({ label: 'Video', shown: 'saved', note: name }, 4),
+});
+const captureMenu = setupCaptureMenu(document.body, {
+  video: clipRecorder.available,
+  onPhoto: () => (photoWanted = true),
+  onVideo: () => clipRecorder.toggle(),
 });
 setCameraView(cameraView);
 dayBar.setGraphics(graphicsPresets[graphics].label);
@@ -1047,6 +1071,9 @@ addEventListener('keydown', (e) => {
     toggleOpening(openingKeys[e.code]);
     return;
   }
+  if (e.code === 'KeyP' && !e.repeat && !e.metaKey && !e.ctrlKey) photoWanted = true;
+  if (e.code === 'KeyV' && !e.repeat && !e.metaKey && !e.ctrlKey && clipRecorder.available)
+    clipRecorder.toggle();
   if (e.code === 'KeyM' && !e.repeat && !e.metaKey && !e.ctrlKey) {
     e.preventDefault();
     vehicleAudio.toggle();
@@ -1904,4 +1931,11 @@ renderer.setAnimationLoop((time) => {
   routeSignsView?.update(sim?.x ?? 0);
   if (sim) routeCard?.update(dt, sim.x);
   renderer.render(scene, camera);
+  // A photo is read now, while the frame's pixels are still there.
+  if (photoWanted) {
+    photoWanted = false;
+    savePhoto(renderer.domElement).then(
+      (name) => name && toasts.show({ label: 'Photo', shown: 'saved', note: name }, 3)
+    );
+  }
 });

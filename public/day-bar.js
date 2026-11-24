@@ -120,7 +120,10 @@ const icons = {
   restart: '<path d="M3.8 9a5.2 5.2 0 1 0 1.6-3.8M3.6 2.8v2.6h2.6"/>',
   sound:
     '<path d="M2.5 7h2.8l3.7-3.2v10.4L5.3 11H2.5z"/><path d="M11.6 6.4a3.6 3.6 0 0 1 0 5.2M13.9 4.2a6.7 6.7 0 0 1 0 9.6"/>',
-  camera: '<path d="M2.5 6.2h3l1.4-2h4.2l1.4 2h3v8.3h-13z"/><circle cx="9" cy="10.2" r="2.6"/>',
+  // The view (an eye), so it is not taken for the photo button.
+  camera:
+    '<path d="M1.6 9c2-3.6 4.6-5.3 7.4-5.3s5.4 1.7 7.4 5.3c-2 3.6-4.6 5.3-7.4 5.3S3.6 12.6 1.6 9z"/><circle cx="9" cy="9" r="2.5"/>',
+  capture: '<circle cx="9" cy="9" r="6.2"/><circle class="dot" cx="9" cy="9" r="2.8"/>',
   paint:
     '<path d="M9 2.3c2.7 3.3 4.4 5.7 4.4 7.9a4.4 4.4 0 0 1-8.8 0c0-2.2 1.7-4.6 4.4-7.9z"/><path d="M7 11.2a2 2 0 0 0 2 1.9"/>',
   muted:
@@ -141,7 +144,17 @@ const presetLabels = { day: 'Day (13:00)', sunset: 'Sunset (18:54)', night: 'Nig
 
 export function setupDayBar(
   container,
-  { setTime, openWeather, toggleRunning, restart, toggleSound, nextCamera, openLook, nextGraphics }
+  {
+    setTime,
+    openWeather,
+    toggleRunning,
+    restart,
+    toggleSound,
+    nextCamera,
+    openLook,
+    nextGraphics,
+    openCapture,
+  }
 ) {
   container.innerHTML = `
     <div class="day-graph" title="Time of day: click or drag to change">
@@ -174,6 +187,7 @@ export function setupDayBar(
       <button type="button" class="day-run" aria-label="Pause time" title="Pause time" aria-pressed="false">${icon('pause')}</button>
       <button type="button" class="day-paint" aria-label="Paint, wheels and graphics" title="Paint, wheels and graphics" aria-expanded="false">${icon('paint')}</button>
       <button type="button" class="day-camera" aria-label="Camera: Chase (C)" title="Camera: Chase (C)">${icon('camera')}</button>
+      <button type="button" class="day-capture" aria-label="Photo or video" title="Photo or video" aria-expanded="false">${icon('capture')}<b></b></button>
       <button type="button" class="day-sound" aria-label="Sound (M)" title="Sound (M)" aria-pressed="true">${icon('sound')}</button>
       <button type="button" class="day-restart" aria-label="Restart (R)" title="Restart (R)">${icon('restart')}</button>
     </div>`;
@@ -198,6 +212,8 @@ export function setupDayBar(
   container.querySelector('.day-restart').onclick = () => restart?.();
   soundButton.onclick = () => toggleSound?.();
   cameraButton.onclick = () => nextCamera?.();
+  const captureButton = container.querySelector('.day-capture');
+  captureButton.onclick = () => openCapture?.(captureButton);
   const paintButton = container.querySelector('.day-paint');
   paintButton.onclick = () => openLook?.(paintButton);
   fps.onclick = () => nextGraphics?.();
@@ -225,6 +241,15 @@ export function setupDayBar(
   let shown = '',
     soundShown = '';
   return {
+    // A video being recorded: the button turns red with the seconds left
+    // (a click then stops it and saves).
+    setCapture({ recording = false, left = 0 } = {}) {
+      captureButton.dataset.recording = String(recording);
+      captureButton.querySelector('b').textContent = recording ? String(left) : '';
+      captureButton.title = captureButton.ariaLabel = recording
+        ? `Recording · ${left} s left (click to stop)`
+        : 'Photo or video';
+    },
     // Frames per second, with a dot: green from 55, amber from 30, red below.
     setFps(value) {
       const shown = String(Math.round(value));
