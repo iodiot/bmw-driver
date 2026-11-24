@@ -51,4 +51,8 @@ test('the route has its own link; the main page keeps the endless road', async (
   assert.equal(routeFor('/bmw-driver/', ''), 'endless');
   assert.equal(routeFor('/bmw-driver/', '?route=m06'), 'm06');
   assert.equal(routeFor('/bmw-driver/kyiv/', '?route=endless'), 'endless');
+  assert.equal(routeFor('/bmw-driver/', '?kyiv'), 'm06');
+  assert.equal(routeFor('/bmw-driver/', '?kyiv&time=22'), 'm06');
+  assert.equal(routeFor('/bmw-driver/', '?time=22&kyiv='), 'm06');
+  assert.equal(routeFor('/bmw-driver/', '?kyiv&route=endless'), 'endless');
 });

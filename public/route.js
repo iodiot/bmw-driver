@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 
 // A real road to drive instead of the endless one: Zhytomyr to Kyiv on the
-// M-06 (see tools/route-m06). It has its own link, the site's /kyiv/
-// page (?route=m06 does the same anywhere, ?route=endless
-// the opposite), to send to friends; the endless road stays at the main one.
+// M-06 (see tools/route-m06). It has its own link, the site's ?kyiv (the
+// old /kyiv/ page sends there; ?route=m06 does the same, ?route=endless the
+// opposite), to send to friends; the endless road stays at the main one.
 //
 // x is the distance from the start, just past Zhytomyr's ramps. The road's
 // centre line (z) follows the real bends, unbent into the game's shape, and
@@ -13,8 +13,10 @@ export const routes = Object.freeze(['endless', 'm06']);
 export const routePath = 'kyiv';
 
 export function routeFor(pathname = '', search = '') {
-  const asked = new URLSearchParams(search).get('route');
+  const query = new URLSearchParams(search);
+  const asked = query.get('route');
   if (routes.includes(asked)) return asked;
+  if (query.has(routePath)) return 'm06';
   return pathname.replace(/\/+$/, '').endsWith(`/${routePath}`) ? 'm06' : 'endless';
 }
 const chosenRoute = () =>
@@ -87,6 +89,9 @@ async function loadRoute(name) {
 
 export const routeName = chosenRoute();
 export const route = routeName === 'endless' ? null : await loadRoute(routeName).catch(() => null);
+// Its own title in the tab and the bookmarks.
+if (route && typeof document !== 'undefined')
+  document.title = `BMW M5 F10 · ${route.from} → ${route.to}`;
 
 // The same in GLSL: routeAt(x) gives (centre z, height), from the texture.
 export const routeGLSL = route

@@ -91,9 +91,9 @@ export function bumpSpeed(x, { over = 13.9, braking = 2.2 } = {}) {
 // index from the left, `leader` {gap, speed, moving} the vehicle ahead in
 // it (moving: already changing lanes), `cruise` the car's own pace.
 // Returns 'left', 'right', 'flash' or null.
-// (Close up, as a driver in a hurry does: some 60 m behind at 170 km/h.)
-export const fastLane = Object.freeze({ flashGap: 50, flashEvery: 4, patience: 2, slower: 1 });
-export const flashRange = (speed = 0) => Math.max(fastLane.flashGap, 10 + 1.15 * speed);
+// (Close up, as a driver in a hurry does: some 40 m behind at 170 km/h.)
+export const fastLane = Object.freeze({ flashGap: 35, flashEvery: 3, patience: 2, slower: 1 });
+export const flashRange = (speed = 0) => Math.max(fastLane.flashGap, 5 + 0.8 * speed);
 export function fastLanePlan({
   lane,
   leader,
@@ -116,16 +116,16 @@ export function fastLanePlan({
 }
 
 // How hard the self-driving car presses on in the left lane, as a driver
-// would: spells of a brisk cruise at 130–150 km/h, now and then a push to
-// 170–190 km/h, and back. It picks up speed briskly (more gently the
+// would: spells of a brisk cruise at 140–160 km/h, now and then a push to
+// 180–200 km/h, and back. It picks up speed briskly (more gently the
 // faster it goes and the calmer its mood) and, when the mood passes, lifts
 // off and lets the speed fall away on the drag instead of braking. Bends,
 // traffic and cameras are left to the caller: they brake as they need.
 // Speeds in m/s.
 export const autopilotPace = Object.freeze({
   slow: 25,
-  cruise: [36, 41.5],
-  push: [48, 53],
+  cruise: [39, 44],
+  push: [50, 55],
   cruiseFor: [8, 18],
   pushFor: [8, 16],
   liftOff: 0.9,
@@ -163,7 +163,14 @@ export class AutopilotPace {
     this.set = wish >= this.set ? wish : Math.max(wish, this.set - autopilotPace.liftOff * dt);
     // Brisk at motorway pace, tailing off toward 200 km/h as a driver eases
     // the throttle.
-    const accel = this.drive * Math.max(1.2, 3.6 - 0.045 * speed);
+    const accel = this.drive * Math.max(1.4, 4.2 - 0.05 * speed);
     return { speed: this.set, accel };
   }
+}
+
+// The speed to keep behind a vehicle going at `speed`, `spare` metres
+// beyond the distance to keep: as fast as still lets the car brake (at
+// `braking` m/s²) down to its speed by then, and slower once inside it.
+export function followSpeed(spare, speed, braking = 3.5) {
+  return spare > 0 ? speed + Math.sqrt(2 * braking * spare) : Math.max(0, speed + 0.6 * spare);
 }

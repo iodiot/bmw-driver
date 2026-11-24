@@ -281,7 +281,7 @@ test('The autopilot keeps left and flashes slower cars out of its way', async ()
   assert.equal(fastLanePlan({ ...base, lane: 2, leader: null }), 'left', 'Moves left when clear');
   assert.equal(fastLanePlan({ ...base, lane: 1, clearLeft: false, leader: null }), null);
   assert.equal(fastLanePlan({ ...base, lane: 0, leader: null }), null, 'Stays left');
-  const slow = { gap: 40, speed: 26, moving: false };
+  const slow = { gap: 30, speed: 26, moving: false };
   assert.equal(fastLanePlan({ ...base, lane: 0, leader: slow }), 'flash');
   assert.equal(
     fastLanePlan({ ...base, lane: 0, leader: slow, sinceFlash: 1 }),
@@ -347,4 +347,26 @@ test('The autopilot slows for the speed cameras and the tunnel', async () => {
   assert.ok(
     Math.abs(cameraSpeed(from + structureLayout.period + (to - from) / 2) * 3.6 - 110) < 0.5
   );
+});
+
+test('Behind slower traffic the autopilot brakes late, but in time', async () => {
+  const { followSpeed } = await import('../public/lane-keeping.js');
+  // Closing at 15 m/s, braking at 3.5 m/s² to come down to the other's speed:
+  // it starts some 32 m out.
+  assert.ok(followSpeed(40, 25) > 40, 'Far back: no need to brake yet');
+  assert.ok(Math.abs(followSpeed(32, 25) - 40) < 0.5);
+  assert.equal(followSpeed(0, 25), 25);
+  assert.ok(followSpeed(-5, 25) < 25, 'Too close: drops back');
+  // Simulated: a car at 40 m/s catching one at 25 m/s from 120 m.
+  let v = 40,
+    gap = 120,
+    least = Infinity;
+  for (let t = 0; t < 20; t += 0.02) {
+    const want = Math.min(40, followSpeed(gap - (4 + 0.6 * 25), 25));
+    v += Math.max(-6.5, Math.min(2, (want - v) * 1)) * 0.02;
+    gap -= (v - 25) * 0.02;
+    least = Math.min(least, gap);
+  }
+  assert.ok(least > 10 && least < 22, `closest ${least.toFixed(1)} m`);
+  assert.ok(Math.abs(v - 25) < 0.5, 'Settles at its speed');
 });

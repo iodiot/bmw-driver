@@ -313,10 +313,11 @@ export class DrivingSimulation {
       (input.brake ? this.brakePressure : 1);
     // Cruise control for self-driving: eases toward the set speed (gently up,
     // firmer down for a bend, or as hard as `cruiseAccel` and `cruiseBrake`
-    // allow) until the driver touches a pedal.
+    // allow, and as promptly as `cruiseGain` asks) until the driver touches
+    // a pedal.
     if (Number.isFinite(input.cruiseSpeed) && !this.pedalUsed)
       acceleration = clamp(
-        (input.cruiseSpeed - this.speed) * 0.5,
+        (input.cruiseSpeed - this.speed) * (input.cruiseGain ?? 0.5),
         -(input.cruiseBrake ?? 2.5),
         input.cruiseAccel ?? 1.8
       );

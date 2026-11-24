@@ -64,6 +64,7 @@ import {
   bumpSpeed,
   fastLanePlan,
   flashRange,
+  followSpeed,
   AutopilotPace,
 } from './lane-keeping.js';
 import { setupSparks } from './sparks.js';
@@ -575,8 +576,7 @@ function applyWeather(fade = 0) {
   // Compile hidden tyre trails when lighting changes, before the first slide
   // makes them visible. The first on-road compilation otherwise caused a hitch.
   if (skidMarks)
-    renderer
-      .compileAsync(skidMarks.mesh, camera, scene)
+    compileForAllViews(skidMarks.mesh)
       .then(() => skidMarks.warmup(renderer, camera, scene))
       .catch(console.error);
   $('#night').checked = nightMode;
@@ -593,10 +593,26 @@ function applyWeather(fade = 0) {
 function warmNightPrograms() {
   if (!headlights || headlights.projectors[0].visible) return;
   for (const light of headlights.projectors) light.visible = true;
-  renderer
-    .compileAsync(scene, camera)
+  compileForAllViews(scene)
     .catch(console.error)
     .finally(() => headlights.setNight(lowBeamsOn || inTunnel));
+}
+// The door and rear-view mirrors draw the scene into render targets, where
+// every material takes a program of its own (linear colour, no tone
+// mapping): compiling only the screen's left whatever first showed in a
+// mirror (the village, a turn signal's glow) to compile mid-drive, a
+// hitch of tens of milliseconds each. So both are compiled: for the screen,
+// and with a target like the mirrors' bound.
+function compileForAllViews(root) {
+  // (Made on first use: this may be called before this line has run.)
+  compileForAllViews.target ??= new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
+  const onScreen = renderer.compileAsync(root, camera, scene);
+  const previous = renderer.getRenderTarget();
+  renderer.setRenderTarget(compileForAllViews.target);
+  // (The programs are chosen as the call is made; only the linking waits.)
+  const inMirrors = renderer.compileAsync(root, camera, scene);
+  renderer.setRenderTarget(previous);
+  return Promise.all([onScreen, inMirrors]);
 }
 // In the tunnel the car's light changes: the sun and sky give way to the
 // tunnel's warm lamps, the low beams come on, and the camera is out of the
@@ -1180,7 +1196,7 @@ new GLTFLoader().load(
       // Snow lies on everything standing on the land in winter, not the car.
       snowOnScene(scene, [rig.root]);
       shadeCarFromSun(rig.root);
-      await renderer.compileAsync(scene, camera);
+      await compileForAllViews(scene);
       for (const o of later) o.visible = false;
       applyMirrors();
       renderer.initTexture(headlights.pattern);
@@ -1309,8 +1325,8 @@ function autopilotTraffic(dt) {
     leader: ahead && { gap: ahead.gap, speed: ahead.speed, moving: Boolean(ahead.who.change) },
     cruise: autopilotPacing.set,
     speed: sim.speed,
-    clearLeft: left !== undefined && traffic.laneClearFor(sim.x, sim.speed, left, 4.9, 1.9, 30),
-    clearRight: right !== undefined && traffic.laneClearFor(sim.x, sim.speed, right, 4.9, 1.9, 40),
+    clearLeft: left !== undefined && traffic.laneClearFor(sim.x, sim.speed, left, 4.9, 1.9, 20),
+    clearRight: right !== undefined && traffic.laneClearFor(sim.x, sim.speed, right, 4.9, 1.9, 25),
     flashes: flashCount,
     sinceFlash: sinceBeamFlash,
   });
@@ -1435,8 +1451,13 @@ renderer.setAnimationLoop((time) => {
       // Cruise at motorway pace, easing off for the bends and speed bumps,
       // and keeping its distance behind slower traffic.
       const leader = traffic.leaderFor(sim.x, roadLateral(sim.x, sim.z));
+      // It keeps close, as a driver in a hurry does: some 0.6 s behind
+      // (more on snow), and closing up it brakes late and firmly, as late as
+      // its brakes allow to come down to the other's speed there.
+      const headway = 0.6 + 0.5 * winterLevel,
+        closing = 3.5 - 1.5 * winterLevel;
       const follow = leader
-        ? Math.max(0, leader.speed + 0.35 * (leader.gap - (6 + 1.4 * leader.speed)))
+        ? followSpeed(leader.gap - (4 + headway * leader.speed), leader.speed, closing)
         : Infinity;
       const fastLane = Math.abs(keptLane - roadLanes[0]) < 0.1;
       if (fastLane) autopilotPassing = false;
@@ -1461,13 +1482,15 @@ renderer.setAnimationLoop((time) => {
       );
       input.cruiseAccel = pace.accel;
       // Firmer on the brakes at speed, gentler on snow.
-      input.cruiseBrake = 2.5 + 2 * (1 - winterLevel);
+      input.cruiseBrake = 3 + 3.5 * (1 - winterLevel);
+      input.cruiseGain = 1;
     } else {
       keptLane = null;
       delete input.steerAngle;
       delete input.cruiseSpeed;
       delete input.cruiseAccel;
       delete input.cruiseBrake;
+      delete input.cruiseGain;
     }
     document.body.dataset.autopilot = String(autopilot);
     // Snow and ice: less grip all round.
