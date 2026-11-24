@@ -83,16 +83,20 @@ export const oncomingLanes = Object.freeze(
   oncoming ? roadLanes.map((lane) => oncomingCentre - lane) : []
 );
 
-// A country road branching off. Every `period` metres it leaves the right
-// lane, swings out to run `separation` metres from the road centre behind a
-// grass strip, and rejoins the right lane. It is unpaved and has no
-// guardrails; the main road's right rail opens where it leaves and rejoins.
+// A service area's lane, as on Ukraine's motorways: every `period` metres
+// a deceleration lane leaves the right lane, tapering out over `diverge`
+// metres to run `separation` metres from the road centre beside the
+// carriageway (a narrow island between them) for `length` metres past the
+// fuel station and the bus stop, then the acceleration lane tapers back in.
+// It is paved as the motorway is, with its edge lines; the main road's
+// right rail stands back where it leaves and rejoins. On the route the
+// service areas come every 12 km, as along the M-06, rather than every 3.
 export const roadBranch = Object.freeze({
   start: 300,
-  period: 3000,
-  diverge: 300,
-  length: 600,
-  separation: 42,
+  period: route ? 12000 : 3000,
+  diverge: 170,
+  length: 300,
+  separation: 11,
   halfWidth: 2.2,
   // The main road's right rail stands again once the branch's inner edge is
   // this far from the road centre.
@@ -125,7 +129,7 @@ export function nextBranch(x) {
 // Guardrails at x, each by its lateral offset and the side its traffic is on
 // (0: both sides, so a car coming from the field is stopped as well as one
 // from the road). The main road has rails on both sides; the right one
-// opens where the country road leaves and rejoins.
+// opens along the service lane.
 export function guardrailsAt(x) {
   const rails = [{ lateral: -guardrailOffset, traffic: 0 }];
   // (And the oncoming carriageway's outer one.)
@@ -279,10 +283,10 @@ export const surfaces = Object.freeze({
   dirt: Object.freeze({ grip: 0.68, wetGrip: 0.36, rolling: 0.03, roughness: 0.018 }),
   grass: Object.freeze({ grip: 0.5, wetGrip: 0.3, rolling: 0.06, roughness: 0.028 }),
 });
-// The fuel station's forecourt beside the country road (see
+// The fuel station's forecourt beside the service lane (see
 // fuel-station.js), paved: `at` into each section, `length` along the road,
-// from `from` to `from + depth` metres beyond the track's far edge.
-export const fuelStationPlace = Object.freeze({ at: 700, length: 56, from: 0.6, depth: 27 });
+// from `from` to `from + depth` metres beyond the lane's far edge.
+export const fuelStationPlace = Object.freeze({ at: 580, length: 56, from: 0.6, depth: 27 });
 // How far beyond the track's far edge a point is, on the forecourt's
 // stretch of road; null off it.
 export function forecourtDepth(x, lateral) {
@@ -302,7 +306,7 @@ function onForecourt(x, lateral) {
   );
 }
 // The surface at a world point: the carriageway and its asphalt shoulders,
-// the country road's asphalt, the gravel strips beside the motorway and
+// the service lane's asphalt, the gravel strips beside the motorway and
 // grass everywhere else.
 export function surfaceAt(x, z) {
   const lateral = roadLateral(x, z),

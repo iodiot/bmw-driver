@@ -96,20 +96,22 @@ export const structureLayout = Object.freeze({
       ),
       kind: 'distances',
     }),
+    // The service area 500 m ahead: what it has (fuel, a café, parking).
     Object.freeze({
-      at: places.exitAt,
-      kind: 'exit',
-      distance: roadBranch.period + roadBranch.start - places.exitAt,
+      at: places.exitAt + roadBranch.period - 3000,
+      kind: 'services',
+      distance: 3000 + roadBranch.start - places.exitAt,
     }),
-    Object.freeze({ at: roadBranch.start + 130, kind: 'gore' }),
-    // The fuel station on the country road: a blue service sign a kilometre
-    // before, and one just before the country road leaves the motorway.
+    // The chevron in the island where the service lane has left.
+    Object.freeze({ at: roadBranch.start + roadBranch.diverge + 25, kind: 'gore' }),
+    // The fuel station on the service lane: a blue service sign a kilometre
+    // before, and one just before the lane leaves the motorway.
     Object.freeze({
-      at: clearOfBridges(2650),
+      at: clearOfBridges(2650) + roadBranch.period - 3000,
       kind: 'fuel',
-      distance: roadBranch.period + fuelStationPlace.at - clearOfBridges(2650),
+      distance: 3000 + fuelStationPlace.at - clearOfBridges(2650),
     }),
-    // (Before the country road leaves, so there is time to move over.)
+    // (Before the lane leaves, so there is time to move over.)
     Object.freeze({
       at: roadBranch.start - 120,
       kind: 'fuelTurn',
@@ -544,8 +546,55 @@ const signFaces = {
       arrow(g, 740, 250, Math.PI / 4, 120, 18);
     },
   }),
+  // A service area ahead, as on Ukraine's motorways: white on blue, its
+  // services as pictograms (fuel, a café, parking) and how far.
+  services: ({ distance }) => ({
+    size: [3.2, 1.8],
+    canvas: [640, 360],
+    draw(g, w, h) {
+      roundedPanel(g, 4, 4, w - 8, h - 8, 22, informationBlue, '#ffffff', 8);
+      const tile = 150,
+        top = 40;
+      [0, 1, 2].forEach((i) => {
+        const x = 40 + i * (tile + 30);
+        roundedPanel(g, x, top, tile, tile, 10, '#ffffff');
+        g.fillStyle = informationBlue;
+        g.strokeStyle = informationBlue;
+        if (i === 0) fuelPump(g, x + tile / 2, top + tile / 2, 0.82);
+        else if (i === 1) {
+          // A cup on its saucer, steam above.
+          g.fillRect(x + 42, top + 62, 56, 50);
+          g.lineWidth = 9;
+          g.beginPath();
+          g.arc(x + 104, top + 86, 13, -Math.PI / 2, Math.PI / 2);
+          g.stroke();
+          g.fillRect(x + 30, top + 116, 90, 9);
+          g.lineWidth = 6;
+          for (const sx of [56, 82]) {
+            g.beginPath();
+            g.moveTo(x + sx, top + 52);
+            g.bezierCurveTo(x + sx - 10, top + 40, x + sx + 10, top + 32, x + sx, top + 20);
+            g.stroke();
+          }
+        } else {
+          g.font = signFont(120);
+          g.textAlign = 'center';
+          g.textBaseline = 'middle';
+          g.fillText('P', x + tile / 2, top + tile / 2 + 6);
+          g.textAlign = 'left';
+        }
+      });
+      g.fillStyle = '#ffffff';
+      g.textBaseline = 'alphabetic';
+      g.font = signFont(60);
+      g.textAlign = 'right';
+      g.fillText(`${distance} м`, w - 40, h - 40);
+      g.textAlign = 'left';
+      arrow(g, 70, h - 60, Math.PI / 4, 80, 14);
+    },
+  }),
   // Fuel: the white pump on blue, and how far (with an arrow off to the
-  // right where the country road leaves).
+  // right where the service lane leaves).
   fuel: ({ distance }) => ({
     size: [1.5, 1.95],
     canvas: [300, 390],
@@ -1484,7 +1533,7 @@ export function setupRoadStructures(scene, fields = {}) {
     group.add(sign);
     return { spec, sign, at: NaN };
   });
-  const lateralOf = (spec, x) => (spec.kind === 'gore' ? 11.5 : 9.4);
+  const lateralOf = (spec, x) => (spec.kind === 'gore' ? 7.5 : 9.4);
 
   const place = (object, x, lateral, y = 0) => {
     onRoad(x, lateral, y, object.position);

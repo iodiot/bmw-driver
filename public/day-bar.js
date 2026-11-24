@@ -4,8 +4,7 @@ import { dayCycle, dayPhase, formatClock, sunElevation, wrapHours } from './time
 // 24 hours with the sun or moon at the current time (click or drag to set
 // the time), the clock with a glowing sun or moon, the frame rate under it,
 // a Day / Sunset / Night switch with the current
-// phase lit, rain, pause with a ring showing how far the day has run, sound
-// and restart.
+// phase lit, rain, the autopilot, sound and restart.
 const width = 132,
   height = 46,
   horizonY = 25;
@@ -115,8 +114,9 @@ const icons = {
   snow: '<path d="M5 10.5h8a3 3 0 0 0 .3-6 4.2 4.2 0 0 0-8.1 1A2.6 2.6 0 0 0 5 10.5z"/><path d="M6 13.2v2.6M4.7 14.5h2.6M12 13.2v2.6M10.7 14.5h2.6M9 14.6v2.4M7.8 15.8h2.4"/>',
   blizzard:
     '<path d="M5 9.5h8a3 3 0 0 0 .3-6 4.2 4.2 0 0 0-8.1 1A2.6 2.6 0 0 0 5 9.5z"/><path d="M2.5 12.5h9M5 15h10M8 12.2v1M13 14.7v1"/>',
-  pause: '<path d="M6.5 4.5v9M11.5 4.5v9"/>',
-  play: '<path d="M6.5 4.2v9.6L14 9z"/>',
+  // A steering wheel: the rim, the hub and three spokes.
+  autopilot:
+    '<circle cx="9" cy="9" r="6.6"/><circle cx="9" cy="9" r="1.9"/><path d="M2.6 8.2h4.5M10.9 8.2h4.5M9 10.9v4.6"/>',
   restart: '<path d="M3.8 9a5.2 5.2 0 1 0 1.6-3.8M3.6 2.8v2.6h2.6"/>',
   sound:
     '<path d="M2.5 7h2.8l3.7-3.2v10.4L5.3 11H2.5z"/><path d="M11.6 6.4a3.6 3.6 0 0 1 0 5.2M13.9 4.2a6.7 6.7 0 0 1 0 9.6"/>',
@@ -147,7 +147,7 @@ export function setupDayBar(
   {
     setTime,
     openWeather,
-    toggleRunning,
+    toggleAutopilot,
     restart,
     toggleSound,
     nextCamera,
@@ -184,7 +184,7 @@ export function setupDayBar(
           .join('')}
       </div>
       <button type="button" class="day-rain" aria-label="Weather and season" title="Weather and season" aria-pressed="false" aria-expanded="false">${icon('clear')}</button>
-      <button type="button" class="day-run" aria-label="Pause time" title="Pause time" aria-pressed="false">${icon('pause')}</button>
+      <button type="button" class="day-autopilot" aria-label="Autopilot" title="Autopilot" aria-pressed="true">${icon('autopilot')}</button>
       <button type="button" class="day-paint" aria-label="Paint, wheels and graphics" title="Paint, wheels and graphics" aria-expanded="false">${icon('paint')}</button>
       <button type="button" class="day-camera" aria-label="Camera: Chase (C)" title="Camera: Chase (C)">${icon('camera')}</button>
       <button type="button" class="day-capture" aria-label="Photo or video" title="Photo or video" aria-expanded="false">${icon('capture')}<b></b></button>
@@ -202,13 +202,13 @@ export function setupDayBar(
     moon = container.querySelector('.day-celestial .moon'),
     presets = [...container.querySelectorAll('[data-preset]')],
     rain = container.querySelector('.day-rain'),
-    run = container.querySelector('.day-run'),
+    autopilotButton = container.querySelector('.day-autopilot'),
     soundButton = container.querySelector('.day-sound'),
     cameraButton = container.querySelector('.day-camera');
   for (const button of presets)
     button.onclick = () => setTime(dayCycle.presets[button.dataset.preset]);
   rain.onclick = () => openWeather?.(rain);
-  run.onclick = toggleRunning;
+  autopilotButton.onclick = () => toggleAutopilot?.();
   container.querySelector('.day-restart').onclick = () => restart?.();
   soundButton.onclick = () => toggleSound?.();
   cameraButton.onclick = () => nextCamera?.();
@@ -240,7 +240,18 @@ export function setupDayBar(
   };
   let shown = '',
     soundShown = '';
+  let autopilotShown = null;
   return {
+    // The autopilot on (the button lit) or off; a click turns it on again
+    // after the driver has taken the wheel, or hands the wheel over.
+    setAutopilot(on) {
+      if (on === autopilotShown) return;
+      autopilotShown = on;
+      autopilotButton.setAttribute('aria-pressed', String(on));
+      autopilotButton.title = autopilotButton.ariaLabel = on
+        ? 'Autopilot on (click to take the wheel)'
+        : 'Autopilot off (click to let the car drive itself)';
+    },
     // A video being recorded: the button turns red with the seconds left
     // (a click then stops it and saves).
     setCapture({ recording = false, left = 0 } = {}) {
@@ -314,9 +325,6 @@ export function setupDayBar(
           rain.ariaLabel = `Weather: ${weatherNames[weather]} (click to choose, and the season)`;
       }
       rain.setAttribute('aria-pressed', String(weather !== 'clear'));
-      run.setAttribute('aria-pressed', String(!running));
-      run.innerHTML = icon(running ? 'pause' : 'play');
-      run.title = run.ariaLabel = running ? 'Pause time' : 'Resume time';
       container.setAttribute(
         'aria-label',
         `Time ${text}, ${name.toLowerCase()}, ${next.kind} at ${formatClock(next.at)}${weather === 'clear' ? '' : `, ${weatherNames[weather]}`}`

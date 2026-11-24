@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { branchOffset, roadBranch, roadCenterSlope, roadCenterZ } from './road-profile.js';
+import { roadCenterSlope, roadCenterZ } from './road-profile.js';
 import { nearestOccurrence } from './road-structures.js';
 import { Kit, canvasTexture } from './build-kit.js';
 import { addSurfaceDetail } from './surface-detail.js';
@@ -19,8 +19,12 @@ import { groupShadow } from './sun-shadows.js';
 // a sweep. Each yard is one mesh for its walls, roofs and fences, one for
 // its windows, which glow warm in the evening, and one for its leaves and
 // one for its beds and sunflowers, which are gone in winter.
-// Yards' places into each section (clear of the bus stop at 900 m).
-export const villageYards = Object.freeze([770, 805, 842, 935, 970, 1006, 1044, 1080]);
+// Yards' places into each section (past the service area, its bus stop at
+// 760 m), and how far from the road centre their fences stand: the village
+// lies back across a field, as villages along the M-06 do, not on the
+// motorway's service lane.
+export const villageYards = Object.freeze([840, 875, 912, 1005, 1040, 1076, 1114, 1150]);
+export const villageSetback = 58;
 const plot = 30;
 
 function seeded(n) {
@@ -792,7 +796,7 @@ export function setupVillage(scene) {
           if (yard.leafShadow) yard.leafShadow.mesh.visible = false;
           continue;
         }
-        const edge = (branchOffset(u) ?? roadBranch.separation) + roadBranch.halfWidth;
+        const edge = villageSetback;
         yard.group.position.set(u, 0, roadCenterZ(u) + edge);
         yard.group.rotation.y = -Math.atan(roadCenterSlope(u));
         yard.shadow.update(sun, strength);

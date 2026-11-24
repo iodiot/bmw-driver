@@ -9,9 +9,10 @@ import { groupShadow } from './sun-shadows.js';
 // Ukraine's roads), a bench, a bin and the stop's sign with the village's
 // name. Its mosaic faces the road, so it can be seen from the motorway too.
 export const busStopLayout = Object.freeze({
-  // Distance into each 3 km section, in the middle of the country road.
-  at: 900,
-  // From the country road's edge to the shelter's front.
+  // Distance into each section, by the service lane past the fuel station
+  // (the lane serves as the bus's lay-by).
+  at: 760,
+  // From the lane's edge to the shelter's front.
   setback: 1.6,
   width: 4.6,
   depth: 1.7,

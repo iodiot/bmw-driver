@@ -242,8 +242,8 @@ export function setupRoad(scene, { lite = false } = {}) {
         // Lateral position relative to the curving road centre line.
         float roadLat = vRoadXZ.y - roadCenterZ(vRoadXZ.x);
         float lateral = abs(roadLat);
-        // The country road: an old local road of grey asphalt, about 4.4 m
-        // wide, its edges crumbling into a gravel shoulder and then grass.
+        // The service lane beside the motorway: the motorway's own asphalt,
+        // 4.4 m wide, with an edge line along each side.
         float branchCentre = branchOffset(vRoadXZ.x);
         float hasBranch = step(0., branchCentre);
         float branchLat = roadLat - branchCentre;
@@ -253,8 +253,7 @@ export function setupRoad(scene, { lite = false } = {}) {
         float rawLat = roadLat;
         roadLat = carriageLat(roadLat);
         lateral = abs(roadLat);
-        float pavedBranch = hasBranch * (1. - smoothstep(2.05, 2.3,
-          branchLateral + .3 * (texture2D(roadWetnessMap, vRoadXZ / 3.1).r - .5)));
+        float pavedBranch = hasBranch * (1. - smoothstep(2.15, 2.25, branchLateral));
         float offRoad = smoothstep(6.05, 6.25, lateral) * (1. - tunnelFloor(vRoadXZ)) *
           (1. - pavedBranch);
         float track = 0.;
@@ -366,11 +365,12 @@ export function setupRoad(scene, { lite = false } = {}) {
         // patches and meandering sealed cracks.
         float onCarriageway = 1. - smoothstep(5.35, 5.55, lateral);
         float laneOffset = mod(roadLat + 5.4, 3.6) - 1.8;
-        // The country road beyond the motorway's asphalt: greyer and patchier,
-        // worn smooth where the wheels run.
-        float countryRoad = pavedBranch * (1. - onCarriageway);
+        // The service lane beyond the motorway's asphalt: the same asphalt,
+        // worn where the wheels run (no country road's patchiness now).
+        float countryRoad = 0.;
+        float serviceLane = pavedBranch * (1. - onCarriageway);
         float wheelTrack = max(exp(-pow((abs(laneOffset) - .82) / .3, 2.)) * onCarriageway,
-          exp(-pow((abs(branchLat) - .85) / .32, 2.)) * countryRoad);
+          exp(-pow((abs(branchLat) - .85) / .32, 2.)) * serviceLane);
         diffuseColor.rgb *= mix(1., 1. + .18 * broadNoise + .06 * midNoise, countryRoad);
         vec2 patchCell = floor(vec2(vRoadXZ.x / 11., (roadLat + 5.4) / 3.6));
         float patchSeed = fract(sin(dot(patchCell, vec2(12.9898, 78.233))) * 43758.5453);
@@ -386,7 +386,7 @@ export function setupRoad(scene, { lite = false } = {}) {
         float crackField = abs(texture2D(roadWetnessMap, vRoadXZ / 7.).r - .5);
         float crackWidth = max(fwidth(crackField), .0015);
         float sealedCrack = (1. - smoothstep(.006, .006 + 1.5 * crackWidth, crackField)) *
-          smoothstep(.55, .7, midNoise) * max(onCarriageway, countryRoad);
+          smoothstep(.55, .7, midNoise) * max(onCarriageway, serviceLane);
         diffuseColor.rgb *= 1. - .14 * wheelTrack;
         diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * (.8 + .08 * midNoise), repairPatch);
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.035), sealedCrack * .85);
@@ -396,8 +396,7 @@ export function setupRoad(scene, { lite = false } = {}) {
         float laneSnow = 0.;
         if (winterCover > 0.) {
           vec3 snow = vec3(.86, .89, .94) * (.88 + .1 * broadNoise + .05 * fineNoise);
-          float trackRuts = hasBranch * exp(-pow((abs(branchLat) - .85) / .32, 2.)) *
-            (1. - smoothstep(1.6, 2.4, branchLateral));
+          float trackRuts = 0.;
           vec3 rutted = mix(snow, snow * vec3(.62, .6, .58), trackRuts * .75);
           roadside = mix(roadside, rutted, winterCover * (.9 + .1 * midNoise));
           // (Between the wheel tracks: a thin, broken film of packed snow.)
@@ -405,10 +404,9 @@ export function setupRoad(scene, { lite = false } = {}) {
           laneSnow = winterCover * onCarriageway *
             max(smoothstep(4.4, 5.3, lateral) * (.55 + .45 * midNoise),
                 betweenTracks * .22 * smoothstep(.55, .8, midNoise) * (.6 + .4 * fineNoise));
-          // The country road is hardly cleared: packed snow over it all but
-          // the two dark wheel ruts.
-          laneSnow = max(laneSnow, winterCover * countryRoad * (.8 + .2 * midNoise) *
-            (1. - .85 * exp(-pow((abs(branchLat) - .85) / .32, 2.))));
+          // The service lane: snow banked along its edges, as the carriageway's.
+          laneSnow = max(laneSnow, winterCover * serviceLane *
+            smoothstep(1.4, 2.1, branchLateral) * (.55 + .45 * midNoise));
           diffuseColor.rgb *= 1. - .25 * winterCover * wheelTrack;
           diffuseColor.rgb = mix(diffuseColor.rgb, snow * .96, laneSnow);
         }
@@ -421,7 +419,11 @@ export function setupRoad(scene, { lite = false } = {}) {
         float dashPaint = 1.0 - smoothstep(1.5 - roadAAX, 1.5 + roadAAX, dashX);
         float edgeDistance = min(abs(roadLat - 5.4), abs(roadLat + 5.4));
         float edgePaint = 1.0 - smoothstep(0.075 - roadAAZ, 0.075 + roadAAZ, edgeDistance);
-        // Where the country road leaves or joins, the right edge line is
+        // The service lane's edge lines, where it runs clear of the
+        // carriageway.
+        float laneEdge = 1.0 - smoothstep(0.075 - roadAAZ, 0.075 + roadAAZ, abs(branchLateral - 1.95));
+        edgePaint = max(edgePaint, laneEdge * hasBranch * step(6.2, rawLat));
+        // Where the service lane leaves or joins, the right edge line is
         // broken into short dashes across its mouth.
         float mouth = hasBranch * step(0., rawLat) * (1. - step(5.9, branchCentre - 2.2));
         float exitDash = 1. - smoothstep(1. - roadAAX, 1. + roadAAX, abs(mod(vRoadXZ.x + 2., 4.) - 2.));

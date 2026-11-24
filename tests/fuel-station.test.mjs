@@ -9,6 +9,7 @@ import {
   surfaceAt,
 } from '../public/road-profile.js';
 import { villageYards, yardKits } from '../public/village.js';
+import { busStopLayout } from '../public/bus-stops.js';
 
 const at = fuelStationPlace.at;
 const edge = (x) => branchOffset(x) + roadBranch.halfWidth;
@@ -57,7 +58,7 @@ test('The tank burns about 14 L/100 km and fills at the pump', () => {
 
 test('Village yards stay clear of the bus stop and the fuel station', () => {
   for (const u of villageYards) {
-    assert.ok(Math.abs(u - 900) > 30, `yard at ${u}`);
+    assert.ok(Math.abs(u - busStopLayout.at) > 30, `yard at ${u}`);
     assert.ok(u - at > fuelStationPlace.length / 2 + 15, `yard at ${u}`);
   }
   const { solid, glass } = yardKits(0);

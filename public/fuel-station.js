@@ -32,6 +32,9 @@ export const fuelPrices = Object.freeze([
 export const fuelPrice = fuelPrices[0].price;
 // Pump islands along the forecourt (x) and their row from the track (z), in
 // the station's frame: x along the road, z away from the track's far edge.
+// The price sign's place: along the road from the forecourt's middle, and
+// out from the service lane's far edge.
+export const priceSignPlace = Object.freeze({ along: -42, out: 1.6 });
 export const pumpIslands = Object.freeze([-8, 0, 8]);
 export const pumpRow = 12;
 const brandGreen = 0x168447;
@@ -393,9 +396,9 @@ export function setupFuelStation(scene) {
       const turn = -Math.atan(roadCenterSlope(u));
       group.position.set(u, 0, roadCenterZ(u) + edge);
       group.rotation.y = turn;
-      // The price sign between the motorway and the track, a little before.
-      const signAt = u - 60;
-      sign.group.position.set(signAt, 0, roadCenterZ(signAt) + 24);
+      // The price sign by the service lane, before the forecourt.
+      const signAt = u + priceSignPlace.along;
+      sign.group.position.set(signAt, 0, roadCenterZ(signAt) + edge + priceSignPlace.out);
       sign.group.rotation.y = -Math.atan(roadCenterSlope(signAt));
       underside.emissiveIntensity = 0.9 * night;
       fascia.emissiveIntensity = 0.55 * night;

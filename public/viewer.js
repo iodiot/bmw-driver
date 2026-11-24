@@ -532,7 +532,8 @@ const lightning = setupLightning(scene, {
 // Time of day: it runs a full day in dayCycle.minutesPerDay real minutes and
 // sets the sky, light and fog continuously; lamps switch at dusk and dawn.
 let timeOfDay = remembered.time ?? dayCycle.start,
-  timeRunning = remembered.timeRunning,
+  // (The day always runs: the panel's pause button became the autopilot's.)
+  timeRunning = true,
   lowBeamsOn = false,
   light = daylight(timeOfDay, rainMode);
 // Discrete changes: the weather, night-time lamps and materials.
@@ -830,12 +831,19 @@ const dayBar = setupDayBar($('#day-bar'), {
     captureMenu.close();
     weatherPicker.toggle(button);
   },
-  toggleRunning() {
-    timeRunning = !timeRunning;
-    remembered.timeRunning = timeRunning;
-    remembered.time = timeOfDay;
-    rememberSettings();
-    applyDaylight();
+  // Back to the autopilot after taking the wheel (in its lane, the pedals
+  // let go, moving off if paused), or the wheel taken from it.
+  toggleAutopilot() {
+    if (!sim) return;
+    if (autopilot) {
+      autopilot = false;
+      return;
+    }
+    clearInput();
+    autopilot = true;
+    keptLane = null;
+    sim.pedalUsed = false;
+    if (!driving) setDriving(true);
   },
   restart: () => restart(),
   toggleSound: () => vehicleAudio.toggle(),
@@ -1520,6 +1528,7 @@ renderer.setAnimationLoop((time) => {
       delete input.cruiseGain;
     }
     document.body.dataset.autopilot = String(autopilot);
+    dayBar.setAutopilot(autopilot);
     // Snow and ice: less grip all round.
     sim.gripScale = 1 - (1 - winterDriving.grip) * winterLevel;
     traffic.speedScale = 1 - (1 - winterDriving.trafficSpeed) * winterLevel;

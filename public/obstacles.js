@@ -6,8 +6,8 @@ import {
   roadCenterSlope,
 } from './road-profile.js';
 import { nearestOccurrence } from './road-structures.js';
-import { pumpIslands, pumpRow } from './fuel-station.js';
-import { villageYards, yardColliders } from './village.js';
+import { priceSignPlace, pumpIslands, pumpRow } from './fuel-station.js';
+import { villageSetback, villageYards, yardColliders } from './village.js';
 
 // The solid things beside the country road the car can run into: the fuel
 // station's shop, pump islands, canopy columns and price sign, and the
@@ -31,13 +31,13 @@ export function solidsNear(x, range = 40) {
   if (Math.abs(u - x) < 60 + range) {
     const edge = edgeAt(u);
     for (const [bx, bz, hx, hz] of stationBoxes) out.push({ x: u + bx, lat: edge + bz, hx, hz });
-    // The price sign, between the motorway and the track.
-    out.push({ x: u - 60, lat: 24, hx: 0.4, hz: 1.4 });
+    // The price sign, by the service lane before the forecourt.
+    out.push({ x: u + priceSignPlace.along, lat: edge + priceSignPlace.out, hx: 0.4, hz: 1.4 });
   }
   villageYards.forEach((yard, i) => {
     const at = nearestOccurrence(x, yard);
     if (Math.abs(at - x) > 20 + range) return;
-    const edge = edgeAt(at);
+    const edge = villageSetback;
     for (const [bx, bz, hx, hz] of yardColliders(i))
       out.push({ x: at + bx, lat: edge + bz, hx, hz });
   });

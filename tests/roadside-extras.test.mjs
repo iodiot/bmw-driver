@@ -39,7 +39,7 @@ test('Poles and wires are laid round the car, wires not across a gap', () => {
   assert.ok(drawn > 0 && drawn % 2 === 0);
 });
 
-test('The bus stop stands beside the country road', () => {
+test('The bus stop stands beside the service lane', () => {
   const stops = setupBusStops(new THREE.Scene());
   stops.update(950);
   const p = stops.group.position;
@@ -48,5 +48,5 @@ test('The bus stop stands beside the country road', () => {
   assert.ok(
     Math.abs(lateral - (branchOffset(p.x) + roadBranch.halfWidth + busStopLayout.setback)) < 1e-6
   );
-  assert.ok(lateral > 40, 'Across the country road from the motorway');
+  assert.ok(lateral > 12 && lateral < 20, 'Across the service lane from the motorway');
 });

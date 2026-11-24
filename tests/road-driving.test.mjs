@@ -14,6 +14,7 @@ import {
   nextBranch,
   roadBranch,
   guardedRoad,
+  surfaceAt,
 } from '../public/road-profile.js';
 import { laneKeepingSteer, nearestLane, curveSpeed } from '../public/lane-keeping.js';
 import { sparkRate, sparkColour } from '../public/sparks.js';
@@ -165,7 +166,7 @@ test('The minimap shows the road ahead, the next curve and the next speed bump',
   assert.equal(gradeLabel(-0.04).arrow, '↘');
 });
 
-test('The branch road splits from the right lane, runs beside the road and merges back', () => {
+test('The service lane splits from the right lane, runs beside the road and merges back', () => {
   const { start, period, diverge, length, separation } = roadBranch;
   assert.equal(branchOffset(start - 1), null, 'No branch before its start');
   assert.equal(branchOffset(start), roadLanes.at(-1), 'It leaves from the right lane');
@@ -173,14 +174,17 @@ test('The branch road splits from the right lane, runs beside the road and merge
   assert.ok(Math.abs(branchOffset(start + 2 * diverge + length) - roadLanes.at(-1)) < 1e-9);
   assert.equal(nextBranch(0), start);
   assert.equal(nextBranch(start + 10), 0);
-  // The main road keeps both rails, except where the country road leaves and
-  // rejoins; beside the country road the right rail faces both ways; the
-  // country road itself has none.
+  // The main road keeps both rails, except along the service lane, which
+  // runs close beside it with only an island between (no rail there).
   const right = (x) => guardrailsAt(x).find((r) => r.lateral > 0);
   assert.equal(right(start - 10).traffic, 0, 'Solid from both sides');
   assert.equal(right(start + 50), undefined, 'The rail opens at the mouth');
-  assert.equal(right(start + diverge + length / 2).traffic, 0);
+  assert.equal(right(start + diverge + length / 2), undefined, 'None beside the lane');
   assert.equal(right(start + 2 * diverge + length - 50), undefined);
+  assert.equal(right(start + 2 * diverge + length + 10).traffic, 0, 'Back after it');
+  // An island of at least a couple of metres between the carriageway's
+  // asphalt (to 6.15 m) and the lane.
+  assert.ok(separation - roadBranch.halfWidth - 6.15 > 2);
   for (let x = start - 50; x < start + period - 100; x += 0.5) {
     const rails = guardrailsAt(x);
     assert.ok(
@@ -194,7 +198,7 @@ test('The branch road splits from the right lane, runs beside the road and merge
   }
 });
 
-test('A car can drive the branch and back without touching a rail', () => {
+test('A car can drive the service lane and back without touching a rail', () => {
   const sim = new DrivingSimulation(undefined, guardedRoad);
   sim.reset(25);
   const { start, diverge, length } = roadBranch;
@@ -215,26 +219,22 @@ test('A car can drive the branch and back without touching a rail', () => {
       true
     );
     assert.equal(sim.railContact, null, `rail contact at x ${sim.x.toFixed(0)}`);
-    assert.ok(Math.abs(roadLateral(sim.x, sim.z) - path(sim.x)) < 1.5, 'stays on the branch');
+    assert.ok(Math.abs(roadLateral(sim.x, sim.z) - path(sim.x)) < 1.5, 'stays on the lane');
     furthest = Math.max(furthest, roadLateral(sim.x, sim.z));
   }
-  assert.ok(furthest > 40, 'It really went out along the branch');
+  assert.ok(furthest > roadBranch.separation - 1, 'It really went out along the lane');
 });
 
-test('The gore rail stops a car leaving the main road between the two roads', () => {
-  const { start, diverge, length } = roadBranch;
-  const sim = new DrivingSimulation(undefined, guardedRoad);
-  sim.reset(25);
-  sim.x = start + diverge + length / 2;
-  sim.z = roadCenterZ(sim.x) + roadLanes.at(-1);
-  sim.heading = -Math.atan(roadCenterSlope(sim.x));
-  let contact = false;
-  for (let t = 0; t < 4; t += 1 / 60) {
-    sim.step(1 / 60, { steerAngle: -0.05 }, true);
-    contact ||= Boolean(sim.railContact);
-    assert.ok(roadLateral(sim.x, sim.z) + 0.95 < 7.3, 'The body stays on the road side');
-  }
-  assert.ok(contact);
+test('Beside the service lane only an island of verge parts it from the road', () => {
+  const { start, diverge, length, separation, halfWidth } = roadBranch;
+  const x = start + diverge + length / 2;
+  // Asphalt on the carriageway, gravel and grass on the island, asphalt on
+  // the lane, gravel and grass beyond it.
+  const at = (lateral) => surfaceAt(x, roadCenterZ(x) + lateral);
+  assert.equal(at(5), 'asphalt');
+  assert.notEqual(at(separation - halfWidth - 0.8), 'asphalt');
+  assert.equal(at(separation), 'asphalt');
+  assert.notEqual(at(separation + halfWidth + 0.5), 'asphalt');
 });
 
 test('Self-driving cruises up to the set speed and hands over on a pedal', () => {
