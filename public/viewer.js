@@ -75,6 +75,7 @@ import { createWeatherCycle, isWet, weatherCycle } from './weather-cycle.js';
 import { setupLightning } from './lightning.js';
 import { daylight, dayCycle, wrapHours } from './time-of-day.js';
 import { setupDayBar } from './day-bar.js';
+import { setupRadio } from './radio.js';
 import { setupRearGlow } from './rear-glow.js';
 import { setupSignalGlow } from './signal-glow.js';
 import { setupBeamFlash } from './beam-flash.js';
@@ -847,6 +848,7 @@ const dayBar = setupDayBar($('#day-bar'), {
   },
   restart: () => restart(),
   toggleSound: () => vehicleAudio.toggle(),
+  nextStation: () => radio.next(),
   nextCamera: () => setCameraView(nextCameraView(cameraView)),
   openCapture(button) {
     // While a video runs the button stops it (and saves it).
@@ -882,6 +884,29 @@ const captureMenu = setupCaptureMenu(document.body, {
 });
 setCameraView(cameraView);
 dayBar.setGraphics(graphicsPresets[graphics].label);
+// The radio: Ukrainian stations live (N or the panel's button). A new
+// station is named in a toast, and one that cannot be reached says so.
+let radioShown = null;
+const radio = setupRadio({
+  sound: $('#sound'),
+  volume: $('#volume'),
+  onChange: ({ station, state }) => {
+    dayBar.setRadio(station, state);
+    if (station !== radioShown) {
+      radioShown = station;
+      toasts.show(
+        station
+          ? { label: 'Radio', shown: station.name, note: station.note }
+          : { label: 'Radio', shown: 'off' },
+        2.5
+      );
+    }
+    if (state === 'error' && station)
+      toasts.show({ label: station.name, shown: 'no signal', note: 'N for the next station' }, 3);
+  },
+});
+radioShown = radio.station;
+dayBar.setRadio(radio.station, radio.state);
 $('#night').onchange = (e) => {
   setTimeOfDay(e.target.checked ? dayCycle.presets.night : dayCycle.presets.day);
 };
@@ -1082,6 +1107,11 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyP' && !e.repeat && !e.metaKey && !e.ctrlKey) photoWanted = true;
   if (e.code === 'KeyV' && !e.repeat && !e.metaKey && !e.ctrlKey && clipRecorder.available)
     clipRecorder.toggle();
+  if (e.code === 'KeyN' && !e.repeat && !e.metaKey && !e.ctrlKey) {
+    e.preventDefault();
+    radio.next();
+    return;
+  }
   if (e.code === 'KeyM' && !e.repeat && !e.metaKey && !e.ctrlKey) {
     e.preventDefault();
     vehicleAudio.toggle();
@@ -1777,6 +1807,7 @@ renderer.setAnimationLoop((time) => {
       winter: winterLevel > 0.5,
       night: nightMode,
       visible: inCabin,
+      radio: radio.station,
     });
     brakes.update(dt, {
       energy: sim.brakeEnergy - previousBrakeEnergy,
@@ -1891,6 +1922,7 @@ renderer.setAnimationLoop((time) => {
     inside: cameraViews[cameraView].inside ? 1 : 0,
   });
   dayBar.setSound(vehicleAudio.audible, $('#sound').checked);
+  radio.update(dt, { inside: cameraViews[cameraView].inside ? 1 : 0 });
   if (cameraView === 'chase' || !rig) {
     controls.update(dt);
     keepCameraInTunnel();

@@ -79,7 +79,7 @@ export function mapPoint(simulation, x, z, scale, cx, cy) {
   return [cx + right * scale, cy - forward * scale];
 }
 
-function drawScreen(ctx, w, h, simulation, hours, weather, winter = false) {
+function drawScreen(ctx, w, h, simulation, hours, weather, winter = false, radio = null) {
   // Map on the left two thirds, in iDrive's night-blue style.
   const mapW = w * 0.66;
   ctx.fillStyle = '#0c1724';
@@ -174,10 +174,11 @@ function drawScreen(ctx, w, h, simulation, hours, weather, winter = false) {
     { rain: 'Rain', storm: 'Storm', fog: 'Fog', snow: 'Snow', blizzard: 'Blizzard' }[weather] ??
     'Clear';
   ctx.fillText(`${temperature} °C  ${label}`, px, h * 0.53);
-  ctx.fillStyle = '#e8eef4';
-  ctx.fillText('FM 101.5', px, h * 0.72);
+  // The station playing (radio.js), or the radio off.
+  ctx.fillStyle = radio ? '#ffd9a0' : '#5f7a93';
+  ctx.fillText(radio ? radio.name : 'Radio off', px, h * 0.72);
   ctx.fillStyle = '#5f7a93';
-  ctx.fillText('Radio', px, h * 0.84);
+  ctx.fillText(radio ? radio.note : 'Press N', px, h * 0.84);
 }
 
 export function setupCentreDisplay(rig) {
@@ -257,13 +258,14 @@ export function setupCentreDisplay(rig) {
         winter = false,
         night = false,
         visible = true,
+        radio = null,
       } = {}
     ) {
       screenMesh.material.color.setScalar(night ? 0.6 : 0.85);
       elapsed += dt;
       if (elapsed < refresh || !simulation || !visible) return;
       elapsed = 0;
-      drawScreen(display.ctx, ...screen.pixels, simulation, hours, weather, winter);
+      drawScreen(display.ctx, ...screen.pixels, simulation, hours, weather, winter, radio);
       display.texture.needsUpdate = true;
     },
   };

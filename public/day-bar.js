@@ -4,7 +4,7 @@ import { dayCycle, dayPhase, formatClock, sunElevation, wrapHours } from './time
 // 24 hours with the sun or moon at the current time (click or drag to set
 // the time), the clock with a glowing sun or moon, the frame rate under it,
 // a Day / Sunset / Night switch with the current
-// phase lit, rain, the autopilot, sound and restart.
+// phase lit, rain, the autopilot, the radio, sound and restart.
 const width = 132,
   height = 46,
   horizonY = 25;
@@ -123,6 +123,9 @@ const icons = {
   // The view (an eye), so it is not taken for the photo button.
   camera:
     '<path d="M1.6 9c2-3.6 4.6-5.3 7.4-5.3s5.4 1.7 7.4 5.3c-2 3.6-4.6 5.3-7.4 5.3S3.6 12.6 1.6 9z"/><circle cx="9" cy="9" r="2.5"/>',
+  // A radio: its body, a speaker, the tuning scale and the aerial.
+  radio:
+    '<path d="M4.5 5.6 13.5 2.2"/><rect x="1.8" y="5.6" width="14.4" height="10" rx="2"/><circle cx="6.4" cy="10.6" r="2.4"/><path d="M11 9h3M11 12.2h3"/>',
   capture: '<circle cx="9" cy="9" r="6.2"/><circle class="dot" cx="9" cy="9" r="2.8"/>',
   paint:
     '<path d="M9 2.3c2.7 3.3 4.4 5.7 4.4 7.9a4.4 4.4 0 0 1-8.8 0c0-2.2 1.7-4.6 4.4-7.9z"/><path d="M7 11.2a2 2 0 0 0 2 1.9"/>',
@@ -154,6 +157,7 @@ export function setupDayBar(
     openLook,
     nextGraphics,
     openCapture,
+    nextStation,
   }
 ) {
   container.innerHTML = `
@@ -188,6 +192,7 @@ export function setupDayBar(
       <button type="button" class="day-paint" aria-label="Paint, wheels and graphics" title="Paint, wheels and graphics" aria-expanded="false">${icon('paint')}</button>
       <button type="button" class="day-camera" aria-label="Camera: Chase (C)" title="Camera: Chase (C)">${icon('camera')}</button>
       <button type="button" class="day-capture" aria-label="Photo or video" title="Photo or video" aria-expanded="false">${icon('capture')}<b></b></button>
+      <button type="button" class="day-radio" aria-label="Radio (N)" title="Radio (N)" aria-pressed="false">${icon('radio')}</button>
       <button type="button" class="day-sound" aria-label="Sound (M)" title="Sound (M)" aria-pressed="true">${icon('sound')}</button>
       <button type="button" class="day-restart" aria-label="Restart (R)" title="Restart (R)">${icon('restart')}</button>
     </div>`;
@@ -211,6 +216,8 @@ export function setupDayBar(
   autopilotButton.onclick = () => toggleAutopilot?.();
   container.querySelector('.day-restart').onclick = () => restart?.();
   soundButton.onclick = () => toggleSound?.();
+  const radioButton = container.querySelector('.day-radio');
+  radioButton.onclick = () => nextStation?.();
   cameraButton.onclick = () => nextCamera?.();
   const captureButton = container.querySelector('.day-capture');
   captureButton.onclick = () => openCapture?.(captureButton);
@@ -260,6 +267,22 @@ export function setupDayBar(
       captureButton.title = captureButton.ariaLabel = recording
         ? `Recording · ${left} s left (click to stop)`
         : 'Photo or video';
+    },
+    // The radio's station (null when off) and its state: lit while it
+    // plays, pulsing while it tunes in or waits for a click.
+    setRadio(station, state) {
+      radioButton.dataset.state = state;
+      radioButton.setAttribute('aria-pressed', String(Boolean(station)));
+      radioButton.title = radioButton.ariaLabel = station
+        ? `Radio: ${station.name} · ${
+            {
+              tuning: 'tuning in',
+              waiting: 'click to play',
+              muted: 'sound off',
+              error: 'no signal',
+            }[state] ?? station.note
+          } (N: next station)`
+        : 'Radio off (N: Ukrainian stations)';
     },
     // Frames per second, with a dot: green from 55, amber from 30, red below.
     setFps(value) {
