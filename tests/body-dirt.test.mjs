@@ -66,6 +66,27 @@ test('Rubbing along a rail parallel to it scratches the whole side', async () =>
   assert.ok(worn(angled) < 0.8 * perMetre, 'At an angle only near the corner');
 });
 
+test('Hitting a car or a building alongside marks only where it touched', async () => {
+  const { scratchAt, addScratchWear, scratchLayout } = await import('../public/body-dirt.js');
+  // Driving along the road, a car beside clips the right front door.
+  const car = { x: 0, z: 0, heading: 0 };
+  const contact = { x: 1, z: 0.95, impact: 3, scrape: 4, railSlope: 0, traffic: {} };
+  const hit = scratchAt(contact, car, 1 / 60);
+  const row = new Float32Array(scratchLayout.columns);
+  addScratchWear(row, hit.x, hit.wear, hit.angle, hit.spread);
+  const worn = Array.from(row).filter((v) => v > 0.05).length;
+  const perMetre = scratchLayout.columns / scratchLayout.length;
+  assert.ok(
+    worn > 0.5 * perMetre && worn < 1.2 * perMetre,
+    `${worn / perMetre} m, not the whole side`
+  );
+  // The same touch from a rail along the car still wears the whole side.
+  const rail = scratchAt({ ...contact, traffic: undefined }, car, 1 / 60);
+  const side = new Float32Array(scratchLayout.columns);
+  addScratchWear(side, rail.x, rail.wear, rail.angle, rail.spread);
+  assert.ok(Array.from(side).filter((v) => v > 0.05).length > 3.5 * perMetre);
+});
+
 test('winter cakes the car in snow and slush on any road; it thaws after', () => {
   const state = new BodyDirtState();
   const surfaces = ['asphalt', 'asphalt', 'asphalt', 'asphalt'];

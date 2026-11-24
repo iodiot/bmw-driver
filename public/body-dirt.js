@@ -65,6 +65,9 @@ export const scratchLayout = Object.freeze({
   length: 5.1,
   // Wear reaches at least this far around the contact point (m)…
   spread: 0.3,
+  // …or, hitting a car or a building, only this far: it touches at one
+  // place, not along a rail.
+  hitSpread: 0.55,
   // …and along the side wherever it is within this gap of the rail (m).
   reach: 0.03,
   // The side's straight part; the bumpers curve away from a rail.
@@ -73,6 +76,9 @@ export const scratchLayout = Object.freeze({
 
 // Where a rail contact rubs the body: car-space x and side, and how much
 // wear it adds in dt (a hit scratches at once, scraping along wears more).
+// A car or a building (`contact.traffic`) marks only round where it
+// touched: lying along the road like the car does not make it a rail
+// down the whole side.
 export function scratchAt(contact, simulation, dt) {
   const c = Math.cos(simulation.heading),
     s = Math.sin(simulation.heading);
@@ -84,18 +90,20 @@ export function scratchAt(contact, simulation, dt) {
       Math.sin(simulation.heading - railHeading),
       Math.cos(simulation.heading - railHeading)
     );
+  const local = Boolean(contact.traffic);
   return {
     x: dx * c - dz * s,
     side: dx * s + dz * c > 0 ? 1 : 0,
     wear: Math.min(1, contact.impact * 0.25 + contact.scrape * 0.08 * dt + 0.02),
-    angle,
+    angle: local ? Math.PI / 2 : angle,
+    spread: local ? scratchLayout.hitSpread : scratchLayout.spread,
   };
 }
 
 // Adds wear to a row of columns: around car-space x, and along the side as
 // far as it lies within `reach` of the rail at this angle to it.
-export function addScratchWear(row, x, wear, angle = Math.PI / 2) {
-  const { columns, from, length, spread, reach, side } = scratchLayout;
+export function addScratchWear(row, x, wear, angle = Math.PI / 2, spread = scratchLayout.spread) {
+  const { columns, from, length, reach, side } = scratchLayout;
   const tilt = Math.abs(Math.sin(angle));
   let changed = false;
   for (let i = 0; i < columns; i++) {
@@ -324,8 +332,8 @@ export function setupBodyDirt(rig, paintMaterials) {
     // A rail contact this step leaves scratches where it rubs.
     scrape(contact, simulation, dt) {
       if (!contact) return;
-      const { x, side, wear: amount, angle } = scratchAt(contact, simulation, dt);
-      if (addScratchWear(wear[side], x, amount, angle)) uploadScratches();
+      const { x, side, wear: amount, angle, spread } = scratchAt(contact, simulation, dt);
+      if (addScratchWear(wear[side], x, amount, angle, spread)) uploadScratches();
     },
     get scratches() {
       return wear;
