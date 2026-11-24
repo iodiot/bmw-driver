@@ -270,14 +270,15 @@ export function setupCockpitCluster(rig) {
   let elapsed = Infinity;
   const noLamps = { left: false, right: false, low: false, high: false };
   function drawLamps({ left: l, right: rt, low, high }) {
-    // (Low enough to clear the hood over the cluster.)
-    const size = r * 0.12,
+    // Low enough to clear the hood over the cluster, and kept to the middle,
+    // clear of the dials' chrome bezels, which stand out in front of the
+    // face (at this height they come within some 0.6 r of the centre).
+    const size = r * 0.085,
       y = height * 0.22;
-    // (Between the dials' bezels, which stand out in front of the face.)
-    if (l) drawArrow(ctx, width / 2 - r * 0.44, y, size, 1);
-    if (rt) drawArrow(ctx, width / 2 + r * 0.44, y, size, -1);
-    if (low) drawHeadlamp(ctx, width / 2 - r * 0.06, y, size * 0.75, false);
-    if (high) drawHeadlamp(ctx, width / 2 + r * 0.22, y, size * 0.75, true);
+    if (l) drawArrow(ctx, width / 2 - r * 0.37, y, size, 1);
+    if (rt) drawArrow(ctx, width / 2 + r * 0.37, y, size, -1);
+    if (low) drawHeadlamp(ctx, width / 2 - r * 0.04, y, size * 0.85, false);
+    if (high) drawHeadlamp(ctx, width / 2 + r * 0.17, y, size * 0.85, true);
   }
   function draw(speedKmh, rpm, gear, nav = null, lamps = noLamps) {
     ctx.drawImage(dials, 0, 0);
