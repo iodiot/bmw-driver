@@ -33,6 +33,7 @@ import { setupPowerLines } from './power-lines.js';
 import { setupBusStops } from './bus-stops.js';
 import { FuelTank, atPump, fuelPrice, setupFuelStation } from './fuel-station.js';
 import { setupVillage } from './village.js';
+import { setupRouteLand } from './route-land.js';
 import { setupFoxes } from './foxes.js';
 import { collideWithSolids } from './obstacles.js';
 import { route, routeName } from './route.js';
@@ -282,7 +283,9 @@ const toasts = setupToasts(document.body),
 const powerLines = setupPowerLines(scene),
   busStops = setupBusStops(scene),
   fuelStation = setupFuelStation(scene),
-  village = setupVillage(scene);
+  village = setupVillage(scene),
+  // On a real route, what really stands beside it.
+  routeLand = setupRouteLand(scene);
 // Foxes in the winter fields.
 const foxes = setupFoxes(scene);
 // On the route, the real places' names by the road.
@@ -1968,6 +1971,7 @@ renderer.setAnimationLoop((time) => {
   const evening = Math.min(1, Math.max(0, (light.darkness - 0.25) / 0.5));
   fuelStation.update(sim?.x ?? 0, evening, sunDirection, sunlight);
   village.update(sim?.x ?? 0, evening, sunDirection, sunlight, winterLevel, dt);
+  routeLand?.update(sim?.x ?? 0, { evening, winter: winterLevel });
   foxes.update(driving ? dt : 0, sim?.x ?? 0, sim?.z ?? 0, winterLevel);
   routeSignsView?.update(sim?.x ?? 0);
   if (sim) routeCard?.update(dt, sim.x);

@@ -30,10 +30,10 @@ test('it plays louder in the cabin than outside, and follows the volume', () => 
   assert.equal(radioVolume(250, 2), radioVolume(100, 1));
 });
 
-test('it starts off on a first visit and keeps the station chosen last time', () => {
-  assert.equal(keptStation(null), null);
-  assert.equal(keptStation(''), null);
-  assert.equal(keptStation('-1'), null);
+test('it plays the first station on a first visit, then keeps the choice', () => {
+  assert.equal(keptStation(null), 0);
+  assert.equal(keptStation(''), 0);
+  assert.equal(keptStation('-1'), -1);
   assert.equal(keptStation('2'), 2);
-  assert.equal(keptStation(String(radioStations.length)), null);
+  assert.equal(keptStation(String(radioStations.length)), 0);
 });

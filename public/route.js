@@ -77,6 +77,8 @@ export function makeRoute(data) {
     step,
     length,
     places: data.places ?? [],
+    // What stands beside it, from OpenStreetMap (route-land.js), if known.
+    land: data.land ?? null,
     texture,
     samples: centre.length,
     width,

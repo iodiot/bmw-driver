@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { roadCenterSlope, roadCenterZ } from './road-profile.js';
 import { nearestOccurrence } from './road-structures.js';
+import { route } from './route.js';
 import { Kit, canvasTexture } from './build-kit.js';
 import { addSurfaceDetail } from './surface-detail.js';
 import { groupShadow } from './sun-shadows.js';
@@ -25,6 +26,8 @@ import { groupShadow } from './sun-shadows.js';
 // motorway's service lane.
 export const villageYards = Object.freeze([840, 875, 912, 1005, 1040, 1076, 1114, 1150]);
 export const villageSetback = 58;
+// A route whose land is known has its real villages instead (route-land.js).
+export const villageShown = !route?.land;
 const plot = 30;
 
 function seeded(n) {
@@ -275,7 +278,7 @@ function lumpy(radius, random) {
   g.computeVertexNormals();
   return g;
 }
-function addTree(solid, leaves, x, z, kind, random) {
+export function addTree(solid, leaves, x, z, kind, random) {
   const bark = 0x5e5248;
   if (kind === 'poplar') {
     solid.cylinder(0.24, 4, x, 0, z, bark, 7);
@@ -787,6 +790,11 @@ export function setupVillage(scene) {
         if (yard.foliage) yard.foliage.visible = winter < 0.5;
       }
       for (const yard of yards) {
+        if (!villageShown) {
+          yard.group.visible = yard.shadow.mesh.visible = false;
+          if (yard.leafShadow) yard.leafShadow.mesh.visible = false;
+          continue;
+        }
         const u = nearestOccurrence(x, yard.u);
         // Not drawn at all when far off.
         const near = Math.abs(u - x) < 900;

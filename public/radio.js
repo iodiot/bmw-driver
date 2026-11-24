@@ -28,12 +28,14 @@ export function radioVolume(volume, inside) {
 }
 
 const storageKey = 'bmw-driver:radio';
-// The station remembered from the last visit (its index), or null: the
-// radio starts off until it is turned on.
+// The station to start on (its index; -1 is off): the one chosen on the
+// last visit, off if it was turned off, and on a first visit the first
+// station (it plays from the first click or key, as browsers allow).
 export function keptStation(stored, count = radioStations.length) {
-  if (stored === null || stored === undefined || !/^\d+$/.test(String(stored))) return null;
+  if (String(stored) === '-1') return -1;
+  if (stored === null || stored === undefined || !/^\d+$/.test(String(stored))) return 0;
   const index = Number(stored);
-  return index < count ? index : null;
+  return index < count ? index : 0;
 }
 
 // `sound`: the sound checkbox (unticked mutes the radio too); `volume`: the
@@ -43,14 +45,13 @@ export function keptStation(stored, count = radioStations.length) {
 export function setupRadio({ sound, volume, onChange }) {
   const audio = new Audio();
   audio.preload = 'none';
-  let index = -1,
+  let index = 0,
     state = 'off',
     inside = 1;
   try {
-    const kept = keptStation(localStorage.getItem(storageKey));
-    if (kept !== null) index = kept;
+    index = keptStation(localStorage.getItem(storageKey));
   } catch {
-    // No storage: the radio starts off.
+    // No storage: the first station, as on a first visit.
   }
   const station = () => radioStations[index] ?? null;
   const setState = (next) => {

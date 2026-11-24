@@ -7,7 +7,8 @@ import {
 } from './road-profile.js';
 import { nearestOccurrence } from './road-structures.js';
 import { priceSignPlace, pumpIslands, pumpRow } from './fuel-station.js';
-import { villageSetback, villageYards, yardColliders } from './village.js';
+import { villageSetback, villageYards, yardColliders, villageShown } from './village.js';
+import { currentLand } from './route-land.js';
 
 // The solid things beside the country road the car can run into: the fuel
 // station's shop, pump islands, canopy columns and price sign, and the
@@ -34,13 +35,16 @@ export function solidsNear(x, range = 40) {
     // The price sign, by the service lane before the forecourt.
     out.push({ x: u + priceSignPlace.along, lat: edge + priceSignPlace.out, hx: 0.4, hz: 1.4 });
   }
-  villageYards.forEach((yard, i) => {
-    const at = nearestOccurrence(x, yard);
-    if (Math.abs(at - x) > 20 + range) return;
-    const edge = villageSetback;
-    for (const [bx, bz, hx, hz] of yardColliders(i))
-      out.push({ x: at + bx, lat: edge + bz, hx, hz });
-  });
+  // On a real route, its own buildings and trees.
+  if (currentLand) out.push(...currentLand.solidsNear(x, range));
+  if (villageShown)
+    villageYards.forEach((yard, i) => {
+      const at = nearestOccurrence(x, yard);
+      if (Math.abs(at - x) > 20 + range) return;
+      const edge = villageSetback;
+      for (const [bx, bz, hx, hz] of yardColliders(i))
+        out.push({ x: at + bx, lat: edge + bz, hx, hz });
+    });
   return out.filter((b) => Math.abs(b.x - x) < b.hx + range);
 }
 
