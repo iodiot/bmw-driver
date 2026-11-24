@@ -75,6 +75,10 @@ export function setupSignalGlow(scene) {
       fog: false,
       // (The left one is mirrored.)
       side: THREE.DoubleSide,
+      // Flat or added on: one pass for both faces (three otherwise draws
+      // a double-sided transparent material twice, re-checking its program
+      // each time).
+      forceSinglePass: true,
     });
     const geometry = new THREE.PlaneGeometry(length, reach);
     // Out from the side: the texture's top row lies along the car.

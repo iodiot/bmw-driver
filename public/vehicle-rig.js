@@ -368,6 +368,10 @@ export function addRearDefroster(rig) {
       opacity: rearDefroster.opacity,
       depthWrite: false,
       side: THREE.DoubleSide,
+      // Flat or added on: one pass for both faces (three otherwise draws
+      // a double-sided transparent material twice, re-checking its program
+      // each time).
+      forceSinglePass: true,
     })
   );
   mesh.name = 'Rear window heating grid';

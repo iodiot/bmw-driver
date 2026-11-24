@@ -55,7 +55,7 @@ export function createRoadGeometry() {
     for (let p = 0; p <= core + 0.001; p += 0.2) positive.push(Number(p.toFixed(4)));
     let start = core;
     for (const [end, step] of bands) {
-      for (let p = start + step; p <= end + 0.001; p += step) positive.push(p);
+      for (let p = start + step; p <= end + 0.001; p += step) positive.push(Number(p.toFixed(4)));
       start = end;
     }
     return [
@@ -67,8 +67,12 @@ export function createRoadGeometry() {
     ];
   }
   // Dense where bumps and holes are drawn: within 60 m of the car, and the
-  // mesh recentres in 30 m steps, so 80 m either side of its centre.
-  const xs = axis(80, [
+  // mesh recentres in 30 m steps, so 80 m either side of its centre. The
+  // car is within 15 m of the centre, so 20 cm cells reach 25 m past it
+  // and 40 cm ones the rest: tinier cells far off, smaller than a pixel,
+  // cost the GPU without showing.
+  const xs = axis(40, [
+    [80, 0.4],
     [120, 2],
     [240, 8],
     [600, 40],
@@ -195,6 +199,7 @@ export function setupRoad(scene, { lite = false } = {}) {
         // (costly) obstacle profile is not evaluated at all.
         float visibleRoadHeight(vec2 p) {
           float fade = 1. - smoothstep(35., 60., length(p - roadCenter));
+          roadTouched = 0.;
           return fade > 0. ? roadHeight(p) * fade : 0.;
         }
       `;
@@ -206,8 +211,13 @@ export function setupRoad(scene, { lite = false } = {}) {
         // reused for the displacement below.
         vec2 surfaceXZ = (modelMatrix * vec4(position, 1.)).xz;
         float surfaceHeight = visibleRoadHeight(surfaceXZ);
-        float dx = (visibleRoadHeight(surfaceXZ + vec2(.02, 0.)) - surfaceHeight) / .02;
-        float dz = (visibleRoadHeight(surfaceXZ + vec2(0., .02)) - surfaceHeight) / .02;
+        // Only a point on a bump or a hole has a slope: elsewhere (most of
+        // the ground) the two more evaluations are skipped.
+        float dx = 0., dz = 0.;
+        if (roadTouched > 0.) {
+          dx = (visibleRoadHeight(surfaceXZ + vec2(.02, 0.)) - surfaceHeight) / .02;
+          dz = (visibleRoadHeight(surfaceXZ + vec2(0., .02)) - surfaceHeight) / .02;
+        }
         objectNormal = normalize(vec3(-dx, dz, 1.));
       `
       );

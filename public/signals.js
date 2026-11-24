@@ -78,10 +78,10 @@ export function highBeamWanted({
 }) {
   return Boolean(
     enabled &&
-      night &&
-      !raining &&
-      speed >= highBeamAssist.minSpeed &&
-      trafficDistance > highBeamAssist.glare
+    night &&
+    !raining &&
+    speed >= highBeamAssist.minSpeed &&
+    trafficDistance > highBeamAssist.glare
   );
 }
 
@@ -155,6 +155,10 @@ function lampLight(name) {
     depthWrite: false,
     toneMapped: false,
     side: THREE.DoubleSide,
+    // Flat or added on: one pass for both faces (three otherwise draws
+    // a double-sided transparent material twice, re-checking its program
+    // each time).
+    forceSinglePass: true,
     polygonOffset: true,
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,

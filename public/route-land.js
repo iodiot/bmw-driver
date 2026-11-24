@@ -134,7 +134,14 @@ const pickOf = (list, r) => list[Math.floor(r * list.length) % list.length];
 function addBuilding(b, solid, lit, dark) {
   const r = (n) => hash2(b.seed, n, 71);
   const { length: L, width: W, height: h } = b;
-  const pane = (kit, x, y, z, w, tall) => kit.box(w, tall, 0.06, x, y, z, 0x2a3440);
+  // A window: one quad on the wall, facing out (z < 0 the front, else the
+  // back), two triangles where a box would take twelve.
+  const pane = (kit, x, y, z, w, tall) =>
+    kit.add(
+      new THREE.PlaneGeometry(w, tall),
+      0x2a3440,
+      new THREE.Matrix4().makeRotationY(z < 0 ? Math.PI : 0).setPosition(x, y + tall / 2, z)
+    );
   const glass = (n) => (r(n) < 0.55 ? lit : dark);
   if (b.kind === 0) {
     solid.box(L, h, W, 0, 0, 0, pickOf(walls, r(1)));
@@ -249,7 +256,9 @@ export function setupRouteLand(scene) {
       if (!kit.parts.length) continue;
       const mesh = new THREE.Mesh(kit.geometry(), material);
       mesh.name = name;
-      mesh.castShadow = mesh.receiveShadow = material === solidMaterial;
+      // (They stand well outside the few metres the sun's shadow map
+      // covers round the car, so they cast nothing into it.)
+      mesh.receiveShadow = material === solidMaterial;
       mesh.userData.noShadow = true;
       group.add(mesh);
       meshes.push(mesh);

@@ -788,6 +788,10 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
     transparent: true,
     opacity: 0.45,
     side: THREE.DoubleSide,
+    // Flat or added on: one pass for both faces (three otherwise draws
+    // a double-sided transparent material twice, re-checking its program
+    // each time).
+    forceSinglePass: true,
     depthWrite: false,
     polygonOffset: true,
     polygonOffsetFactor: -3,
@@ -890,6 +894,10 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
         fog: false,
         // (The tail glow's is mirrored.)
         side: THREE.DoubleSide,
+        // Flat or added on: one pass for both faces (three otherwise draws
+        // a double-sided transparent material twice, re-checking its program
+        // each time).
+        forceSinglePass: true,
       }),
       capacity
     );

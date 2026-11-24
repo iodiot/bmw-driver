@@ -362,6 +362,12 @@ export function guardrailSlope(x, lateral, h = 0.5) {
   return roadCenterSlope(x) + (near(x + h) - near(x - h)) / (2 * h);
 }
 const f = (n) => Number(n).toFixed(6);
+// How far across the road any bump or hole reaches: beyond it the shaders
+// skip the obstacles (most of the ground is verge and field).
+export const obstacleReach = Math.max(
+  0,
+  ...obstacles.map((o) => Math.abs(o.z) + (o.w / 2) * (o.h < 0 ? 1.3 : 1))
+);
 export const roadProfileGLSL = `
 ${terrainGLSL}
 float roadCenterZ(float x) {
@@ -379,9 +385,14 @@ float branchOffset(float x) {
     smoothstep(${f(branchSpan - roadBranch.diverge)}, ${f(branchSpan)}, u);
   return ${f(roadLanes.at(-1))} + ${f(roadBranch.separation - roadLanes.at(-1))} * swing;
 }
+// Set when the last roadHeight() point lay within reach of an obstacle
+// (its slope is then worth working out).
+float roadTouched = 0.;
 float roadHeight(vec2 p) {
   float h = 0.;
+  roadTouched = 0.;
   float lateral = p.y - roadCenterZ(p.x);
+  if (abs(lateral) > ${f(obstacleReach + 0.05)}) return 0.;
   // Distance into the obstacles' period once; each obstacle then costs a
   // subtraction and a comparison unless the point is beside it.
   float px = mod(p.x, ${f(roadPeriod)});
@@ -413,6 +424,7 @@ float roadHeight(vec2 p) {
     float dx = px - ${f(o.x)};
     ${wrap}
     if (abs(dx) < ${f(reach)}) {
+      roadTouched = 1.;
       ${body}
     }
   }`;
