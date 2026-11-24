@@ -10,7 +10,7 @@ import * as THREE from 'three';
 // shapes rather than with a system font, so the plate looks the same
 // everywhere.
 export const ukrainianPlate = Object.freeze({
-  text: 'AP 1860 EA',
+  text: 'AP 1011 CX',
   width: 0.52,
   height: 0.112,
 });
