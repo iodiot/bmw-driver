@@ -55,4 +55,34 @@ test('the route has its own link; the main page keeps the endless road', async (
   assert.equal(routeFor('/bmw-driver/', '?kyiv&time=22'), 'm06');
   assert.equal(routeFor('/bmw-driver/', '?time=22&kyiv='), 'm06');
   assert.equal(routeFor('/bmw-driver/', '?kyiv&route=endless'), 'endless');
+  assert.equal(routeFor('/bmw-driver/', '?zp'), 'n08');
+  assert.equal(routeFor('/bmw-driver/zp/', ''), 'n08');
+  assert.equal(routeFor('/bmw-driver/', '?zp&time=22'), 'n08');
+});
+
+test('the N-08 from Dnipro to Zaporizhzhia: its length, heights, places and bends', () => {
+  const zp = makeRoute(
+    JSON.parse(readFileSync(new URL('../public/assets/route-n08.json', import.meta.url)))
+  );
+  assert.equal(zp.from, 'Дніпро');
+  assert.equal(zp.to, 'Запоріжжя');
+  assert.equal(zp.road, 'Н-08');
+  assert.equal(zp.toGenitive, 'Запоріжжя');
+  assert.equal(zp.toLocative, 'Запоріжжі');
+  // From Dnipro's edge to Zaporizhzhia's, some 64 km of the N-08.
+  assert.ok(zp.length > 60000 && zp.length < 68000);
+  // The steppe above the Dnipro's valley: 50–160 m.
+  for (let x = 0; x < zp.length; x += 100) {
+    const h = zp.height(x) + routeDatum;
+    assert.ok(h > 40 && h < 170, `height ${h} at ${x}`);
+    assert.ok(Math.abs(zp.grade(x + 5)) < 0.04, `grade at ${x}`);
+    assert.ok(Math.abs(zp.centreSlope(x + 5)) < Math.tan((15.5 * Math.PI) / 180), `slope at ${x}`);
+  }
+  const names = zp.places.map((p) => p.name);
+  for (const name of ['Дослідне', 'Петропавлівка']) assert.ok(names.includes(name), name);
+  // Its boards count down to Zaporizhzhia and on beyond it.
+  assert.deepEqual(
+    zp.boards.map((b) => b.name),
+    ['Запоріжжя', 'Мелітополь', 'Маріуполь']
+  );
 });

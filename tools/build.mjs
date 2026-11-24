@@ -92,37 +92,50 @@ html = html.replace(
 </body>`
 );
 await writeFile(new URL('index.html', output), html);
-// The drive from Zhytomyr to Kyiv on its own link, ?kyiv (route.js picks
-// the route from it). The old /kyiv/ page stays for links already sent: it
-// keeps the route's title and link preview, for the messengers that read
-// them, and sends a visitor on to ?kyiv with whatever else was asked.
-const routeTitle = 'BMW M5 F10 · Житомир → Київ';
-const routeAbout =
-  '116,8 км трасою М-06: справжні повороти, висоти й села, а скільки до Києва — на приладовій панелі.';
-const routeHtml = `<!doctype html>
+// The real drives on their own links, ?kyiv and ?zp (route.js picks the
+// route from them). A page in a folder of each name (/kyiv/, /zp/) keeps
+// the drive's title and link preview, for the messengers that read them,
+// and sends a visitor on to the link with whatever else was asked.
+const routePages = [
+  {
+    path: 'kyiv',
+    title: 'BMW M5 F10 · Житомир → Київ',
+    about:
+      '116,8 км трасою М-06: справжні повороти, висоти й села, а скільки до Києва — на приладовій панелі.',
+  },
+  {
+    path: 'zp',
+    title: 'BMW M5 F10 · Дніпро → Запоріжжя',
+    about:
+      '63,8 км трасою Н-08: справжні повороти, висоти й села, а скільки до Запоріжжя — на приладовій панелі.',
+  },
+];
+for (const { path, title, about } of routePages) {
+  const page = `<!doctype html>
 <html lang="uk">
   <head>
     <meta charset="utf-8" />
-    <title>${routeTitle}</title>
-    <meta name="description" content="${routeAbout}" />
+    <title>${title}</title>
+    <meta name="description" content="${about}" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="${routeTitle}" />
-    <meta property="og:description" content="${routeAbout}" />
+    <meta property="og:title" content="${title}" />
+    <meta property="og:description" content="${about}" />
     <meta name="twitter:card" content="summary" />
-    <link rel="canonical" href="../?kyiv" />
-    <meta http-equiv="refresh" content="0; url=../?kyiv" />
+    <link rel="canonical" href="../?${path}" />
+    <meta http-equiv="refresh" content="0; url=../?${path}" />
     <script>
       const rest = location.search.slice(1);
-      location.replace('../?kyiv' + (rest ? '&' + rest : '') + location.hash);
+      location.replace('../?${path}' + (rest ? '&' + rest : '') + location.hash);
     </script>
   </head>
   <body>
-    <a href="../?kyiv">${routeTitle}</a>
+    <a href="../?${path}">${title}</a>
   </body>
 </html>
 `;
-await mkdir(new URL('kyiv/', output), { recursive: true });
-await writeFile(new URL('kyiv/index.html', output), routeHtml);
+  await mkdir(new URL(`${path}/`, output), { recursive: true });
+  await writeFile(new URL(`${path}/index.html`, output), page);
+}
 await writeFile(
   new URL('build.json', output),
   JSON.stringify({

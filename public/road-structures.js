@@ -409,6 +409,29 @@ function arrow(g, x, y, angle, length = 70, width = 16) {
   g.fill();
   g.restore();
 }
+// The distance boards' rows at x: on the endless road toward Kyiv; on a
+// route, its own places (one on the route by name, its end, and places
+// beyond it), counting down as you drive.
+function endlessBoards(at) {
+  const kyiv = Number.isFinite(at) ? kyivDistance(at) : 48;
+  return [
+    ['Стоянка', kyiv - 14],
+    ['Київ', kyiv],
+    ['Бориспіль', kyiv + 38],
+  ];
+}
+function routeBoards(at) {
+  const left = Number.isFinite(at) ? route.toGo(at) / 1000 : route.length / 2000;
+  return route.boards
+    .map((b) => {
+      if (b.place) {
+        const p = route.places.find((q) => q.name === b.place);
+        return p ? [b.place, Math.round(left - route.toGo(p.at) / 1000)] : null;
+      }
+      return [b.name, Math.round(left + (b.beyond ?? 0))];
+    })
+    .filter(Boolean);
+}
 // Kilometres to Kyiv at x metres along the road: counting down as you
 // drive, and (the road being endless) starting again from 70 km at 12.
 export function kyivDistance(x) {
@@ -491,16 +514,7 @@ const signFaces = {
     draw(g, w, h, at) {
       roundedPanel(g, 4, 4, w - 8, h - 8, 22, motorwayGreen, '#ffffff', 8);
       routeShield(g, 36, 30);
-      const kyiv = Number.isFinite(at) ? kyivDistance(at) : 48;
-      const stoyanka = route?.places.find((p) => p.name === 'Стоянка');
-      const rows = [
-        [
-          'Стоянка',
-          stoyanka && Number.isFinite(at) ? Math.round((stoyanka.at - at) / 1000) : kyiv - 14,
-        ],
-        ['Київ', kyiv],
-        ['Бориспіль', kyiv + 38],
-      ].filter(([, km]) => km > 0);
+      const rows = (route ? routeBoards(at) : endlessBoards(at)).filter(([, km]) => km > 0);
       g.fillStyle = '#ffffff';
       g.textBaseline = 'alphabetic';
       rows.forEach(([place, km], i) => {

@@ -35,7 +35,7 @@ import { FuelTank, atPump, fuelPrice, setupFuelStation } from './fuel-station.js
 import { setupVillage } from './village.js';
 import { setupFoxes } from './foxes.js';
 import { collideWithSolids } from './obstacles.js';
-import { route } from './route.js';
+import { route, routeName } from './route.js';
 import { setupRouteSigns } from './route-signs.js';
 import { setupRouteCard } from './route-card.js';
 import { DriftScore, driftRules } from './drift.js';
@@ -921,7 +921,7 @@ $('#pause').onclick = () => setDriving(!driving);
 // starts again from Zhytomyr.
 let routeTime = 0,
   arrived = false;
-const routeBestKey = 'bmw-driver:route-m06';
+const routeBestKey = `bmw-driver:route-${routeName}`;
 const routeClock = (seconds) => {
   const h = Math.floor(seconds / 3600),
     m = Math.floor((seconds % 3600) / 60),

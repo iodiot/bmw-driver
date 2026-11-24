@@ -1,23 +1,27 @@
 import * as THREE from 'three';
 
-// A real road to drive instead of the endless one: Zhytomyr to Kyiv on the
-// M-06 (see tools/route-m06). It has its own link, the site's ?kyiv (the
-// old /kyiv/ page sends there; ?route=m06 does the same, ?route=endless the
+// Real roads to drive instead of the endless one: Zhytomyr to Kyiv on the
+// M-06, and Dnipro to Zaporizhzhia on the N-08 (see tools/routes). Each has
+// its own link, the site's ?kyiv and ?zp (the old /kyiv/ and /zp/ pages
+// send there; ?route=m06 or n08 does the same, ?route=endless the
 // opposite), to send to friends; the endless road stays at the main one.
 //
-// x is the distance from the start, just past Zhytomyr's ramps. The road's
+// x is the distance from the start, just past the first city's streets. The road's
 // centre line (z) follows the real bends, unbent into the game's shape, and
 // the land's height is the real height above sea level (SRTM), smoothed.
 // Outside a browser (the tests) there is no route.
-export const routes = Object.freeze(['endless', 'm06']);
+export const routes = Object.freeze(['endless', 'm06', 'n08']);
+// Each route's link: ?kyiv, ?zp.
+export const routePaths = Object.freeze({ kyiv: 'm06', zp: 'n08' });
 export const routePath = 'kyiv';
 
 export function routeFor(pathname = '', search = '') {
   const query = new URLSearchParams(search);
   const asked = query.get('route');
   if (routes.includes(asked)) return asked;
-  if (query.has(routePath)) return 'm06';
-  return pathname.replace(/\/+$/, '').endsWith(`/${routePath}`) ? 'm06' : 'endless';
+  for (const [path, name] of Object.entries(routePaths)) if (query.has(path)) return name;
+  const last = pathname.replace(/\/+$/, '').split('/').pop();
+  return routePaths[last] ?? 'endless';
 }
 const chosenRoute = () =>
   typeof location === 'undefined' ? 'endless' : routeFor(location.pathname, location.search);
@@ -65,6 +69,11 @@ export function makeRoute(data) {
     road: data.road,
     from: data.from,
     to: data.to,
+    // (Its name as “to Kyiv” and “in Kyiv” want it.)
+    toGenitive: data.toGenitive ?? data.to,
+    toLocative: data.toLocative ?? data.to,
+    // What its green distance boards count down to.
+    boards: data.boards ?? [],
     step,
     length,
     places: data.places ?? [],
@@ -76,7 +85,7 @@ export function makeRoute(data) {
     // Height above the datum, and its grade.
     height: (x) => at(height, x) - routeDatum,
     grade: (x) => slopeOf(height, x),
-    // Metres still to go to the end (Kyiv).
+    // Metres still to go to the end.
     toGo: (x) => Math.max(0, length - x),
   };
 }
