@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 import { roadCenterZ, roadCenterSlope, roadHeight } from './road-profile.js';
 import { tunnelCover, bridgeShade, structureUniforms } from './road-structures.js';
 import { OncomingTraffic, Traffic, rideOver, vehicleTypes } from './traffic.js';
@@ -62,6 +62,59 @@ function taper(geometry, from, top, to) {
   }
   geometry.computeVertexNormals();
   return geometry;
+}
+// Rounds a vehicle `L` long and `W` wide in plan: toward each end (over
+// `reach` metres, front and rear) its sides draw in by `inset` (a share of
+// the half-width) and its face bows back `bow` metres at the corners (each
+// front and rear), so the
+// nose and tail curve round rather than end square; every part but the
+// wheels and plates follows (lamps and grille wrap with the face). Then
+// smooth shading over the rounded surfaces, kept sharp at real edges.
+function shapePlan(parts, L, W, { reach = [0.8, 0.6], inset = [0, 0], bow = [0.26, 0.15] } = {}) {
+  for (const [kind, list] of Object.entries(parts)) {
+    if (kind === 'plate') continue;
+    parts[kind] = list.map((g) => {
+      if (g.userData.hub) return g;
+      const p = g.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        const x = p.getX(i),
+          z = p.getZ(i);
+        const end = x >= 0 ? 0 : 1;
+        const t = Math.max(0, Math.min(1, 1 - (L / 2 - Math.abs(x)) / reach[end]));
+        const s = t * t;
+        const across = Math.min(1, (2 * z) / W) ** 2;
+        p.setZ(i, z * (1 - inset[end] * s));
+        p.setX(i, x - Math.sign(x) * bow[end] * s * across);
+      }
+      const shaded = toCreasedNormals(g, 0.75);
+      // The flat sides are a few long triangles: shaded by their corners'
+      // normals, drawn in toward the ends, they streak. Kept facing square
+      // out; the rounded edges carry the curve.
+      const n = shaded.attributes.normal;
+      for (let i = 0; i < n.count; i++)
+        if (Math.abs(n.getZ(i)) > 0.85) n.setXYZ(i, 0, 0, Math.sign(n.getZ(i)));
+      shaded.userData = g.userData;
+      return shaded;
+    });
+  }
+  return parts;
+}
+// Where a closed outline's front (or, with `dir` −1, its rear) face is at
+// height y, and how far it leans back there (radians): `outline` is the
+// rounded profile's points in order (see roundedShape).
+function faceAt(outline, y, dir = 1) {
+  let best = null;
+  for (let i = 0; i < outline.length; i++) {
+    const a = outline[i],
+      b = outline[(i + 1) % outline.length];
+    if ((y < a.y && y < b.y) || (y > a.y && y > b.y) || a.y === b.y) continue;
+    const x = a.x + ((b.x - a.x) * (y - a.y)) / (b.y - a.y);
+    if (!best || x * dir > best.x * dir) {
+      const [lo, hi] = a.y < b.y ? [a, b] : [b, a];
+      best = { x, lean: Math.atan2((lo.x - hi.x) * dir, hi.y - lo.y) };
+    }
+  }
+  return best ?? { x: 0, lean: 0 };
 }
 // A number plate (520 × 112 mm) at x, height y, facing forward (+1) or back.
 const plateAt = (x, y, facing) => {
@@ -220,6 +273,14 @@ function car({ length: L, width: W }, profile) {
   // The body, its arches cut out, rounded at the shoulders.
   const cut = withArches(body.points, body.radii, [front, rear], r);
   parts.paint.push(taper(extruded(cut.points, cut.radii, W, 0.1), belt - 0.35, belt, 0.95));
+  // Its outline as drawn, to set the lamps and plates on its faces, and its
+  // half-width at a height (drawn in toward the shoulders).
+  const outline = roundedShape(cut.points, cut.radii).getPoints(5);
+  const face = (y, dir = 1) => faceAt(outline, y, dir);
+  const sideAt = (y) => {
+    const t = Math.max(0, Math.min(1, (y - belt + 0.35) / 0.35));
+    return (W / 2) * (1 - 0.05 * t * t);
+  };
   for (const x of [front, rear]) parts.trim.push(wheelWell(r, x, W - 0.16));
   // The glasshouse and the roof over it.
   parts.glass.push(
@@ -229,9 +290,17 @@ function car({ length: L, width: W }, profile) {
   const [rearSill, screenBase, screenTop, rearTop] = glass.points;
   // Black pillars between the side windows, and a bright strip along their
   // foot.
+  // (Up to the roof's edge, not past it.)
   const pillar = (x, width) => {
     for (const side of [-1, 1]) {
-      const g = box(width, top - belt + 0.05, 0.02, x, (belt + top) / 2, side * (W * 0.45 + 0.012));
+      const g = box(
+        width,
+        top - belt - 0.08,
+        0.02,
+        x,
+        (belt + top) / 2 - 0.05,
+        side * (W * 0.45 + 0.012)
+      );
       parts.trim.push(taper(g, belt - 0.05, top, 0.78));
     }
   };
@@ -268,23 +337,28 @@ function car({ length: L, width: W }, profile) {
         side * (W / 2 - 0.004)
       )
     );
-    // Door mirrors at the windscreen's foot: a cap in the body's colour on
-    // a dark base, its glass facing back.
-    parts.paint.push(box(0.11, 0.1, 0.19, screenBase[0] - 0.2, belt + 0.1, side * (W / 2 + 0.07)));
-    parts.trim.push(
-      box(0.08, 0.04, 0.1, screenBase[0] - 0.16, belt + 0.03, side * (W / 2 - 0.005))
-    );
-    parts.glass.push(
-      box(0.01, 0.07, 0.15, screenBase[0] - 0.26, belt + 0.1, side * (W / 2 + 0.07))
-    );
+    // Door mirrors on the doors just behind the windscreen's foot: a cap in
+    // the body's colour on a short dark arm, its glass facing back.
+    const mx = screenBase[0] - 0.12;
+    const cap = new THREE.SphereGeometry(1, 10, 6);
+    cap.scale(0.06, 0.05, 0.09);
+    cap.translate(mx, belt + 0.07, side * (W / 2 + 0.05));
+    cap.deleteAttribute('uv');
+    parts.paint.push(cap);
+    parts.trim.push(box(0.05, 0.035, 0.1, mx + 0.01, belt + 0.02, side * (W / 2 - 0.02)));
+    parts.glass.push(box(0.01, 0.06, 0.12, mx - 0.056, belt + 0.07, side * (W / 2 + 0.055)));
   }
   // The front: a grille in a bright surround between the lamps, a dark
   // intake low in the bumper; the rear: a dark diffuser.
   const nose = L / 2;
-  parts.trim.push(box(0.05, 0.16, W * 0.4, nose + 0.02, lampY.head - 0.03, 0));
-  parts.metal.push(box(0.03, 0.02, W * 0.42, nose + 0.035, lampY.head + 0.06, 0));
-  parts.metal.push(box(0.03, 0.02, W * 0.42, nose + 0.035, lampY.head - 0.12, 0));
-  parts.trim.push(box(0.08, 0.1, W * 0.62, nose - 0.02, 0.4, 0));
+  // On the face, leaning back with it: where it is at the lamps' height.
+  const headFace = face(lampY.head),
+    tailFace = face(lampY.tail, -1);
+  const onFace = (sx, sy, sz, y, z, out = 0) =>
+    leaning(sx, sy, sz, face(y).x + out, y, z, face(y).lean);
+  parts.trim.push(onFace(0.04, 0.11, W * 0.34, lampY.head - 0.02, 0, -0.02));
+  parts.metal.push(onFace(0.03, 0.014, W * 0.35, lampY.head + 0.035, 0, -0.008));
+  parts.trim.push(onFace(0.06, 0.1, W * 0.62, 0.4, 0, -0.02));
   parts.trim.push(box(0.12, 0.12, W * 0.86, -nose + 0.06, 0.38, 0));
   // Roof rails on an SUV.
   if (profile.rails)
@@ -300,8 +374,10 @@ function car({ length: L, width: W }, profile) {
         )
       );
   // Number plates, front and rear.
-  parts.plate.push(plateAt(-nose - 0.035, lampY.tail - 0.33, -1));
-  parts.plate.push(plateAt(nose + 0.035, 0.46, 1));
+  // (plateAt stands each 75 mm out from x: on its face here.)
+  const rearPlateY = lampY.tail - 0.33;
+  parts.plate.push(plateAt(face(rearPlateY, -1).x + 0.065, rearPlateY, -1));
+  parts.plate.push(plateAt(face(0.46).x - 0.065, 0.46, 1));
   // Alloy wheels on tyres, flush with the body's sides.
   for (const x of [front, rear])
     for (const side of [-1, 1]) {
@@ -311,17 +387,46 @@ function car({ length: L, width: W }, profile) {
     }
   // Lamps: each in a dark housing, the tail lamps wrapping round the rear
   // corners, the indicators at the corners.
+  const hx = headFace.x,
+    tx = tailFace.x;
   for (const side of [-1, 1]) {
-    parts.trim.push(box(0.05, 0.16, 0.42, nose - 0.01, lampY.head, side * (W / 2 - 0.25)));
-    parts.head.push(box(0.03, 0.09, 0.34, nose + 0.012, lampY.head + 0.01, side * (W / 2 - 0.27)));
-    parts.trim.push(box(0.05, 0.17, 0.48, -nose + 0.01, lampY.tail, side * (W / 2 - 0.26)));
-    parts.tail.push(box(0.03, 0.12, 0.42, -nose - 0.012, lampY.tail, side * (W / 2 - 0.27)));
-    parts.tail.push(box(0.3, 0.12, 0.03, -nose + 0.16, lampY.tail, side * (W / 2 + 0.004)));
+    // Headlamps set into the face, a dark housing round a slimmer lens,
+    // swept back with the face's curve (see shapePlan).
+    parts.trim.push(
+      leaning(0.04, 0.13, 0.44, hx - 0.035, lampY.head, side * (W / 2 - 0.27), headFace.lean)
+    );
+    parts.head.push(
+      leaning(
+        0.03,
+        0.075,
+        0.36,
+        hx - 0.018,
+        lampY.head + 0.008,
+        side * (W / 2 - 0.29),
+        headFace.lean
+      )
+    );
+    // Tail lamps on the rear face, clear of its rounded corners.
+    parts.tail.push(
+      leaning(0.03, 0.12, 0.42, tx - 0.012, lampY.tail, side * (W / 2 - 0.31), -tailFace.lean)
+    );
     const lamps = side < 0 ? parts.left : parts.right;
-    lamps.push(box(0.05, 0.07, 0.08, -nose - 0.014, lampY.tail, side * (W / 2 - 0.05)));
-    lamps.push(box(0.05, 0.06, 0.08, nose + 0.014, lampY.head, side * (W / 2 - 0.05)));
+    lamps.push(
+      leaning(
+        0.03,
+        0.06,
+        0.07,
+        tx - 0.008,
+        lampY.tail - 0.005,
+        side * (W / 2 - 0.08),
+        -tailFace.lean
+      )
+    );
+    lamps.push(
+      leaning(0.03, 0.05, 0.07, hx + 0.002, lampY.head, side * (W / 2 - 0.06), headFace.lean)
+    );
   }
-  return parts;
+  return shapePlan(parts, L, W, profile.plan);
 }
 const profiles = {
   hatch: {
@@ -358,7 +463,8 @@ const profiles = {
     wheelbase: 2.62,
     frontOverhang: 0.85,
     r: 0.31,
-    lampY: { tail: 0.9, head: 0.68 },
+    // (The tail lamps low, below the tailgate's slope.)
+    lampY: { tail: 0.68, head: 0.68 },
   },
   sedan: {
     body: {
@@ -395,7 +501,7 @@ const profiles = {
     wheelbase: 2.8,
     frontOverhang: 0.92,
     r: 0.32,
-    lampY: { tail: 0.88, head: 0.67 },
+    lampY: { tail: 0.8, head: 0.67 },
   },
   suv: {
     body: {
@@ -431,7 +537,7 @@ const profiles = {
     wheelbase: 2.72,
     frontOverhang: 0.88,
     r: 0.36,
-    lampY: { tail: 1.0, head: 0.8 },
+    lampY: { tail: 0.9, head: 0.8 },
     rails: true,
   },
 };
@@ -490,12 +596,12 @@ function van({ length: L, width: W }) {
       parts.trim.push(box(1.9, 0.04, 0.03, nose - 3.4, 2.02, z));
     }
     // The cab door's seam, its handle; the rubbing strip; the mirror.
-    parts.trim.push(box(0.014, 1.5, 0.008, nose - 0.75, 1.35, z));
+    parts.trim.push(box(0.014, 1.1, 0.008, nose - 1.45, 1.3, z));
     parts.metal.push(box(0.16, 0.035, 0.03, nose - 2.0, 1.2, side * (W / 2 + 0.012)));
     parts.trim.push(box(L - 1.6, 0.14, 0.03, -0.4, 0.68, side * (W / 2 + 0.008)));
-    parts.trim.push(box(0.04, 0.04, 0.32, nose - 0.75, 1.62, side * (W / 2 + 0.14)));
-    parts.trim.push(box(0.1, 0.34, 0.16, nose - 0.8, 1.72, side * (W / 2 + 0.3)));
-    parts.glass.push(box(0.01, 0.28, 0.12, nose - 0.86, 1.72, side * (W / 2 + 0.3)));
+    parts.trim.push(box(0.04, 0.04, 0.26, nose - 1.1, 1.62, side * (W / 2 + 0.12)));
+    parts.trim.push(box(0.09, 0.3, 0.14, nose - 1.12, 1.72, side * (W / 2 + 0.26)));
+    parts.glass.push(box(0.01, 0.25, 0.11, nose - 1.17, 1.72, side * (W / 2 + 0.26)));
   }
   // Bumpers, the grille with its bright bars, the rear doors' seams and
   // their handle.
@@ -519,7 +625,7 @@ function van({ length: L, width: W }) {
     lamps.push(box(0.05, 0.12, 0.14, tail - 0.012, 0.78, side * (W / 2 - 0.08)));
     lamps.push(box(0.05, 0.07, 0.1, nose - 0.08, 0.98, side * (W / 2 - 0.04)));
   }
-  return parts;
+  return shapePlan(parts, L, W, { reach: [0.6, 0.3], inset: [0, 0], bow: [0.14, 0.03] });
 }
 // A tractor unit and a box trailer, 16.5 m in all. The cab: a sloped,
 // rounded front with a big windscreen under a sun visor, a dark grille with
@@ -1055,7 +1161,8 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
       off: new THREE.Color(0.22, 0.03, 0.02),
       tail: new THREE.Color(1.1, 0.07, 0.05),
       brake: new THREE.Color(3.4, 0.2, 0.12),
-      headDay: new THREE.Color(0.9, 0.92, 0.95),
+      // (By day, unlit: clear glass over a silvered reflector.)
+      headDay: new THREE.Color(0.55, 0.58, 0.62),
       headNight: new THREE.Color(3, 2.9, 2.6),
       signalOff: new THREE.Color(0.25, 0.12, 0.02),
       signalOn: new THREE.Color(3.2, 1.35, 0.08),
