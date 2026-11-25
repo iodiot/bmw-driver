@@ -165,6 +165,16 @@ export function branchOffset(x) {
   const out = smooth(0, diverge, u) - smooth(branchSpan - diverge, branchSpan, u);
   return lane + (separation - lane) * out;
 }
+// A roadside lateral offset at x moved clear of the service lane where it
+// runs there: something standing on the verge at `lateral` that would fall
+// on the lane (or within `margin` of it) stands beyond its far edge.
+export function clearOfServiceLane(x, lateral, margin = 1.2) {
+  const branch = branchOffset(x);
+  if (branch === null) return lateral;
+  const near = branch - roadBranch.halfWidth - margin,
+    far = branch + roadBranch.halfWidth + margin;
+  return lateral > near && lateral < far ? far : lateral;
+}
 // Distance from x to the start of the next branch section (0 inside one).
 export function nextBranch(x) {
   if (branchLocal(x) >= 0) return 0;
@@ -438,8 +448,8 @@ float roadCenterZ(float x) {
 float carriageLat(float lateral) {
   return ${oncoming ? `lateral < ${f(medianBarrier)} ? ${f(oncomingCentre)} - lateral : lateral` : 'lateral'};
 }
-// Branch centre offset from the road centre; negative where there is none.
-float branchOffset(float x) {
+// How far into its service area's branch x is; negative outside one.
+float branchAlong(float x) {
   ${
     serviceOrigins
       ? `float u = -1.;
@@ -449,10 +459,15 @@ float branchOffset(float x) {
         `if (x > ${f(o + roadBranch.start)} && x < ${f(o + roadBranch.start + branchSpan)}) u = x - ${f(o + roadBranch.start)};`
     )
     .join('\n  ')}
-  if (u < 0.) return -1.;`
+  return u;`
       : `float u = mod(x - ${f(roadBranch.start)}, ${f(roadBranch.period)});
-  if (u > ${f(branchSpan)}) return -1.;`
+  return u > ${f(branchSpan)} ? -1. : u;`
   }
+}
+// Branch centre offset from the road centre; negative where there is none.
+float branchOffset(float x) {
+  float u = branchAlong(x);
+  if (u < 0.) return -1.;
   float swing = smoothstep(0., ${f(roadBranch.diverge)}, u) -
     smoothstep(${f(branchSpan - roadBranch.diverge)}, ${f(branchSpan)}, u);
   return ${f(roadLanes.at(-1))} + ${f(roadBranch.separation - roadLanes.at(-1))} * swing;

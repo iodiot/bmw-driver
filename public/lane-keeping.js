@@ -28,10 +28,13 @@ export function pathCurvature(path, x, h = 0.5) {
 // `braking` m/s² sheds before reaching it. The default is a gentle 2 m/s²,
 // about what lifting off sheds at motorway speed: hard braking mid-bend at
 // 240 km/h unsettles the car more than the bend does.
+// (A route's road runs straight between samples 10 m apart and turns at
+// each: its curvature is read over 10 m, every 5 m, so no turn falls
+// between the points looked at.)
 export function curveSpeed(x, path = 0, { lateral = 4, braking = 2, lookahead = 900 } = {}) {
   let limit = Infinity;
-  for (let d = 0; d <= lookahead; d += 10) {
-    const k = Math.abs(pathCurvature(path, x + d)) + 1e-6;
+  for (let d = 0; d <= lookahead; d += 5) {
+    const k = Math.abs(pathCurvature(path, x + d, 5)) + 1e-6;
     limit = Math.min(limit, Math.sqrt(lateral / k + 2 * braking * d));
   }
   return limit;

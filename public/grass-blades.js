@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { roadProfileGLSL } from './road-profile.js';
+import { fuelStationPlace, roadBranch, roadProfileGLSL } from './road-profile.js';
 
 // Blades of grass on the fields either side of the road, round the camera:
 // two strips `length` metres along the road, from the verge out to `reach`,
@@ -102,6 +102,13 @@ export function setupGrassBlades(scene, { grassMap, noiseMap }) {
         float trackLat = branch < 0. ? 1e3 : abs(roadLat - branch);
         float grows = smoothstep(${f(clearRoad[0])}, ${f(clearRoad[1])}, abs(carriageLat(roadLat))) *
           smoothstep(${f(clearTrack[0])}, ${f(clearTrack[1])}, trackLat);
+        // None on the fuel station's forecourt, nor on the way onto it and
+        // off it from the service lane.
+        float stationAlong = branchAlong(root.x) - ${f(fuelStationPlace.at - roadBranch.start)};
+        float depth = roadLat - branch - ${f(roadBranch.halfWidth)};
+        if (branch >= 0. && abs(stationAlong) < ${f(fuelStationPlace.length / 2 + 26)} &&
+            depth > -1. && depth < ${f(fuelStationPlace.from + fuelStationPlace.depth + 1)})
+          grows = 0.;
         float away = length(root - cameraPosition.xz);
         grows *= 1. - smoothstep(${f(radius * 0.55)}, ${f(radius)}, away);
         float height = bladeShape.x * grows;

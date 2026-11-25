@@ -375,3 +375,23 @@ test('Behind slower traffic the autopilot brakes late, but in time', async () =>
   assert.ok(least > 10 && least < 22, `closest ${least.toFixed(1)} m`);
   assert.ok(Math.abs(v - 25) < 0.5, 'Settles at its speed');
 });
+
+test('the curve speed sees a bend drawn as straight runs 10 m long, as a route is', () => {
+  // A 60 m radius bend, as a route's samples draw it: straight between
+  // points 10 m apart, turning at each.
+  const from = 2000,
+    radius = 60;
+  const arc = (x) => {
+    const u = Math.max(0, Math.min(radius * 0.9, x - from));
+    return radius - Math.sqrt(radius * radius - u * u);
+  };
+  const path = (x) => {
+    const a = Math.floor(x / 10) * 10;
+    return arc(a) + ((arc(a + 10) - arc(a)) * (x - a)) / 10;
+  };
+  // Wherever it is looked at from, 100 m before the bend.
+  for (let x = from - 100; x < from - 90; x += 1) {
+    const limit = curveSpeed(x, path, { lateral: 4, braking: 2 });
+    assert.ok(limit < Math.sqrt(4 * radius + 2 * 2 * 100) * 1.15, `${limit.toFixed(1)} from ${x}`);
+  }
+});

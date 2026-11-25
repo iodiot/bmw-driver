@@ -1,9 +1,13 @@
-// A short video of the drive, at the press of a button (or V): ten seconds
-// of the scene as drawn, with the car's sound, saved where the browser saves
+// A short video of the drive, at the press of a button (or V, L for the
+// long one): ten or thirty seconds, or a minute, of the scene as drawn, with the car's sound, saved where the browser saves
 // downloads. The canvas is captured as it is drawn (the panels over it are
 // left out, so the clip is the road and the car alone); MP4 where the
 // browser records it (Chrome, Safari), WebM otherwise.
 export const clipLength = 10;
+// The lengths offered (s).
+export const clipLengths = Object.freeze([clipLength, 30, 60]);
+// Their keys (the minute's has none).
+export const clipKeys = Object.freeze(['V', 'L', null]);
 const clipTypes = [
   'video/mp4;codecs=avc1.640028,mp4a.40.2',
   'video/mp4;codecs=avc1,mp4a.40.2',
@@ -27,11 +31,18 @@ export function clipName(date = new Date(), type = 'video/mp4') {
 // `canvas`: what to record; `sound()`: a MediaStream of the car's sound, or
 // null; `onChange({recording, left})` as it runs; `onSaved(name)` once the
 // file is handed to the browser.
-export function setupClipRecorder({ canvas, sound, onChange, onSaved, seconds = clipLength }) {
+export function setupClipRecorder({
+  canvas,
+  sound,
+  onChange,
+  onSaved,
+  seconds: length = clipLength,
+}) {
   const type = clipType();
   let recorder = null,
     timer = 0,
-    started = 0;
+    started = 0,
+    seconds = length;
   const report = () => {
     const left = recorder
       ? Math.max(0, Math.ceil(seconds - (performance.now() - started) / 1000))
@@ -41,15 +52,17 @@ export function setupClipRecorder({ canvas, sound, onChange, onSaved, seconds = 
   function stop() {
     if (recorder?.state === 'recording') recorder.stop();
   }
-  function start() {
+  function start(wanted = length) {
     if (recorder || !type || !canvas.captureStream) return false;
+    seconds = wanted;
     const stream = canvas.captureStream(60);
     for (const track of sound?.()?.getAudioTracks() ?? []) stream.addTrack(track);
     const chunks = [];
     const taken = new Date();
     recorder = new MediaRecorder(stream, {
       mimeType: type,
-      videoBitsPerSecond: 16e6,
+      // (A minute's at a lower rate, so its file stays near 80 MB.)
+      videoBitsPerSecond: seconds > 30 ? 10e6 : 16e6,
       audioBitsPerSecond: 192e3,
     });
     recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
@@ -83,10 +96,11 @@ export function setupClipRecorder({ canvas, sound, onChange, onSaved, seconds = 
     get recording() {
       return Boolean(recorder);
     },
-    // Starts a clip, or ends the one running early (and saves it).
-    toggle() {
+    // Starts a clip of `wanted` seconds, or ends the one running early (and
+    // saves it).
+    toggle(wanted = length) {
       if (recorder) stop();
-      else start();
+      else start(wanted);
     },
   };
 }
@@ -110,8 +124,9 @@ export function savePhoto(canvas, date = new Date()) {
   );
 }
 
-// The capture button's menu: a photo, or a ten-second video (or, while one
-// runs, a stop that saves it). Escape, the button again or a click elsewhere
+// The capture button's menu: a photo, or a video of ten or thirty seconds
+// or a minute
+// (or, while one runs, a stop that saves it). Escape, the button again or a click elsewhere
 // closes it.
 export function setupCaptureMenu(container, { onPhoto, onVideo, video = true }) {
   const panel = document.createElement('div');
@@ -124,10 +139,17 @@ export function setupCaptureMenu(container, { onPhoto, onVideo, video = true }) 
       <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M2.5 6.2h3l1.4-2h4.2l1.4 2h3v8.3h-13z"/><circle cx="9" cy="10.2" r="2.6"/></svg>
       <span><b>Photo</b><small>A picture of the screen · P</small></span>
     </button>
-    <button type="button" role="menuitem" data-capture="video"${video ? '' : ' disabled'}>
+    ${clipLengths
+      .map(
+        (
+          length,
+          i
+        ) => `<button type="button" role="menuitem" data-capture="video" data-seconds="${length}"${video ? '' : ' disabled'}>
       <svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="6.2"/><circle class="dot" cx="9" cy="9" r="3"/></svg>
-      <span><b>Video · ${clipLength} s</b><small>${video ? 'With sound · V' : 'Not in this browser'}</small></span>
-    </button>`;
+      <span><b>Video · ${length >= 60 ? `${length / 60} min` : `${length} s`}</b><small>${video ? (clipKeys[i] ? `With sound · ${clipKeys[i]}` : 'With sound') : 'Not in this browser'}</small></span>
+    </button>`
+      )
+      .join('')}`;
   container.append(panel);
   let opener = null;
   const close = () => {
@@ -140,7 +162,7 @@ export function setupCaptureMenu(container, { onPhoto, onVideo, video = true }) 
     close();
     item.blur();
     if (item.dataset.capture === 'photo') onPhoto?.();
-    else onVideo?.();
+    else onVideo?.(Number(item.dataset.seconds) || clipLength);
   });
   document.addEventListener('pointerdown', (e) => {
     if (!panel.hidden && !panel.contains(e.target) && !opener?.contains(e.target)) close();

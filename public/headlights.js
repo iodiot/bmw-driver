@@ -10,8 +10,9 @@ import {
 // angle spans metres of road: with 256 rows each texel covered about 2 m at
 // 15 m, and the linear steps between texels showed as bands across the lit
 // road. Rows are therefore dense (about 0.2 m at 15 m); the light varies
-// gently sideways, so fewer columns suffice.
-export function createLowBeamPattern(width = 128, height = 4096, profile = lowBeamProfile) {
+// more gently sideways, so fewer columns suffice (but enough that the
+// cutoff's rise to the right reads as a line, not steps).
+export function createLowBeamPattern(width = 256, height = 4096, profile = lowBeamProfile) {
   const data = new Uint16Array(width * height * 4);
   const tangent = Math.tan(lowBeamSettings.angle);
   for (let y = 0; y < height; y++) {
@@ -46,7 +47,7 @@ export function setupHeadlights(rig) {
   const pattern = createLowBeamPattern();
   // The high beam's pattern, made with the low beam's while the scene loads:
   // made on first use, at nightfall, it cost a visible hitch.
-  const highPattern = createLowBeamPattern(128, 4096, highBeamProfile);
+  const highPattern = createLowBeamPattern(256, 4096, highBeamProfile);
   highPattern.name = 'High beam angular distribution';
   let night = false,
     high = false,

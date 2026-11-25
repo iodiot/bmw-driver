@@ -35,6 +35,12 @@ test('The forecourt is paved and the car fills up beside a pump', () => {
   );
 });
 
+test('The car sets off nearly empty: the first fuel station is worth a stop', () => {
+  const tank = new FuelTank();
+  assert.equal(tank.litres, 10);
+  assert.ok(tank.rangeKm < 80);
+});
+
 test('The tank burns about 14 L/100 km and fills at the pump', () => {
   const tank = new FuelTank(60);
   tank.burn(100_000);
@@ -50,7 +56,7 @@ test('The tank burns about 14 L/100 km and fills at the pump', () => {
   const second = new FuelTank(20);
   for (let i = 0; i < 20; i++) second.step(0.1, true);
   const left = second.step(0.1, false);
-  assert.ok(left && Math.abs(left.litres - 5) < 1e-6);
+  assert.ok(left && Math.abs(left.litres - 10) < 1e-6);
   assert.equal(second.step(0.1, false), null);
   tank.burn(1e9);
   assert.equal(tank.litres, 0);

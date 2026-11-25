@@ -21,8 +21,11 @@ export const lowBeamSettings = Object.freeze({
 // lamp, so the road is brightest 10–15 m ahead and stays lit to about 50 m
 // instead of a bright pool at the bumper.
 export function lowBeamProfile(horizontal, vertical) {
+  // (The cutoff blurred over some 0.4°: sharper, its rising right-hand
+  // part showed as steps across a car ahead, one per column of the
+  // pattern's texture.)
   const cutoff = clamp(horizontal * 0.27, 0, 0.014);
-  const belowCutoff = 1 - smooth(cutoff - 0.002, cutoff + 0.001, vertical);
+  const belowCutoff = 1 - smooth(cutoff - 0.0045, cutoff + 0.0025, vertical);
   const hotspot = Math.exp(-((horizontal / 0.22) ** 2) - ((vertical + 0.016) / 0.03) ** 2);
   const spread = 0.05 * Math.exp(-((horizontal / 0.42) ** 2) - ((vertical + 0.05) / 0.06) ** 2);
   const foreground = 0.003 * Math.exp(-((horizontal / 0.58) ** 2) - ((vertical + 0.19) / 0.2) ** 2);

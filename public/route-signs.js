@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { canvasTexture } from './build-kit.js';
-import { roadCenterZ, roadCenterSlope } from './road-profile.js';
+import { clearOfServiceLane, roadCenterZ, roadCenterSlope } from './road-profile.js';
 
 // On the route, the real places along the M-06 by name, as Ukrainian signs
 // show them: a white board with the name where the road enters a village it
@@ -113,7 +113,8 @@ export function setupRouteSigns(scene, route) {
     sign.add(panel, rear);
     sign.visible = false;
     const x = spec.at,
-      lateral = routeSignLayout.lateral + (spec.kind === 'turn' ? 0.6 : 0);
+      // (Beyond the service lane where it runs there.)
+      lateral = clearOfServiceLane(x, routeSignLayout.lateral + (spec.kind === 'turn' ? 0.6 : 0));
     sign.position.set(x, 0, roadCenterZ(x) + lateral);
     sign.rotation.y = -Math.atan(roadCenterSlope(x));
     group.add(sign);

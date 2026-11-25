@@ -7,7 +7,14 @@ import {
   roadCenterSlope,
 } from './road-profile.js';
 import { nearestOccurrence } from './road-structures.js';
-import { priceSignPlace, pumpIslands, pumpRow } from './fuel-station.js';
+import {
+  priceSignPlace,
+  pumpIslands,
+  pumpRow,
+  wayBarrierOut,
+  wayBarriers,
+  wayDepth,
+} from './fuel-station.js';
 import { villageSetback, villageYards, yardColliders, villageShown } from './village.js';
 import { currentLand } from './route-land.js';
 import { checkpointSolids } from './checkpoints.js';
@@ -21,9 +28,15 @@ const stationBoxes = (() => {
   const { from, depth } = fuelStationPlace;
   const shopZ = from + depth - 6.5;
   const boxes = [[0, shopZ + 2.5, 9.2, 4.7]];
-  for (const x of pumpIslands) boxes.push([x, pumpRow, 0.7, 3]);
+  // (The islands run along the road, kerb to kerb with their bollards.)
+  for (const x of pumpIslands) boxes.push([x, pumpRow, 3, 0.7]);
   for (const x of [-12, -4, 4, 12])
-    for (const z of [pumpRow - 3.6, pumpRow + 3.6]) boxes.push([x, z, 0.25, 0.25]);
+    for (const z of [pumpRow - 4.4, pumpRow + 4.4]) boxes.push([x, z, 0.25, 0.25]);
+  // The steel barrier along the outside of the way off, a short box to
+  // every half metre (it slants across the boxes' axes).
+  for (const [a, b] of wayBarriers)
+    for (let u = a; u < b; u += 0.5)
+      boxes.push([u + 0.25, wayDepth(u + 0.25) + wayBarrierOut, 0.25, 0.12]);
   return boxes;
 })();
 const edgeAt = (u) => (branchOffset(u) ?? roadBranch.separation) + roadBranch.halfWidth;

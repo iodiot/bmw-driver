@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {
+  clearOfServiceLane,
   guardrailOffset,
   laneWidth,
   roadCenterSlope,
@@ -214,7 +215,7 @@ export function setupCheckpoints(scene) {
     );
     for (const { x, spec } of checkpointSigns(at)) {
       const sign = makeRoadSign(spec);
-      sign.position.set(x, 0, roadCenterZ(x) + guardrailOffset + 1.3);
+      sign.position.set(x, 0, roadCenterZ(x) + clearOfServiceLane(x, guardrailOffset + 1.3));
       sign.rotation.y = -Math.atan(roadCenterSlope(x));
       group.add(sign);
     }

@@ -116,9 +116,10 @@ function faceAt(outline, y, dir = 1) {
   }
   return best ?? { x: 0, lean: 0 };
 }
-// A number plate (520 × 112 mm) at x, height y, facing forward (+1) or back.
+// A number plate at x, height y, facing forward (+1) or back: 520 × 112 mm
+// drawn a fifth larger, to read as the car's own does beside them.
 const plateAt = (x, y, facing) => {
-  const g = new THREE.PlaneGeometry(0.52, 0.112);
+  const g = new THREE.PlaneGeometry(0.52 * 1.2, 0.112 * 1.2);
   g.rotateY((facing * Math.PI) / 2);
   g.translate(x + facing * 0.075, y, 0);
   return g;
@@ -272,14 +273,20 @@ function car({ length: L, width: W }, profile) {
   const top = roof.points.reduce((m, p) => Math.max(m, p[1]), 0);
   // The body, its arches cut out, rounded at the shoulders.
   const cut = withArches(body.points, body.radii, [front, rear], r);
-  parts.paint.push(taper(extruded(cut.points, cut.radii, W, 0.1), belt - 0.35, belt, 0.95));
+  // (Its edges well rounded, its sides drawn in toward the shoulders.)
+  parts.paint.push(taper(extruded(cut.points, cut.radii, W, 0.16), belt - 0.5, belt, 0.9));
   // Its outline as drawn, to set the lamps and plates on its faces, and its
   // half-width at a height (drawn in toward the shoulders).
+  // (The extrusion's rounded edge stands its faces out by the bevel's size,
+  // 0.6 × 0.16 m, beyond the outline.)
   const outline = roundedShape(cut.points, cut.radii).getPoints(5);
-  const face = (y, dir = 1) => faceAt(outline, y, dir);
+  const face = (y, dir = 1) => {
+    const f = faceAt(outline, y, dir);
+    return { x: f.x + dir * 0.096, lean: f.lean };
+  };
   const sideAt = (y) => {
-    const t = Math.max(0, Math.min(1, (y - belt + 0.35) / 0.35));
-    return (W / 2) * (1 - 0.05 * t * t);
+    const t = Math.max(0, Math.min(1, (y - belt + 0.5) / 0.5));
+    return (W / 2) * (1 - 0.1 * t * t);
   };
   for (const x of [front, rear]) parts.trim.push(wheelWell(r, x, W - 0.16));
   // The glasshouse and the roof over it.
@@ -391,40 +398,20 @@ function car({ length: L, width: W }, profile) {
     tx = tailFace.x;
   for (const side of [-1, 1]) {
     // Headlamps set into the face, a dark housing round a slimmer lens,
-    // swept back with the face's curve (see shapePlan).
-    parts.trim.push(
-      leaning(0.04, 0.13, 0.44, hx - 0.035, lampY.head, side * (W / 2 - 0.27), headFace.lean)
-    );
-    parts.head.push(
-      leaning(
-        0.03,
-        0.075,
-        0.36,
-        hx - 0.018,
-        lampY.head + 0.008,
-        side * (W / 2 - 0.29),
-        headFace.lean
-      )
-    );
-    // Tail lamps on the rear face, clear of its rounded corners.
+    // swept back with the face's curve (see shapePlan), clear of its
+    // rounded corners.
+    const hz = side * (W / 2 - 0.39);
+    parts.trim.push(leaning(0.04, 0.14, 0.42, hx - 0.03, lampY.head, hz, headFace.lean));
+    parts.head.push(leaning(0.03, 0.09, 0.34, hx - 0.01, lampY.head + 0.008, hz, headFace.lean));
+    // Tail lamps on the rear face, clear of its corners too.
     parts.tail.push(
-      leaning(0.03, 0.12, 0.42, tx - 0.012, lampY.tail, side * (W / 2 - 0.31), -tailFace.lean)
+      leaning(0.03, 0.12, 0.4, tx - 0.008, lampY.tail, side * (W / 2 - 0.38), -tailFace.lean)
     );
+    // The indicators: at the lamps' outer ends.
     const lamps = side < 0 ? parts.left : parts.right;
-    lamps.push(
-      leaning(
-        0.03,
-        0.06,
-        0.07,
-        tx - 0.008,
-        lampY.tail - 0.005,
-        side * (W / 2 - 0.08),
-        -tailFace.lean
-      )
-    );
-    lamps.push(
-      leaning(0.03, 0.05, 0.07, hx + 0.002, lampY.head, side * (W / 2 - 0.06), headFace.lean)
-    );
+    const iz = side * (W / 2 - 0.15);
+    lamps.push(leaning(0.03, 0.06, 0.07, tx - 0.004, lampY.tail - 0.005, iz, -tailFace.lean));
+    lamps.push(leaning(0.03, 0.05, 0.07, hx - 0.01, lampY.head, iz, headFace.lean));
   }
   return shapePlan(parts, L, W, profile.plan);
 }
@@ -573,11 +560,13 @@ function van({ length: L, width: W }) {
   // The windscreen and the cab's side windows, standing just proud.
   parts.glass.push(
     extruded(
+      // (Its face a few centimetres proud of the body's, or the body
+      // hid it.)
       [
         [nose - 2.1, 1.36],
-        [nose - 0.66, 1.2],
-        [nose - 1.4, 2.15],
-        [nose - 2.1, 2.15],
+        [nose - 0.52, 1.2],
+        [nose - 1.26, 2.17],
+        [nose - 2.1, 2.17],
       ],
       [0.03, 0.04, 0.06, 0.03],
       W + 0.02,
@@ -859,11 +848,14 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
       metalness: 0.15,
       roughness: 0.55,
     }),
+    // (Its reflections of the sky kept down: a raked windscreen facing
+    // the sky reflected it so brightly it read as the body.)
     glass: new THREE.MeshStandardMaterial({
       name: 'Traffic glass',
       color: 0x10151a,
-      metalness: 0.3,
-      roughness: 0.08,
+      metalness: 0.2,
+      roughness: 0.1,
+      envMapIntensity: 0.4,
     }),
     trim: new THREE.MeshStandardMaterial({ name: 'Traffic trim', color: 0x15171a, roughness: 0.8 }),
     metal: new THREE.MeshStandardMaterial({

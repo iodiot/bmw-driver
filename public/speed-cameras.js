@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { roadCenterZ, roadCenterSlope } from './road-profile.js';
+import { roadCenterZ, roadCenterSlope, clearOfServiceLane } from './road-profile.js';
 import { structureLayout, nearestOccurrence } from './road-structures.js';
 import { groupShadow } from './sun-shadows.js';
 
@@ -121,7 +121,7 @@ export function setupSpeedCameras(scene) {
     update(x, dt, sun = null, strength = 0) {
       for (const unit of units) {
         const at = nearestOccurrence(x, unit.camera.at);
-        unit.group.position.set(at, 0, roadCenterZ(at) + cameraLateral);
+        unit.group.position.set(at, 0, roadCenterZ(at) + clearOfServiceLane(at, cameraLateral));
         unit.group.rotation.y = -Math.atan(roadCenterSlope(at));
         unit.shadow.update(sun, strength);
         unit.glow = Math.max(0, unit.glow - dt * 6);

@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
+  branchOffset,
+  clearOfServiceLane,
   fuelStationPlace,
+  roadEdge,
   medianBarrier,
   oncoming,
   roadBranch,
@@ -693,17 +696,29 @@ const signFaces = {
     },
   }),
   // At the start of the slip road.
+  // (On a real route the lane serves only the services: blue, АЗС and a
+  // café, rather than the endless road's exit toward Makariv.)
   gore: () => ({
     size: [2.4, 1.2],
     canvas: [480, 240],
     draw(g, w, h) {
-      roundedPanel(g, 4, 4, w - 8, h - 8, 18, motorwayGreen, '#ffffff', 7);
+      roundedPanel(
+        g,
+        4,
+        4,
+        w - 8,
+        h - 8,
+        18,
+        route ? informationBlue : motorwayGreen,
+        '#ffffff',
+        7
+      );
       g.fillStyle = '#ffffff';
       g.textBaseline = 'alphabetic';
       g.font = signFont(56);
-      g.fillText('Макарів', 36, 96);
+      g.fillText(route ? 'АЗС' : 'Макарів', 36, 96);
       g.font = signFont(46, 600);
-      g.fillText('Житомир', 36, 178);
+      g.fillText(route ? 'Кафе · P' : 'Житомир', 36, 178);
       arrow(g, 400, 160, Math.PI / 4, 110, 18);
     },
   }),
@@ -1389,7 +1404,10 @@ function buildSign(spec, materials) {
     // from the back of it up to the post.
     const foot = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.05, 0.07), materials.signBack);
     foot.position.set(0.25, 0.025, z);
-    const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 1.05, 8), materials.signBack);
+    const strut = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.022, 0.022, 1.05, 8),
+      materials.signBack
+    );
     strut.position.set(0.42, 0.42, z);
     strut.rotation.z = 0.78;
     group.add(foot, strut);
@@ -1611,7 +1629,14 @@ export function setupRoadStructures(scene, fields = {}) {
     group.add(sign);
     return { spec, sign, at: NaN };
   });
-  const lateralOf = (spec, x) => (spec.kind === 'gore' ? 7.5 : 9.4);
+  // (The sign at the gore in the middle of the island between the road's
+  // edge and the service lane, however many lanes the road has; the rest
+  // on the verge, or beyond the service lane where it runs there.)
+  const lateralOf = (spec, x) => {
+    if (spec.kind !== 'gore') return clearOfServiceLane(x, 9.4);
+    const branch = branchOffset(x);
+    return branch === null ? 7.5 : (roadEdge + branch - roadBranch.halfWidth) / 2;
+  };
 
   const place = (object, x, lateral, y = 0) => {
     onRoad(x, lateral, y, object.position);

@@ -109,3 +109,17 @@ test('Structures are placed at the nearest occurrence as the car drives on', () 
       );
   });
 });
+
+test('nothing on the verge stands on the service lane where it runs there', async () => {
+  const { branchOffset, clearOfServiceLane, roadBranch: b } = await import(
+    '../public/road-profile.js'
+  );
+  for (let x = 0; x < 3000; x += 2) {
+    const branch = branchOffset(x);
+    for (const lateral of [7.5, 8.7, 9.4, 10])
+      if (branch !== null) {
+        const at = clearOfServiceLane(x, lateral);
+        assert.ok(Math.abs(at - branch) >= b.halfWidth + 1.2 - 1e-9, `${lateral} at ${x}`);
+      } else assert.equal(clearOfServiceLane(x, lateral), lateral);
+  }
+});

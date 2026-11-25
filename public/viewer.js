@@ -43,7 +43,7 @@ import { setupRouteCard } from './route-card.js';
 import { DriftScore, driftRules } from './drift.js';
 import { seasonUniforms, snowOnScene, stepSeason, winterDriving } from './season.js';
 import { setupToasts } from './toasts.js';
-import { setupClipRecorder, setupCaptureMenu, savePhoto } from './clip-recorder.js';
+import { clipLengths, setupClipRecorder, setupCaptureMenu, savePhoto } from './clip-recorder.js';
 import { setupGrassBlades } from './grass-blades.js';
 import { setupBrakes } from './brakes.js';
 import { RenderQuality } from './render-quality.js';
@@ -110,7 +110,11 @@ import {
   roadLanes,
   guardrailOffset,
   laneCount,
+  nextBranch,
+  roadBranch,
+  fuelStationPlace,
 } from './road-profile.js';
+import { branchEndFor, branchStartFor, pitLateral, pitSpeed, pitStop } from './pit-stop.js';
 
 const $ = (s) => document.querySelector(s);
 const instruments = setupInstruments($('#instruments'));
@@ -886,7 +890,7 @@ const dayBar = setupDayBar($('#day-bar'), {
     toasts.show({ label: 'Graphics', shown: graphicsPresets[level].label }, 2);
   },
 });
-// Photos and ten-second videos of the drive, from the capture button's menu
+// Photos and ten- or thirty-second videos of the drive, from the capture button's menu
 // (or P and V), saved where the browser saves downloads.
 let photoWanted = false;
 const clipRecorder = setupClipRecorder({
@@ -898,7 +902,7 @@ const clipRecorder = setupClipRecorder({
 const captureMenu = setupCaptureMenu(document.body, {
   video: clipRecorder.available,
   onPhoto: () => (photoWanted = true),
-  onVideo: () => clipRecorder.toggle(),
+  onVideo: (seconds) => clipRecorder.toggle(seconds),
 });
 setCameraView(cameraView);
 dayBar.setGraphics(graphicsPresets[graphics].label);
@@ -1005,6 +1009,7 @@ function restart(x = 0) {
   fuelDistance = 0;
   cameraFollowHeading = 0;
   keptLane = null;
+  pit = null;
   autopilot = true;
   shiftShake.reset(sim.powertrain.gear);
   roadJolt.reset();
@@ -1117,8 +1122,10 @@ addEventListener('keydown', (e) => {
     return;
   }
   if (e.code === 'KeyP' && !e.repeat && !e.metaKey && !e.ctrlKey) photoWanted = true;
-  if (e.code === 'KeyV' && !e.repeat && !e.metaKey && !e.ctrlKey && clipRecorder.available)
-    clipRecorder.toggle();
+  // (V: ten seconds; L, the long one: thirty. Shift is the handbrake.)
+  const clipKey = { KeyV: 0, KeyL: 1 }[e.code];
+  if (clipKey !== undefined && !e.repeat && !e.metaKey && !e.ctrlKey && clipRecorder.available)
+    clipRecorder.toggle(clipLengths[clipKey]);
   if (e.code === 'KeyN' && !e.repeat && !e.metaKey && !e.ctrlKey) {
     e.preventDefault();
     radio.next();
@@ -1395,8 +1402,52 @@ function chasedBy() {
   const behind = sim.x - chaser.x;
   return behind > -10 && behind < escapeRange ? chaser : null;
 }
+// A stop for fuel on autopilot (see pit-stop.js): the station's middle, and
+// whether it is filling and has filled. Taken with under nine tenths of a
+// tank, at the next service area some way ahead.
+let pit = null;
+function planPit() {
+  if (pit || escaping || fuelTank.litres >= pitStop.below * fuelTank.capacity) return;
+  const next = nextBranch(sim.x);
+  if (!(next > 250 && next < 900)) return;
+  const at = sim.x + next - roadBranch.start + fuelStationPlace.at;
+  pit = { at, filling: false, filled: false, waited: 0 };
+}
+const onPitPath = () => Boolean(pit) && Math.abs(keptLane - roadLanes.at(-1)) < 0.1;
+// Along the stop: filled once a fill has ended (or if it cannot start), the
+// indicators (right off the motorway, left off the forecourt and back on),
+// and over once back on the motorway.
+function stepPit(dt) {
+  const along = sim.x - pit.at,
+    start = branchStartFor(pit.at),
+    end = branchEndFor(pit.at);
+  if (fuelTank.filling) pit.filling = true;
+  else if (pit.filling) pit.filled = true;
+  // (Stood by the pump and nothing flows: on its way.)
+  if (!pit.filled && !pit.filling && sim.speed < 0.3 && along > -4) pit.waited += dt;
+  if (pit.waited > 2.5) pit.filled = true;
+  const want = !pit.filled
+    ? sim.x > start - 220 && sim.x < start + 60
+      ? 'right'
+      : null
+    : (along > pitStop.turnOut[0] - 4 && along < pitStop.turnOut[1]) ||
+        (sim.x > end - 190 && sim.x < end - 10)
+      ? 'left'
+      : null;
+  if (want !== autopilotSignal) {
+    if (want) signals.set(want);
+    else if (signals.side === autopilotSignal) signals.set(null);
+    autopilotSignal = want;
+  }
+  if (sim.x > end + 20) {
+    pit = null;
+    keptLane = roadLanes.at(-1);
+  }
+}
 function autopilotTraffic(dt) {
   sinceBeamFlash += dt;
+  // In the right lane for the stop: its own path and indicators.
+  if (onPitPath()) return;
   const lat = roadLateral(sim.x, sim.z);
   const settled = Math.abs(lat - keptLane) < 0.4;
   if (settled && autopilotSignal && !autopilotPressing && signals.side === autopilotSignal) {
@@ -1410,6 +1461,18 @@ function autopilotTraffic(dt) {
   autopilotPlan = 0.5;
   const lane = roadLanes.findIndex((l) => Math.abs(l - keptLane) < 0.1);
   if (lane < 0) return;
+  // On the way to a stop for fuel: over to the right, a lane at a time.
+  if (pit && !escaping) {
+    if (autopilotPressing && signals.side === 'left') signals.set(null);
+    autopilotPressing = false;
+    const right = roadLanes[lane + 1];
+    if (right !== undefined && traffic.laneClearFor(sim.x, sim.speed, right, 4.9, 1.9, 20)) {
+      keptLane = right;
+      signals.set('right');
+      autopilotSignal = 'right';
+    }
+    return;
+  }
   const ahead = traffic.leaderFor(sim.x, keptLane);
   if (ahead?.who !== flashedVehicle) {
     flashedVehicle = ahead?.who ?? null;
@@ -1640,12 +1703,23 @@ renderer.setAnimationLoop((time) => {
     }
     if (autopilot && driving) {
       keptLane ??= nearestLane(roadLateral(sim.x, sim.z));
+      // Running from the police calls off a stop not yet begun.
+      if (pit && escaping && sim.x < branchStartFor(pit.at)) pit = null;
+      planPit();
       autopilotTraffic(dt);
-      // (Through a checkpoint, along the way through its gaps.)
-      const lane = keptLane;
+      const pitting = onPitPath();
+      if (pitting) stepPit(dt);
+      // (Through a checkpoint, along the way through its gaps; to a stop
+      // for fuel, along its way to the pump.)
+      const lane = keptLane,
+        stop = pitting ? pit : null;
       input.steerAngle = laneKeepingSteer(
         sim,
-        checkpointAt(sim.x, 140) === null ? lane : (x) => slalomLat(x, lane) ?? lane
+        stop
+          ? (x) => pitLateral(x, stop.at)
+          : checkpointAt(sim.x, 140) === null
+            ? lane
+            : (x) => slalomLat(x, lane) ?? lane
       );
       // Cruise at motorway pace, easing off for the bends and speed bumps,
       // and keeping its distance behind slower traffic.
@@ -1688,7 +1762,9 @@ renderer.setAnimationLoop((time) => {
         bumpSpeed(sim.x),
         escaping ? Infinity : cameraSpeed(sim.x),
         // Checkpoints: a walking pace through, police or not.
-        checkpointSpeed(sim.x)
+        checkpointSpeed(sim.x),
+        // A stop for fuel: slowing off the motorway, to a stop at the pump.
+        stop ? pitSpeed(sim.x, stop.at, stop.filled) : Infinity
       );
       input.cruiseAccel = pace.accel;
       // Firmer on the brakes at speed, gentler on snow.
@@ -1696,6 +1772,7 @@ renderer.setAnimationLoop((time) => {
       input.cruiseGain = 1;
     } else {
       keptLane = null;
+      pit = null;
       // Taking the wheel while it pressed on: its left indicator goes off.
       if (autopilotPressing) {
         if (signals.side === 'left' && autopilotSignal === 'left') signals.set(null);

@@ -7,7 +7,7 @@ import {
   roadCenterZ,
   roadCenterSlope,
 } from '../public/road-profile.js';
-import { pumpRow } from '../public/fuel-station.js';
+import { pumpLane, pumpRow } from '../public/fuel-station.js';
 
 const car = (x, lat, turn = 0, speed = 0) => ({
   x,
@@ -29,10 +29,13 @@ test('driving into the fuel station shop stops the car at its wall', () => {
   assert.ok(lat <= shop.lat - shop.hz - 0.94, `pushed out to ${lat}`);
 });
 
-test('a car parked beside a pump, across the forecourt, touches nothing', () => {
-  // Between the middle island (x 0, half 0.7) and the columns at x 4.
-  const sim = car(fuelStationPlace.at + 2.1, edge + pumpRow, -Math.PI / 2, 0);
-  assert.equal(collideWithSolids(sim), null);
+test('a car drawn up beside a pump, along the forecourt, touches nothing', () => {
+  // In the lane beside the middle island, between it and the columns, on
+  // either side.
+  for (const side of [-1, 1]) {
+    const sim = car(fuelStationPlace.at, edge + pumpRow + side * pumpLane, 0, 0);
+    assert.equal(collideWithSolids(sim), null);
+  }
 });
 
 test('the open road has nothing solid on it', () => {
