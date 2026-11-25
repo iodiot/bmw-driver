@@ -5,6 +5,7 @@ import {
   medianBarrier,
   oncoming,
   roadBranch,
+  nearestService,
   roadCenterZ,
   roadCenterSlope,
 } from './road-profile.js';
@@ -96,24 +97,30 @@ export const structureLayout = Object.freeze({
       ),
       kind: 'distances',
     }),
-    // The service area 500 m ahead: what it has (fuel, a café, parking).
+    // The service area's signs stand by its place (see nearestService:
+    // every section on the endless road, at the real fuel stations on a
+    // route), `at` from its origin. The service area 500 m ahead: what it
+    // has (fuel, a café, parking).
     Object.freeze({
-      at: places.exitAt + roadBranch.period - 3000,
+      at: places.exitAt - 3000,
+      service: true,
       kind: 'services',
       distance: 3000 + roadBranch.start - places.exitAt,
     }),
     // The chevron in the island where the service lane has left.
-    Object.freeze({ at: roadBranch.start + roadBranch.diverge + 25, kind: 'gore' }),
+    Object.freeze({ at: roadBranch.start + roadBranch.diverge + 25, service: true, kind: 'gore' }),
     // The fuel station on the service lane: a blue service sign a kilometre
     // before, and one just before the lane leaves the motorway.
     Object.freeze({
-      at: clearOfBridges(2650) + roadBranch.period - 3000,
+      at: clearOfBridges(2650) - 3000,
+      service: true,
       kind: 'fuel',
       distance: 3000 + fuelStationPlace.at - clearOfBridges(2650),
     }),
     // (Before the lane leaves, so there is time to move over.)
     Object.freeze({
       at: roadBranch.start - 120,
+      service: true,
       kind: 'fuelTurn',
       distance: fuelStationPlace.at - roadBranch.start + 120,
     }),
@@ -442,6 +449,41 @@ export function kyivDistance(x) {
 // Each sign's face: its size in metres, canvas size and how to draw it
 // (`at`: where it stands, for signs that show distances).
 const signFaces = {
+  // A checkpoint's STOP (sign 2.2, an octagon) over a КОНТРОЛЬ plate.
+  stop: () => ({
+    size: [0.9, 1.2],
+    canvas: [240, 320],
+    draw(g, w, h) {
+      g.clearRect(0, 0, w, h);
+      const r = w / 2 - 4,
+        cx = w / 2,
+        cy = w / 2;
+      const octagon = (radius) => {
+        g.beginPath();
+        for (let i = 0; i < 8; i++) {
+          const a = Math.PI / 8 + (i * Math.PI) / 4;
+          g.lineTo(cx + radius * Math.cos(a), cy + radius * Math.sin(a));
+        }
+        g.closePath();
+      };
+      octagon(r);
+      g.fillStyle = '#ffffff';
+      g.fill();
+      octagon(r - 8);
+      g.fillStyle = '#c8102e';
+      g.fill();
+      g.fillStyle = '#ffffff';
+      g.font = signFont(68);
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText('STOP', cx, cy + 4);
+      // The plate under it.
+      roundedPanel(g, 14, w + 12, w - 28, h - w - 18, 6, '#ffffff', '#111111', 4);
+      g.fillStyle = '#111111';
+      g.font = signFont(30);
+      g.fillText('КОНТРОЛЬ', cx, w + 12 + (h - w - 18) / 2 + 2);
+    },
+  }),
   limit: ({ value }) => ({
     size: [0.9, 0.9],
     canvas: [256, 256],
@@ -1271,6 +1313,18 @@ function crestCopingGeometry(x, facing) {
   return metresGeometry(positions, x);
 }
 
+// A sign of the road's kinds for something else beside it (a checkpoint's),
+// with its own back material: its face toward the traffic (−x).
+let looseSignBack = null;
+export function makeRoadSign(spec) {
+  looseSignBack ??= new THREE.MeshStandardMaterial({
+    name: 'Sign back',
+    color: 0x8d9296,
+    metalness: 0.5,
+    roughness: 0.5,
+  });
+  return buildSign(spec, { signBack: looseSignBack });
+}
 // A sign on two posts, its face toward the traffic (−x in its frame).
 function buildSign(spec, materials) {
   const face = signFaces[spec.kind](spec);
@@ -1283,7 +1337,8 @@ function buildSign(spec, materials) {
   const [w, h] = face.size;
   const group = new THREE.Group();
   group.name = `Sign ${spec.kind}`;
-  const bottom = spec.kind === 'limit' ? 1.6 : 2.1;
+  // A portable sign stands low on a frame on the carriageway itself.
+  const bottom = spec.stand ? 0.45 : spec.kind === 'limit' ? 1.6 : 2.1;
   const board = new THREE.Mesh(
     face.round ? new THREE.CircleGeometry(w / 2, 40) : new THREE.PlaneGeometry(w, h),
     new THREE.MeshStandardMaterial({
@@ -1329,6 +1384,15 @@ function buildSign(spec, materials) {
     );
     post.position.set(0.05, (bottom + h - 0.1) / 2, z);
     group.add(post);
+    if (!spec.stand) continue;
+    // On its stand: a foot along the road under each post and a strut
+    // from the back of it up to the post.
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.05, 0.07), materials.signBack);
+    foot.position.set(0.25, 0.025, z);
+    const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 1.05, 8), materials.signBack);
+    strut.position.set(0.42, 0.42, z);
+    strut.rotation.z = 0.78;
+    group.add(foot, strut);
   }
   group.traverse((o) => {
     if (o.isMesh) {
@@ -1577,7 +1641,7 @@ export function setupRoadStructures(scene, fields = {}) {
       const start = nearestOccurrence(x, from);
       if (hasTunnel && start !== tunnelAt) placeTunnel(start);
       for (const s of signs) {
-        const at = nearestOccurrence(x, s.spec.at);
+        const at = s.spec.service ? nearestService(x, s.spec.at) : nearestOccurrence(x, s.spec.at);
         if (at !== s.at) {
           place(s.sign, at, lateralOf(s.spec, at));
           s.sign.userData.placeAt(at);

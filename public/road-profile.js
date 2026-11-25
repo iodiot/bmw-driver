@@ -58,12 +58,17 @@ export function roadLateral(x, z) {
   return z - roadCenterZ(x);
 }
 
-// Three 3.6 m lanes between edge lines at ±5.4 m.
-export const roadLanes = Object.freeze([-3.6, 0, 3.6]);
-export const roadEdge = 5.4;
-// Guardrails stand this far from the road centre; the beam's face is a few
-// centimetres nearer the road.
-export const guardrailOffset = 7.3;
+// Three 3.6 m lanes between edge lines at ±5.4 m, or as many as the route
+// has (the N-08 two each way: lanes at ±1.8 m, edges at ±3.6 m).
+export const laneCount = route?.lanes ?? 3;
+export const laneWidth = 3.6;
+export const roadLanes = Object.freeze(
+  Array.from({ length: laneCount }, (_, i) => (i - (laneCount - 1) / 2) * laneWidth)
+);
+export const roadEdge = (laneCount * laneWidth) / 2;
+// Guardrails stand this far from the road centre (1.9 m beyond the edge
+// line); the beam's face is a few centimetres nearer the road.
+export const guardrailOffset = roadEdge + 1.9;
 export const guardrailFace = guardrailOffset - 0.045;
 export const railFaceGap = guardrailOffset - guardrailFace;
 // On the route the motorway is a dual carriageway, as the M-06 is: beyond
@@ -96,18 +101,59 @@ export const roadBranch = Object.freeze({
   period: route ? 12000 : 3000,
   diverge: 170,
   length: 300,
-  separation: 11,
+  separation: roadEdge + 5.6,
   halfWidth: 2.2,
   // The main road's right rail stands again once the branch's inner edge is
   // this far from the road centre.
-  railFrom: 13,
+  railFrom: roadEdge + 7.6,
 });
 const branchSpan = 2 * roadBranch.diverge + roadBranch.length;
+// Where the service areas are: each section's origin (its lane leaves
+// `roadBranch.start` past it, its fuel station stands `fuelStationPlace.at`
+// past it). Every `period` metres on the endless road; on a route whose fuel
+// stations are known, at the real ones on the right of the road (the game's
+// station where the real one stands), at least 2.5 km apart and clear of
+// the farm-track overpasses (which stand 1.55–3.2 km into each 12 km).
+export function serviceOriginsFrom(fuel, { stationAt = 580, period = 12000 } = {}) {
+  const origins = [];
+  for (const [at, lat] of fuel ?? []) {
+    if (lat < 12 || lat > 150) continue;
+    const origin = at - stationAt;
+    if (origins.length && origin - origins.at(-1) < 2500) continue;
+    // Its lane's stretch into the 12 km period, against the overpasses'.
+    const [a, b] = [origin + 200, origin + 1300].map((u) => ((u % period) + period) % period);
+    const crosses = a <= b ? a < 3200 && b > 1550 : b > 1550 || a < 3200;
+    if (!crosses) origins.push(origin);
+  }
+  return origins;
+}
+export const serviceOrigins = route?.fuel ? Object.freeze(serviceOriginsFrom(route.fuel)) : null;
+// The service area origin nearest to y.
+export function serviceOrigin(y) {
+  if (!serviceOrigins?.length) return roadBranch.period * Math.round(y / roadBranch.period);
+  let best = serviceOrigins[0];
+  for (const o of serviceOrigins) if (Math.abs(o - y) < Math.abs(best - y)) best = o;
+  return best;
+}
+// The occurrence of a service area's feature `u` metres into it nearest to
+// x (as nearestOccurrence is for the road's periodic structures).
+export const nearestService = (x, u) => serviceOrigin(x - u) + u;
+// The service area origins with a feature `u` metres in between two
+// distances along the road.
+export function servicesBetween(from, to, u = 0) {
+  if (!serviceOrigins) {
+    const { period } = roadBranch;
+    const out = [];
+    for (let o = Math.ceil((from - u) / period) * period; o + u <= to; o += period) out.push(o);
+    return out;
+  }
+  return serviceOrigins.filter((o) => o + u >= from && o + u <= to);
+}
 // Distance into the current branch section, or -1 outside one.
 function branchLocal(x) {
-  const { start, period } = roadBranch;
-  const u = (((x - start) % period) + period) % period;
-  return u <= branchSpan ? u : -1;
+  const { start } = roadBranch;
+  const u = x - (serviceOrigin(x - start - branchSpan / 2) + start);
+  return u >= 0 && u <= branchSpan ? u : -1;
 }
 // Lateral offset of the branch centre line from the road centre, or null
 // where there is no branch. It starts and ends on the right lane centre.
@@ -123,7 +169,9 @@ export function branchOffset(x) {
 export function nextBranch(x) {
   if (branchLocal(x) >= 0) return 0;
   const { start, period } = roadBranch;
-  return period - ((((x - start) % period) + period) % period);
+  if (!serviceOrigins) return period - ((((x - start) % period) + period) % period);
+  const next = serviceOrigins.find((o) => o + start > x);
+  return next === undefined ? Infinity : next + start - x;
 }
 
 // Guardrails at x, each by its lateral offset and the side its traffic is on
@@ -217,7 +265,21 @@ function drawnObstacles(random) {
   }
   return list.sort((a, b) => a.x - b.x);
 }
-const anyObstacles = roadSeed ? drawnObstacles(seededRandom(roadSeed, 2)) : originalObstacles;
+// Laid out for three lanes; on a road with fewer each keeps its place in its
+// lane, the left lane's going to the left one, the others to the right.
+function intoLanes(list) {
+  if (laneCount === 3) return list;
+  return list
+    .filter((o) => o.w < 5)
+    .map((o) => {
+      const from = Math.round(o.z / laneWidth) + 1;
+      const to = Math.min(laneCount - 1, from === 0 ? 0 : laneCount - 1);
+      return { ...o, z: roadLanes[to] + (o.z - (from - 1) * laneWidth) };
+    });
+}
+const anyObstacles = intoLanes(
+  roadSeed ? drawnObstacles(seededRandom(roadSeed, 2)) : originalObstacles
+);
 // The M-06 has no speed bumps: on the route only the potholes are left.
 export const obstacles = route ? anyObstacles.filter((o) => o.h < 0) : anyObstacles;
 // The original straight test track: centre-lane bumps and holes only, two
@@ -290,9 +352,8 @@ export const fuelStationPlace = Object.freeze({ at: 580, length: 56, from: 0.6, 
 // How far beyond the track's far edge a point is, on the forecourt's
 // stretch of road; null off it.
 export function forecourtDepth(x, lateral) {
-  const { at, length } = fuelStationPlace,
-    period = roadBranch.period;
-  const u = ((((((x - at) % period) + period) % period) + period / 2) % period) - period / 2;
+  const { at, length } = fuelStationPlace;
+  const u = x - nearestService(x, at);
   if (Math.abs(u) > length / 2) return null;
   const branch = branchOffset(x);
   return branch === null ? null : lateral - branch - roadBranch.halfWidth;
@@ -379,8 +440,19 @@ float carriageLat(float lateral) {
 }
 // Branch centre offset from the road centre; negative where there is none.
 float branchOffset(float x) {
-  float u = mod(x - ${f(roadBranch.start)}, ${f(roadBranch.period)});
-  if (u > ${f(branchSpan)}) return -1.;
+  ${
+    serviceOrigins
+      ? `float u = -1.;
+  ${serviceOrigins
+    .map(
+      (o) =>
+        `if (x > ${f(o + roadBranch.start)} && x < ${f(o + roadBranch.start + branchSpan)}) u = x - ${f(o + roadBranch.start)};`
+    )
+    .join('\n  ')}
+  if (u < 0.) return -1.;`
+      : `float u = mod(x - ${f(roadBranch.start)}, ${f(roadBranch.period)});
+  if (u > ${f(branchSpan)}) return -1.;`
+  }
   float swing = smoothstep(0., ${f(roadBranch.diverge)}, u) -
     smoothstep(${f(branchSpan - roadBranch.diverge)}, ${f(branchSpan)}, u);
   return ${f(roadLanes.at(-1))} + ${f(roadBranch.separation - roadLanes.at(-1))} * swing;

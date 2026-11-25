@@ -86,3 +86,23 @@ test('the N-08 from Dnipro to Zaporizhzhia: its length, heights, places and bend
     ['Запоріжжя', 'Мелітополь', 'Маріуполь']
   );
 });
+
+test('on the N-08 the service areas stand at the real fuel stations, two lanes each way', async () => {
+  const { serviceOriginsFrom } = await import('../public/road-profile.js');
+  const data = JSON.parse(
+    readFileSync(new URL('../public/assets/route-n08.json', import.meta.url))
+  );
+  assert.equal(data.lanes, 2);
+  assert.ok(data.fuel.length > 10);
+  const origins = serviceOriginsFrom(data.fuel);
+  assert.ok(origins.length >= 4, `${origins.length} service areas`);
+  // Each at a real station on the right of the road, apart from the next.
+  for (const o of origins) assert.ok(data.fuel.some(([at, lat]) => at === o + 580 && lat > 12));
+  for (let i = 1; i < origins.length; i++) assert.ok(origins[i] - origins[i - 1] >= 2500);
+  // Clear of the overpasses 1.55–3.2 km into each 12 km.
+  for (const o of origins)
+    for (const u of [o + 200, o + 1300]) {
+      const m = ((u % 12000) + 12000) % 12000;
+      assert.ok(m < 1550 || m > 3200);
+    }
+});

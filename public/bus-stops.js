@@ -1,6 +1,11 @@
 import * as THREE from 'three';
-import { branchOffset, roadBranch, roadCenterZ, roadCenterSlope } from './road-profile.js';
-import { nearestOccurrence } from './road-structures.js';
+import {
+  branchOffset,
+  nearestService,
+  roadBranch,
+  roadCenterZ,
+  roadCenterSlope,
+} from './road-profile.js';
 import { groupShadow } from './sun-shadows.js';
 
 // A village bus stop on the country road, on its far side where it runs
@@ -207,7 +212,7 @@ export function setupBusStops(scene) {
     // Places it at its nearest occurrence to x, with its shadow for the sun
     // (`sun` toward it, `strength` 0–1).
     update(x, sun = null, strength = 0) {
-      const u = nearestOccurrence(x, at);
+      const u = nearestService(x, at);
       const offset = branchOffset(u) ?? roadBranch.separation;
       const lateral = offset + roadBranch.halfWidth + setback;
       group.position.set(u, 0, roadCenterZ(u) + lateral);

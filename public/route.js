@@ -67,6 +67,8 @@ export function makeRoute(data) {
   return {
     name: data.name,
     road: data.road,
+    // Lanes each way (three unless the route says otherwise).
+    lanes: data.lanes ?? 3,
     from: data.from,
     to: data.to,
     // (Its name as “to Kyiv” and “in Kyiv” want it.)
@@ -77,6 +79,10 @@ export function makeRoute(data) {
     step,
     length,
     places: data.places ?? [],
+    // Checkpoints: where each one's first row of blocks stands.
+    checkpoints: data.checkpoints ?? [],
+    // The fuel stations by the road: [along, across] (right positive).
+    fuel: data.fuel ?? null,
     // What stands beside it, from OpenStreetMap (route-land.js), if known.
     land: data.land ?? null,
     texture,

@@ -1,5 +1,11 @@
 import * as THREE from 'three';
-import { roadCenterSlope, roadCenterZ } from './road-profile.js';
+import {
+  guardrailOffset,
+  nearestService,
+  oncomingCentre,
+  roadCenterSlope,
+  roadCenterZ,
+} from './road-profile.js';
 import { structureLayout } from './road-structures.js';
 import { powerLineLayout } from './power-lines.js';
 import { Kit } from './build-kit.js';
@@ -30,11 +36,15 @@ export const landLayout = Object.freeze({
 // stop) and the farm-track overpasses with their ramps. `half` is how far
 // the thing reaches across the road either side of `lat`.
 export function keptClear(x, lat, half = 0) {
-  if (lat + half > -26 && lat - half < 22) return true;
+  // (Beyond the oncoming carriageway's outer rail, and the service lane's
+  // bus stops on the right.)
+  if (lat + half > oncomingCentre - guardrailOffset - 4 && lat - half < guardrailOffset + 14.7)
+    return true;
   if (Math.abs(lat - powerLineLayout.lateral) < 4 + half) return true;
+  const service = x - nearestService(x, 760);
+  if (service > -560 && service < 560 && lat + half > 0 && lat - half < 85) return true;
   const period = structureLayout.period;
   const u = ((x % period) + period) % period;
-  if (u > 200 && u < 1320 && lat + half > 0 && lat - half < 85) return true;
   for (const b of structureLayout.bridges)
     if (Math.abs(u - b) < 40 && Math.abs(lat) - half < 140) return true;
   return false;

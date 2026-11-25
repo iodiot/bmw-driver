@@ -241,6 +241,10 @@ test('a patrol car chases the car, the traffic makes way, then it gives up', () 
   const player = { x: 0, lat: roadLanes[0], speed: 11 };
   // Never one drawn at random.
   assert.ok(traffic.vehicles.every((v) => !v.police));
+  // (It comes only where the lane behind is clear: clear it.)
+  traffic.vehicles = traffic.vehicles.filter(
+    (v) => Math.abs(v.x - (player.x - policeLayout.behind)) > 40
+  );
   const police = traffic.callPolice(player);
   assert.ok(police?.police.lights && police.lane === 0);
   assert.equal(traffic.chaser, police);
@@ -280,4 +284,24 @@ test('its light bar flashes blue and red by turns', async () => {
   assert.equal(both, 0);
   v.police.lights = false;
   assert.equal(beaconLit(v, 0) || beaconLit(v, 1), false);
+});
+
+test('kept on the car’s tail, the patrol car pulls it over', () => {
+  let seed = 11;
+  const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+  const traffic = new Traffic({ random });
+  traffic.reset(0, roadLanes[0]);
+  const player = { x: 0, lat: roadLanes[0], speed: 9 };
+  const police = traffic.callPolice(player);
+  let caughtAt = null;
+  for (let t = 0; t < 90 && !caughtAt; t += 0.1) {
+    player.x += player.speed * 0.1;
+    traffic.step(0.1, player);
+    if (traffic.caught) caughtAt = t;
+  }
+  assert.ok(caughtAt !== null, 'pulled over');
+  assert.equal(traffic.caught, police);
+  // Its lights go off: the chase is over.
+  assert.equal(police.police.lights, false);
+  assert.equal(traffic.chaser, null);
 });

@@ -1,7 +1,25 @@
 import * as THREE from 'three';
 import { seasonUniforms } from './season.js';
 import { structuresGLSL, structureUniforms } from './road-structures.js';
-import { obstacleReach, roadProfileGLSL } from './road-profile.js';
+import {
+  guardrailOffset,
+  laneWidth,
+  obstacleReach,
+  roadEdge,
+  roadLanes,
+  roadProfileGLSL,
+} from './road-profile.js';
+
+// The road's widths in the shader, from its lanes (three, or the route's).
+const g = (n) => Number(n).toFixed(3);
+const E = g(roadEdge),
+  W = g(laneWidth),
+  halfLane = g(laneWidth / 2);
+// The distance to the nearest line between lanes, as GLSL.
+const laneLineDistance = roadLanes
+  .slice(0, -1)
+  .map((lane) => `abs(roadLat - ${g(lane + laneWidth / 2)})`)
+  .reduce((a, b) => `min(${a}, ${b})`);
 
 // A small, tileable surface mask is sampled in world space. It stays fixed on
 // the asphalt as the road mesh is recentered and is uploaded only once.
@@ -275,10 +293,10 @@ export function setupRoad(scene, { lite = false } = {}) {
         roadLat = carriageLat(roadLat);
         lateral = abs(roadLat);
         float pavedBranch = hasBranch * (1. - smoothstep(2.15, 2.25, branchLateral));
-        float offRoad = smoothstep(6.05, 6.25, lateral) * (1. - tunnelFloor(vRoadXZ)) *
+        float offRoad = smoothstep(${g(roadEdge + 0.65)}, ${g(roadEdge + 0.85)}, lateral) * (1. - tunnelFloor(vRoadXZ)) *
           (1. - pavedBranch);
         float track = 0.;
-        float verge = min(smoothstep(7.3, 8.1, lateral), smoothstep(2.2, 3., branchLateral));
+        float verge = min(smoothstep(${g(guardrailOffset)}, ${g(guardrailOffset + 0.8)}, lateral), smoothstep(2.2, 3., branchLateral));
         bool onAsphalt = offRoad < 1.;
         // The asphalt's photographs share one tiling, so one set of gradients
         // serves them all (taken outside any branch, for correct mip levels).
@@ -385,8 +403,8 @@ export function setupRoad(scene, { lite = false } = {}) {
         }
         // Asphalt history: polished wheel tracks in every lane, darker repair
         // patches and meandering sealed cracks.
-        float onCarriageway = 1. - smoothstep(5.35, 5.55, lateral);
-        float laneOffset = mod(roadLat + 5.4, 3.6) - 1.8;
+        float onCarriageway = 1. - smoothstep(${g(roadEdge - 0.05)}, ${g(roadEdge + 0.15)}, lateral);
+        float laneOffset = mod(roadLat + ${E}, ${W}) - ${halfLane};
         // The service lane beyond the motorway's asphalt: the same asphalt,
         // worn where the wheels run (no country road's patchiness now).
         float countryRoad = 0.;
@@ -394,9 +412,9 @@ export function setupRoad(scene, { lite = false } = {}) {
         float wheelTrack = max(exp(-pow((abs(laneOffset) - .82) / .3, 2.)) * onCarriageway,
           exp(-pow((abs(branchLat) - .85) / .32, 2.)) * serviceLane);
         diffuseColor.rgb *= mix(1., 1. + .18 * broadNoise + .06 * midNoise, countryRoad);
-        vec2 patchCell = floor(vec2(vRoadXZ.x / 11., (roadLat + 5.4) / 3.6));
+        vec2 patchCell = floor(vec2(vRoadXZ.x / 11., (roadLat + ${E}) / ${W}));
         float patchSeed = fract(sin(dot(patchCell, vec2(12.9898, 78.233))) * 43758.5453);
-        vec2 patchLocal = vec2(mod(vRoadXZ.x, 11.), mod(roadLat + 5.4, 3.6));
+        vec2 patchLocal = vec2(mod(vRoadXZ.x, 11.), mod(roadLat + ${E}, ${W}));
         float patchLength = 2.5 + 5. * fract(patchSeed * 7.3);
         // Slightly irregular, softened edges; newer asphalt is only a little darker.
         float patchEdge = .06 + .1 * fineNoise;
@@ -423,9 +441,11 @@ export function setupRoad(scene, { lite = false } = {}) {
           roadside = mix(roadside, rutted, winterCover * (.9 + .1 * midNoise));
           // (Between the wheel tracks: a thin, broken film of packed snow.)
           float betweenTracks = smoothstep(.2, .55, abs(laneOffset)) * (1. - smoothstep(1.25, 1.6, abs(laneOffset)));
-          laneSnow = winterCover * onCarriageway *
-            max(smoothstep(4.4, 5.3, lateral) * (.55 + .45 * midNoise),
-                betweenTracks * .22 * smoothstep(.55, .8, midNoise) * (.6 + .4 * fineNoise));
+          // (Banked from inside the edge line out over the asphalt shoulder,
+          // which had none and showed as a bare dark strip beside the snow.)
+          laneSnow = winterCover *
+            max(smoothstep(${g(roadEdge - 1)}, ${g(roadEdge - 0.1)}, lateral) * (1. - offRoad) * (.55 + .45 * midNoise),
+                onCarriageway * betweenTracks * .22 * smoothstep(.55, .8, midNoise) * (.6 + .4 * fineNoise));
           // The service lane: snow banked along its edges, as the carriageway's.
           laneSnow = max(laneSnow, winterCover * serviceLane *
             smoothstep(1.4, 2.1, branchLateral) * (.55 + .45 * midNoise));
@@ -435,19 +455,19 @@ export function setupRoad(scene, { lite = false } = {}) {
         diffuseColor.rgb = mix(diffuseColor.rgb, roadside, offRoad);
         float roadAAZ = max(fwidth(roadLat), 0.002);
         float roadAAX = max(fwidth(vRoadXZ.x), 0.002);
-        float laneDistance = min(abs(roadLat - 1.8), abs(roadLat + 1.8));
+        float laneDistance = ${laneLineDistance};
         float lanePaint = 1.0 - smoothstep(0.065 - roadAAZ, 0.065 + roadAAZ, laneDistance);
         float dashX = abs(mod(vRoadXZ.x + 4.5, 9.0) - 4.5);
         float dashPaint = 1.0 - smoothstep(1.5 - roadAAX, 1.5 + roadAAX, dashX);
-        float edgeDistance = min(abs(roadLat - 5.4), abs(roadLat + 5.4));
+        float edgeDistance = min(abs(roadLat - ${E}), abs(roadLat + ${E}));
         float edgePaint = 1.0 - smoothstep(0.075 - roadAAZ, 0.075 + roadAAZ, edgeDistance);
         // The service lane's edge lines, where it runs clear of the
         // carriageway.
         float laneEdge = 1.0 - smoothstep(0.075 - roadAAZ, 0.075 + roadAAZ, abs(branchLateral - 1.95));
-        edgePaint = max(edgePaint, laneEdge * hasBranch * step(6.2, rawLat));
+        edgePaint = max(edgePaint, laneEdge * hasBranch * step(${g(roadEdge + 0.8)}, rawLat));
         // Where the service lane leaves or joins, the right edge line is
         // broken into short dashes across its mouth.
-        float mouth = hasBranch * step(0., rawLat) * (1. - step(5.9, branchCentre - 2.2));
+        float mouth = hasBranch * step(0., rawLat) * (1. - step(${g(roadEdge + 0.5)}, branchCentre - 2.2));
         float exitDash = 1. - smoothstep(1. - roadAAX, 1. + roadAAX, abs(mod(vRoadXZ.x + 2., 4.) - 2.));
         edgePaint *= mix(1., exitDash, mouth);
 

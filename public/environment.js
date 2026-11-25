@@ -175,6 +175,16 @@ export function createSky(night = { value: 0 }, rain = { value: 0 }, sunset = { 
           white = mix(white, white * vec3(1., .72, .56), sunset * .7);
           white = mix(white, mix(vec3(.48, .52, .57), vec3(.13, .16, .21), night), rain * .85);
           color = mix(color, white, cloud * .93);
+          // Under rain or snow the deck is not one flat grey: darker and
+          // lighter drifts in it, slowly moving, and at night its underside
+          // faintly lit, most toward the horizon (the towns' and villages'
+          // lights), so the sky still stands apart from the land.
+          float deck = fbm(p * .55 + vec3(cloudDrift * 2.4, 0., 0.));
+          float deckFine = fbm(p * 1.7 + vec3(0., 0., cloudDrift * 4.));
+          color *= mix(1., .74 + .38 * deck + .12 * deckFine, rain * smoothstep(.0, .12, h));
+          vec3 underlit = mix(vec3(.19, .19, .22), vec3(.075, .085, .11), smoothstep(.0, .5, h));
+          underlit *= .7 + .55 * deck + .15 * deckFine;
+          color = mix(color, underlit, rain * night * .85);
           float glow = pow(max(dot(d, sunDirection), 0.), 280.);
           color += vec3(1., .88, .63) * glow * .8 * (1. - night) * (1. - rain * .95);
 
@@ -187,11 +197,14 @@ export function createSky(night = { value: 0 }, rain = { value: 0 }, sunset = { 
             color = mix(color, moonColor, moonDisc * night * (1. - cloud * .45) * (1. - rain * .35));
           }
           if (photoSkyMix > .001) color = mix(color, photoColor(d), photoSkyMix);
-          // Winter: a pale, cold sky, whitest low down.
+          // Winter: a pale, cold sky, whitest low down, its clouds still in
+          // it (the cold is laid over them, keeping their light and shade).
           if (winter > .001) {
             vec3 cold = mix(vec3(.84, .88, .93), vec3(.58, .68, .82), pow(h, .5));
             cold = mix(cold, cold * vec3(.32, .36, .48), night);
-            color = mix(color, cold, winter * .6 * (1. - storm));
+            float shade = dot(color, vec3(.3, .59, .11)) / max(dot(cold, vec3(.3, .59, .11)), .05);
+            vec3 coldClouds = cold * mix(1., clamp(shade, .55, 1.25), .75);
+            color = mix(color, coldClouds, winter * .6 * (1. - storm));
           }
           // A thunderstorm: low, heavy cloud, darkest overhead, lit from
           // within by lightning.

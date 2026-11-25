@@ -7,8 +7,8 @@ import {
   roadCenterSlope,
   roadCenterZ,
   roadLateral,
+  nearestService,
 } from './road-profile.js';
-import { nearestOccurrence } from './road-structures.js';
 import { Kit, canvasTexture } from './build-kit.js';
 import { addSurfaceDetail } from './surface-detail.js';
 import { groupShadow } from './sun-shadows.js';
@@ -80,7 +80,7 @@ export function atPump(x, z, speed) {
   if (speed > 0.4) return false;
   const depth = forecourtDepth(x, roadLateral(x, z));
   if (depth === null) return false;
-  const along = x - nearestOccurrence(x, fuelStationPlace.at);
+  const along = x - nearestService(x, fuelStationPlace.at);
   const beside = Math.abs(depth - pumpRow);
   return pumpIslands.some((p) => Math.abs(along - p) < 3.2) && beside > 0.9 && beside < 4;
 }
@@ -384,7 +384,7 @@ export function setupFuelStation(scene) {
     // Places it at its nearest occurrence to x; `night` (0–1) lights the
     // canopy, the shop and the sign; `sun` and `strength` lay its shadow.
     update(x, night = 0, sun = null, strength = 0) {
-      const u = nearestOccurrence(x, fuelStationPlace.at);
+      const u = nearestService(x, fuelStationPlace.at);
       // Not drawn at all when far off.
       const near = Math.abs(u - x) < 900;
       group.visible = sign.group.visible = near;

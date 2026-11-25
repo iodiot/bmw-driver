@@ -7,6 +7,7 @@ import {
   obstacles,
   branchOffset,
   fuelStationPlace,
+  servicesBetween,
   roadBranch,
   oncoming,
   oncomingCentre,
@@ -14,6 +15,7 @@ import {
 import { structureLayout, nearestOccurrence } from './road-structures.js';
 import { elevationPeriod, roadElevation, roadGrade } from './terrain.js';
 import { route } from './route.js';
+import { checkpointLayout, checkpoints, rowBlocks } from './checkpoints.js';
 
 // Road-ahead schematic in the top left corner, like a navigation display.
 // Up is the road's direction at the car; the road ahead is drawn with its
@@ -367,9 +369,8 @@ export function setupMinimap(container) {
             bar(x + edge, bridgeFrom, bridgeTo, 0.7, 'rgba(242,246,250,0.95)');
         }
       // The fuel station beside the country road: a green pump sign.
-      const station = nearestOccurrence(simulation.x, fuelStationPlace.at);
-      for (const at of [station - roadBranch.period, station, station + roadBranch.period]) {
-        if (at < from || at > to) continue;
+      for (const origin of servicesBetween(from, to, fuelStationPlace.at)) {
+        const at = origin + fuelStationPlace.at;
         const branch = branchOffset(at);
         if (branch === null) continue;
         const [sx, sy, scale] = P(at, drawnLateral(branch + 16));
@@ -413,6 +414,17 @@ export function setupMinimap(container) {
         ctx.strokeStyle = ctx.fillStyle;
         ctx.stroke();
       };
+      // The checkpoints' blocks, red and white by turns as they are painted
+      // (a little thicker than they are, to show).
+      for (const at of checkpoints) {
+        if (at + checkpointLayout.rows.at(-1) < from || at > to) continue;
+        checkpointLayout.rows.forEach((u, row) =>
+          rowBlocks(row).forEach((lat, i) => {
+            ctx.fillStyle = (i + row) % 2 ? 'rgba(240,244,248,0.95)' : 'rgba(228,48,48,0.95)';
+            block({ x: at + u, lat, length: 1.6, width: checkpointLayout.block.long }, 0, 1);
+          })
+        );
+      }
       for (const v of vehicles) {
         if (v.x < from || v.x > to) continue;
         if (v.lorry) {
@@ -422,8 +434,23 @@ export function setupMinimap(container) {
           block(v, 0, 0.8);
           ctx.fillStyle = 'rgba(28,40,56,0.95)';
           block(v, 0.8, 1);
+        } else if (v.police?.lights) {
+          // A patrol car with its lights on: blue and red by turns, as its
+          // light bar flashes, in a glow of the same, to be seen far off.
+          const blue = ((v.clock ?? 0) * 2.2) % 1 < 0.5;
+          const [gx, gy, scale] = P(v.x, v.lat);
+          const r = Math.max(4, scale * 3.5);
+          const glow = ctx.createRadialGradient(gx, gy, 0, gx, gy, r);
+          glow.addColorStop(0, blue ? 'rgba(80,140,255,0.8)' : 'rgba(255,60,60,0.8)');
+          glow.addColorStop(1, blue ? 'rgba(80,140,255,0)' : 'rgba(255,60,60,0)');
+          ctx.fillStyle = glow;
+          ctx.beginPath();
+          ctx.arc(gx, gy, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = blue ? 'rgb(110,165,255)' : 'rgb(255,85,85)';
+          block(v, 0, 1);
         } else {
-          ctx.fillStyle = v.police?.lights ? 'rgba(70,120,230,0.95)' : 'rgba(22,30,42,0.88)';
+          ctx.fillStyle = 'rgba(22,30,42,0.88)';
           block(v, 0, 1);
         }
       }

@@ -37,7 +37,9 @@ test('Signs stand before what they announce', () => {
   assert.ok(limits[0].at < tunnel.from && limits[0].value === 100);
   assert.ok(limits[1].at > tunnel.to && limits[1].value === 120);
   const services = signs.find((s) => s.kind === 'services');
-  assert.equal(period + roadBranch.start - services.at, services.distance);
+  // (Its place is from the service area's origin: it stands before it.)
+  assert.ok(services.service && services.at < 0);
+  assert.equal(roadBranch.start - services.at, services.distance);
   assert.ok(services.distance > 300 && services.distance < 700, 'some 500 m ahead');
 });
 

@@ -1,6 +1,7 @@
 import {
   branchOffset,
   fuelStationPlace,
+  nearestService,
   roadBranch,
   roadCenterZ,
   roadCenterSlope,
@@ -9,6 +10,7 @@ import { nearestOccurrence } from './road-structures.js';
 import { priceSignPlace, pumpIslands, pumpRow } from './fuel-station.js';
 import { villageSetback, villageYards, yardColliders, villageShown } from './village.js';
 import { currentLand } from './route-land.js';
+import { checkpointSolids } from './checkpoints.js';
 
 // The solid things beside the country road the car can run into: the fuel
 // station's shop, pump islands, canopy columns and price sign, and the
@@ -28,15 +30,17 @@ const edgeAt = (u) => (branchOffset(u) ?? roadBranch.separation) + roadBranch.ha
 
 export function solidsNear(x, range = 40) {
   const out = [];
-  const u = nearestOccurrence(x, fuelStationPlace.at);
+  const u = nearestService(x, fuelStationPlace.at);
   if (Math.abs(u - x) < 60 + range) {
     const edge = edgeAt(u);
     for (const [bx, bz, hx, hz] of stationBoxes) out.push({ x: u + bx, lat: edge + bz, hx, hz });
     // The price sign, by the service lane before the forecourt.
     out.push({ x: u + priceSignPlace.along, lat: edge + priceSignPlace.out, hx: 0.4, hz: 1.4 });
   }
-  // On a real route, its own buildings and trees.
+  // On a real route, its own buildings and trees, and its checkpoints'
+  // concrete blocks.
   if (currentLand) out.push(...currentLand.solidsNear(x, range));
+  out.push(...checkpointSolids(x, range));
   if (villageShown)
     villageYards.forEach((yard, i) => {
       const at = nearestOccurrence(x, yard);

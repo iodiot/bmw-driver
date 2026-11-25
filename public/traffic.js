@@ -1,7 +1,20 @@
 import { roadGrade } from './terrain.js';
-import { oncomingLanes, roadLanes, roadCenterZ, roadCenterSlope } from './road-profile.js';
+import {
+  laneCount,
+  oncomingLanes,
+  roadLanes,
+  roadCenterZ,
+  roadCenterSlope,
+} from './road-profile.js';
 import { bumpSpeed } from './lane-keeping.js';
 import { structureLayout, nearestOccurrence } from './road-structures.js';
+import {
+  checkpointAt,
+  checkpointSpeed,
+  checkpoints,
+  parkedSpots,
+  slalomLat,
+} from './checkpoints.js';
 
 // Traffic on the motorway: cars, vans and lorries in the three lanes, all
 // going the car's way (the carriageway is one-way). Each keeps its own
@@ -15,14 +28,58 @@ import { structureLayout, nearestOccurrence } from './road-structures.js';
 
 // Lanes by index: 0 the left (fast) lane, 2 the right one.
 const lanes = roadLanes;
+// Lanes a vehicle keeps to, given for three (0 the fast one) and taken to
+// the road's: on two, the left stays left and the others go to the right.
+const fit = (list) =>
+  Object.freeze([
+    ...new Set(
+      list.map((i) => (i === 0 ? 0 : Math.min(laneCount - 1, Math.max(1, i - (3 - laneCount)))))
+    ),
+  ]);
 export const vehicleTypes = Object.freeze({
-  hatch: { length: 4.25, width: 1.79, speed: [28, 36], lanes: [0, 1, 2], weight: 4, lorry: false },
-  sedan: { length: 4.8, width: 1.83, speed: [30, 38], lanes: [0, 1, 2], weight: 4, lorry: false },
-  suv: { length: 4.65, width: 1.88, speed: [28, 35], lanes: [0, 1, 2], weight: 3, lorry: false },
-  van: { length: 5.93, width: 2.0, speed: [25, 30], lanes: [1, 2], weight: 2, lorry: false },
-  lorry: { length: 16.5, width: 2.55, speed: [21.5, 24.5], lanes: [1, 2], weight: 3, lorry: true },
+  hatch: {
+    length: 4.25,
+    width: 1.79,
+    speed: [28, 36],
+    lanes: fit([0, 1, 2]),
+    weight: 4,
+    lorry: false,
+  },
+  sedan: {
+    length: 4.8,
+    width: 1.83,
+    speed: [30, 38],
+    lanes: fit([0, 1, 2]),
+    weight: 4,
+    lorry: false,
+  },
+  suv: {
+    length: 4.65,
+    width: 1.88,
+    speed: [28, 35],
+    lanes: fit([0, 1, 2]),
+    weight: 3,
+    lorry: false,
+  },
+  van: { length: 5.93, width: 2.0, speed: [25, 30], lanes: fit([1, 2]), weight: 2, lorry: false },
+  lorry: {
+    length: 16.5,
+    width: 2.55,
+    speed: [21.5, 24.5],
+    lanes: fit([1, 2]),
+    // No longer drawn at random: off the road for now.
+    weight: 0,
+    lorry: true,
+  },
   // Never drawn at random: called up to chase the car (see callPolice).
-  police: { length: 4.8, width: 1.83, speed: [30, 34], lanes: [0, 1, 2], weight: 0, lorry: false },
+  police: {
+    length: 4.8,
+    width: 1.83,
+    speed: [30, 34],
+    lanes: fit([0, 1, 2]),
+    weight: 0,
+    lorry: false,
+  },
 });
 // Roof heights (m), for the shadows they cast.
 export const vehicleHeights = Object.freeze({
@@ -148,6 +205,10 @@ export const policeLayout = Object.freeze({
   top: 72,
   // Traffic ahead of it in its lane, within this, moves over.
   clearAhead: 140,
+  // Close on the car's tail (within this many seconds of it, or 15 m) for
+  // this long, it pulls the car over.
+  catchGap: 0.9,
+  catchTime: 5,
 });
 
 export class Traffic {
@@ -160,9 +221,56 @@ export class Traffic {
     this.policeIn = a + (b - a) * random();
   }
 
-  // The patrol car chasing the car, if any (its lights on).
+  // The patrol car chasing the car, if any (its lights on; not one parked
+  // at a checkpoint).
   get chaser() {
-    return this.vehicles.find((v) => v.police?.lights) ?? null;
+    return this.vehicles.find((v) => v.police?.lights && !v.parked) ?? null;
+  }
+
+  // The checkpoints' patrol cars, there while the car is near (inside the
+  // window the traffic is kept in, so they are not dropped and made again).
+  parkAtCheckpoints(x) {
+    for (const at of checkpoints) {
+      const near = at - x > -trafficLayout.behind + 40 && at - x < trafficLayout.ahead - 40;
+      parkedSpots(at).forEach((spot, i) => {
+        const key = `${at}:${i}`;
+        const index = this.vehicles.findIndex((v) => v.parked === key);
+        if (!near) {
+          if (index >= 0) this.vehicles.splice(index, 1);
+          return;
+        }
+        if (index >= 0) return;
+        const spec = vehicleTypes.police;
+        this.vehicles.push({
+          id: this.serial++,
+          type: 'police',
+          lorry: false,
+          length: spec.length,
+          width: spec.width,
+          x: spot.x,
+          lat: spot.lat,
+          lane: -1,
+          from: -1,
+          speed: 0,
+          desired: 0,
+          accel: 0,
+          latSpeed: 0,
+          yaw: spot.yaw,
+          crash: null,
+          change: null,
+          signal: 0,
+          clock: i * 0.37,
+          decide: 0,
+          sinceChange: 10,
+          hurried: 0,
+          camper: false,
+          colour: '#f3f4f5',
+          trailer: null,
+          parked: key,
+          police: { lights: true, chase: Infinity },
+        });
+      });
+    }
   }
 
   // A patrol car behind the car (`player` {x, lat, speed}), lights on, in
@@ -209,13 +317,26 @@ export class Traffic {
     return v;
   }
 
-  // The patrol car's part of a step: the chase, then lights off.
+  // The patrol car's part of a step: the chase, then lights off. Kept on
+  // the car's tail long enough, it pulls it over: `caught` is set (the
+  // caller fines the car and clears it) and the chase is over.
   pursue(v, dt, player) {
     const p = v.police;
     if (p.lights) {
       p.chase -= dt;
       const behind = player ? player.x - v.x : Infinity;
-      if (!player || p.chase <= 0 || behind > policeLayout.giveUp) p.lights = false;
+      const gap = behind - (v.length + 4.9) / 2;
+      const close =
+        player &&
+        gap > -2 &&
+        gap < Math.max(15, policeLayout.catchGap * player.speed) &&
+        Math.abs(player.lat - v.lat) < 4;
+      p.close = close ? (p.close ?? 0) + dt : Math.max(0, (p.close ?? 0) - dt);
+      if (p.close >= policeLayout.catchTime) {
+        this.caught = v;
+        p.lights = false;
+        p.close = 0;
+      } else if (!player || p.chase <= 0 || behind > policeLayout.giveUp) p.lights = false;
       else {
         // Closing in, then sitting on the car's tail.
         const gap = behind - (v.length + 4.9) / 2;
@@ -232,7 +353,12 @@ export class Traffic {
     if (ahead <= 0 || ahead > policeLayout.clearAhead || v.lane !== chaser.lane) return;
     const spec = vehicleTypes[v.type];
     for (const to of [v.lane + 1, v.lane - 1])
-      if (to >= 0 && to <= 2 && spec.lanes.includes(to) && this.laneOpen(v, to, users, 10)) {
+      if (
+        to >= 0 &&
+        to < lanes.length &&
+        spec.lanes.includes(to) &&
+        this.laneOpen(v, to, users, 10)
+      ) {
         this.begin(v, to, -0.6);
         v.sinceChange = 0;
         v.gaveWay = trafficLayout.gaveWay;
@@ -260,7 +386,7 @@ export class Traffic {
     const spec = vehicleTypes[type];
     const lane = spec.lanes[Math.floor(this.random() * spec.lanes.length)];
     // Lorries keep to the right lane, mostly.
-    const index = spec.lorry && this.random() < 0.8 ? 2 : lane;
+    const index = spec.lorry && this.random() < 0.8 ? lanes.length - 1 : lane;
     const lat = lanes[index];
     const others = [...this.vehicles, player];
     const clear = others.every(
@@ -343,7 +469,7 @@ export class Traffic {
     // (`speedScale`: slower on winter roads.)
     let desired = v.desired * (this.speedScale ?? 1) + (v.hurried > 0 ? 3 : 0);
     const front = v.x + v.length / 2;
-    desired = Math.min(desired, bumpSpeed(front));
+    desired = Math.min(desired, bumpSpeed(front), checkpointSpeed(front));
     const { from, to } = structureLayout.tunnel;
     const start = nearestOccurrence(front, from);
     if (front > start - 250 && front < start + (to - from) + 20)
@@ -375,8 +501,15 @@ export class Traffic {
         this.policeIn = a + (b - a) * this.random();
       }
     }
+    if (player) this.parkAtCheckpoints(player.x);
     const chaser = this.chaser;
     for (const v of this.vehicles) {
+      // Parked at a checkpoint: lights flashing, going nowhere.
+      if (v.parked) {
+        v.clock += dt;
+        v.speed = v.accel = 0;
+        continue;
+      }
       v.clock += dt;
       v.sinceChange += dt;
       if (v.hurried > 0) v.hurried -= dt;
@@ -423,12 +556,21 @@ export class Traffic {
       v.leader = leader;
       if (!v.crash) this.decide(v, leader, users, dt, desired);
       this.move(v, dt, users);
+      // Through a checkpoint: weave through its gaps (no lane changes there).
+      const through = !v.crash && slalomLat(v.x, lanes[v.lane] ?? v.lat);
+      if (through !== null && through !== false) {
+        v.change = null;
+        v.latSpeed = dt > 0 ? (through - v.lat) / dt : 0;
+        v.lat = through;
+      }
     }
     this.recycle(player);
   }
 
   decide(v, leader, users, dt, desired) {
     if (v.change) return;
+    // (Not on the way into a checkpoint or through it.)
+    if (checkpointAt(v.x, 250) !== null) return;
     // Chasing: into the car's lane, or round whatever holds it up.
     if (v.police?.lights) return this.chase(v, leader, users, dt);
     v.decide -= dt;
@@ -436,7 +578,7 @@ export class Traffic {
     v.decide = 0.8 + this.random() * 0.8;
     if (v.sinceChange < 4) return;
     const spec = vehicleTypes[v.type];
-    const can = (index) => index >= 0 && index <= 2 && spec.lanes.includes(index);
+    const can = (index) => index >= 0 && index < lanes.length && spec.lanes.includes(index);
     const stuck = leader && leader.speed < 3 && leader.gap < 35;
     // Overtake on the left when held up by something slower.
     const heldUp =
@@ -532,7 +674,7 @@ export class Traffic {
       this.vehicles.splice(i, 1);
     }
     let tries = 0;
-    while (this.vehicles.length < this.count && tries++ < 20) {
+    while (this.vehicles.filter((v) => !v.parked).length < this.count && tries++ < 20) {
       // Mostly ahead; behind when the car is slower than the traffic.
       const fromBehind = this.random() < (player.speed < 22 ? 0.5 : 0.15);
       const [a, b] = fromBehind ? trafficLayout.spawnBehind : trafficLayout.spawnAhead;
@@ -575,7 +717,11 @@ export class Traffic {
     if (v.crash || v.change) return v;
     const users = [...this.vehicles, { x, lat, speed: v.speed, length: 4.9, width: 1.9 }];
     const spec = vehicleTypes[v.type];
-    if (v.lane < 2 && spec.lanes.includes(v.lane + 1) && this.laneOpen(v, v.lane + 1, users, 12)) {
+    if (
+      v.lane < lanes.length - 1 &&
+      spec.lanes.includes(v.lane + 1) &&
+      this.laneOpen(v, v.lane + 1, users, 12)
+    ) {
       this.begin(v, v.lane + 1, reaction);
       v.sinceChange = 0;
       v.gaveWay = trafficLayout.gaveWay;
@@ -681,7 +827,7 @@ export class OncomingTraffic {
     const spec = vehicleTypes[type];
     const index =
       spec.lorry && this.random() < 0.8
-        ? 2
+        ? this.lanes.length - 1
         : spec.lanes[Math.floor(this.random() * spec.lanes.length)];
     const lat = this.lanes[index];
     const clear = this.vehicles.every(

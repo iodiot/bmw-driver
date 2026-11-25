@@ -34,6 +34,7 @@ import { setupBusStops } from './bus-stops.js';
 import { FuelTank, atPump, fuelPrice, setupFuelStation } from './fuel-station.js';
 import { setupVillage } from './village.js';
 import { setupRouteLand } from './route-land.js';
+import { checkpointAt, checkpointSpeed, setupCheckpoints, slalomLat } from './checkpoints.js';
 import { setupFoxes } from './foxes.js';
 import { collideWithSolids } from './obstacles.js';
 import { route, routeName } from './route.js';
@@ -107,6 +108,8 @@ import {
   guardrailsEnabled,
   surfaceRoughness,
   roadLanes,
+  guardrailOffset,
+  laneCount,
 } from './road-profile.js';
 
 const $ = (s) => document.querySelector(s);
@@ -272,10 +275,11 @@ function applyGraphics(level) {
 }
 applyGraphics(graphics);
 // Cars, vans and lorries on the motorway (see traffic.js).
+// So many to a lane: two-lane roads are no more crowded than three-lane.
 const trafficView = setupTraffic(scene, {
-    count: lowPower ? 10 : 16,
+    count: laneCount * (lowPower ? 3 : 4),
     // The other way, on the route's dual carriageway.
-    oncoming: route ? (lowPower ? 6 : 10) : 0,
+    oncoming: route ? Math.round(laneCount * (lowPower ? 2 : 3.5)) : 0,
   }),
   traffic = trafficView.traffic;
 // Timed runs and speed cameras, announced in short notices.
@@ -287,7 +291,9 @@ const powerLines = setupPowerLines(scene),
   fuelStation = setupFuelStation(scene),
   village = setupVillage(scene),
   // On a real route, what really stands beside it.
-  routeLand = setupRouteLand(scene);
+  routeLand = setupRouteLand(scene),
+  // On the N-08, its checkpoints (see checkpoints.js).
+  checkpointsView = setupCheckpoints(scene);
 // Foxes in the winter fields.
 const foxes = setupFoxes(scene);
 // On the route, the real places' names by the road.
@@ -1399,6 +1405,8 @@ function autopilotTraffic(dt) {
   }
   autopilotPlan -= dt;
   if (autopilotPlan > 0 || !settled) return;
+  // No lane changes on the way into a checkpoint or through it.
+  if (checkpointAt(sim.x, 300) !== null) return;
   autopilotPlan = 0.5;
   const lane = roadLanes.findIndex((l) => Math.abs(l - keptLane) < 0.1);
   if (lane < 0) return;
@@ -1609,6 +1617,23 @@ renderer.setAnimationLoop((time) => {
         },
         3.5
       );
+    } else if (traffic.caught) {
+      // Pulled over: a fine for the speed it caught the car at, at the
+      // motorway's 130 km/h (340 ₴ at the least), on the day's total.
+      const speed = sim.speed * 3.6,
+        fine = fineFor(speed, 130) || 340;
+      finesToday += fine;
+      traffic.caught = null;
+      policeSeen = null;
+      toasts.show(
+        {
+          label: 'POLICE',
+          shown: 'pulled you over',
+          note: `fine ${fine.toLocaleString('uk-UA')} ₴ · ${finesToday.toLocaleString('uk-UA')} ₴ so far`,
+          tone: 'fine',
+        },
+        6
+      );
     } else if (policeSeen && !traffic.chaser) {
       policeSeen = null;
       toasts.show({ label: 'POLICE', shown: 'gave up', tone: 'record' }, 3);
@@ -1616,7 +1641,12 @@ renderer.setAnimationLoop((time) => {
     if (autopilot && driving) {
       keptLane ??= nearestLane(roadLateral(sim.x, sim.z));
       autopilotTraffic(dt);
-      input.steerAngle = laneKeepingSteer(sim, keptLane);
+      // (Through a checkpoint, along the way through its gaps.)
+      const lane = keptLane;
+      input.steerAngle = laneKeepingSteer(
+        sim,
+        checkpointAt(sim.x, 140) === null ? lane : (x) => slalomLat(x, lane) ?? lane
+      );
       // Cruise at motorway pace, easing off for the bends and speed bumps,
       // and keeping its distance behind slower traffic.
       const leader = traffic.leaderFor(sim.x, roadLateral(sim.x, sim.z));
@@ -1626,9 +1656,16 @@ renderer.setAnimationLoop((time) => {
       // Closer still behind one it is pressing to move over.
       const headway = (escaping ? 0.35 : autopilotPressing ? 0.45 : 0.6) + 0.5 * winterLevel,
         closing = 3.5 - 1.5 * winterLevel;
-      const follow = leader
-        ? followSpeed(leader.gap - (4 + headway * leader.speed), leader.speed, closing)
-        : Infinity;
+      // Behind one braking hard, or on the way into a checkpoint (where the
+      // traffic queues for the gaps), it assumes the other may stop: no
+      // faster than lets it stop as short as the other would.
+      const spare = leader ? leader.gap - (4 + headway * leader.speed) : Infinity;
+      const wary = leader && ((leader.who?.accel ?? 0) < -1 || checkpointAt(sim.x, 500) !== null);
+      const follow = !leader
+        ? Infinity
+        : wary && spare > 0
+          ? Math.sqrt(leader.speed * leader.speed + 2 * (closing - 1) * spare)
+          : followSpeed(spare, leader.speed, closing);
       const fastLane = Math.abs(keptLane - roadLanes[0]) < 0.1;
       if (fastLane) autopilotPassing = false;
       const pace = autopilotPacing.step(dt, {
@@ -1649,7 +1686,9 @@ renderer.setAnimationLoop((time) => {
         follow,
         curveSpeed(sim.x, keptLane, { lateral: rainMode ? 2.5 : 3.5 }),
         bumpSpeed(sim.x),
-        escaping ? Infinity : cameraSpeed(sim.x)
+        escaping ? Infinity : cameraSpeed(sim.x),
+        // Checkpoints: a walking pace through, police or not.
+        checkpointSpeed(sim.x)
       );
       input.cruiseAccel = pace.accel;
       // Firmer on the brakes at speed, gentler on snow.
@@ -1679,7 +1718,9 @@ renderer.setAnimationLoop((time) => {
       const lat = roadLateral(sim.x, sim.z);
       traffic.step(
         dt,
-        Math.abs(lat) < 7.6 && !sim.reversing ? { x: sim.x, lat, speed: sim.speed } : null
+        Math.abs(lat) < guardrailOffset + 0.3 && !sim.reversing
+          ? { x: sim.x, lat, speed: sim.speed }
+          : null
       );
       // Traffic, and the buildings, fences and poles by the country road.
       const solid = collideWithSolids(sim);
@@ -1731,7 +1772,7 @@ renderer.setAnimationLoop((time) => {
       for (const result of runTimer.update(dt, Math.max(0, sim.forwardSpeed ?? sim.speed), manual))
         toasts.show({ ...describeRun(result), tone: result.record ? 'record' : '' });
       // Speed cameras passed this frame.
-      if (Number.isFinite(lastCameraX) && Math.abs(lat) < 7.6)
+      if (Number.isFinite(lastCameraX) && Math.abs(lat) < guardrailOffset + 0.3)
         for (const camera of camerasPassed(lastCameraX, sim.x)) {
           const speed = sim.speed * 3.6,
             fine = fineFor(speed, camera.limit);
@@ -2082,6 +2123,7 @@ renderer.setAnimationLoop((time) => {
   powerLines.update(sim?.x ?? 0, sunDirection, sunlight);
   roadside?.shadow(sunDirection, sunlight);
   busStops.update(sim?.x ?? 0, sunDirection, sunlight);
+  checkpointsView?.update(sim?.x ?? 0, sunDirection, sunlight);
   const evening = Math.min(1, Math.max(0, (light.darkness - 0.25) / 0.5));
   fuelStation.update(sim?.x ?? 0, evening, sunDirection, sunlight);
   village.update(sim?.x ?? 0, evening, sunDirection, sunlight, winterLevel, dt);

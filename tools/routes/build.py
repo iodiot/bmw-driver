@@ -31,6 +31,11 @@ ROUTES = {
     'n08': {
         'lat0': 48.15, 'origin': (35.0462, 48.4647), 'stretch': (9200, 73000),
         'name': 'Дніпро — Запоріжжя', 'road': 'Н-08', 'from': 'Дніпро', 'to': 'Запоріжжя',
+        # Two lanes each way, as the N-08 has (the M-06 has three, the default).
+        'lanes': 2,
+        # Checkpoints (where their first row of blocks stands, along the
+        # drive): clear of the service areas and the overpasses.
+        'checkpoints': [30000, 55500],
         'toGenitive': 'Запоріжжя', 'toLocative': 'Запоріжжі',
         'boards': [{'name': 'Запоріжжя'}, {'name': 'Мелітополь', 'beyond': 120},
                    {'name': 'Маріуполь', 'beyond': 233}],
@@ -196,9 +201,23 @@ def land():
     length = S1 - S0
     seen = lambda pts: any(-50 < x < length + 50 and abs(l) < 620 for x, l, _ in pts)
     flat = lambda pts: [v for x, l, _ in pts for v in (round(x, 1), round(l, 1))]
-    result = {'woods': [], 'rows': [], 'orchards': [], 'yards': [], 'water': [], 'buildings': []}
+    result = {'woods': [], 'rows': [], 'orchards': [], 'yards': [], 'water': [], 'buildings': [],
+              'fuel': []}
     for e in json.load(open(path))['elements']:
         tags = e['tags']
+        # Fuel stations: where they are along the road and on which side.
+        if tags.get('amenity') == 'fuel':
+            if 'lat' in e:
+                lon, lat = e['lon'], e['lat']
+            elif e.get('geometry'):
+                lon = sum(q[0] for q in e['geometry']) / len(e['geometry'])
+                lat = sum(q[1] for q in e['geometry']) / len(e['geometry'])
+            else:
+                continue
+            q = frame(lon, lat)
+            if q and 0 < q[0] < length and abs(q[1]) < 250:
+                result['fuel'].append([round(q[0]), round(q[1], 1)])
+            continue
         if e['type'] == 'relation':
             ways = [m['geometry'] for m in e.get('members', []) if m['role'] == 'outer']
             shapes = joined(ways)
@@ -280,6 +299,8 @@ out = {
     'toGenitive': C['toGenitive'],
     'toLocative': C['toLocative'],
     'boards': C['boards'],
+    **({'lanes': C['lanes']} if 'lanes' in C else {}),
+    **({'checkpoints': C['checkpoints']} if 'checkpoints' in C else {}),
     'step': OUT,
     'length': S1 - S0,
     'centre': pack(centre),
@@ -289,6 +310,9 @@ out = {
 grounds = land()
 if grounds:
     out['land'] = {'water': grounds['water'], 'buildings': grounds['buildings']}
+    # The fuel stations by the road (along, across; right positive), where
+    # the game puts its service areas.
+    out['fuel'] = sorted(grounds['fuel'])
     print({k: len(v) for k, v in grounds.items()}, 'buildings', len(grounds['buildings']) // 7)
 target = os.path.join(here, '..', '..', 'public', 'assets', f'route-{ID}.json')
 json.dump(out, open(target, 'w'), ensure_ascii=False, separators=(',', ':'))

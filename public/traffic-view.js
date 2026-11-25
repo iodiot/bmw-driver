@@ -1022,6 +1022,22 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
     (g, w, h) =>
       paintPool(g, w, h, (along, across) => Math.exp(-((along / 0.45) ** 2) - (across / 0.6) ** 2))
   );
+  // A patrol car's light bar at night: a blue and a red wash on the road
+  // either side of it, each lit as its lamp flashes.
+  const roundGlow = (g, w, h) => {
+    const image = g.createImageData(w, h);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const dx = (x / (w - 1)) * 2 - 1,
+          dy = (y / (h - 1)) * 2 - 1;
+        const i = (y * w + x) * 4;
+        image.data[i] = image.data[i + 1] = image.data[i + 2] = 255;
+        image.data[i + 3] = Math.round(255 * Math.max(0, 1 - Math.hypot(dx, dy)) ** 2);
+      }
+    g.putImageData(image, 0, 0);
+  };
+  const blueGlow = lampPool('Police blue glow', new THREE.Color(0.25, 0.45, 1), 0.85, roundGlow),
+    redGlow = lampPool('Police red glow', new THREE.Color(1, 0.15, 0.1), 0.75, roundGlow);
   const poolAt = new THREE.Vector3(),
     poolSize = new THREE.Vector3(),
     flatTurn = new THREE.Quaternion();
@@ -1085,7 +1101,9 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
       }
       const counts = Object.fromEntries(Object.keys(meshes).map((t) => [t, 0]));
       let shadows = 0,
-        pools = 0;
+        pools = 0,
+        blues = 0,
+        reds = 0;
       opposite?.update(dt, x);
       for (const v of opposite ? [...traffic.vehicles, ...opposite.vehicles] : traffic.vehicles) {
         const index = counts[v.type]++;
@@ -1162,6 +1180,23 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
         rotation.setFromEuler(euler);
         matrix.compose(position, rotation, new THREE.Vector3(v.length + 0.7, 1, v.width + 0.6));
         shadow.setMatrixAt(shadows++, matrix);
+        // A patrol car's light bar after dark: its blue and red on the road.
+        if (v.police?.lights && lamps > 0.5) {
+          euler.set(0, heading, 0);
+          flatTurn.setFromEuler(euler);
+          for (const [side, glow] of [
+            [0, blueGlow],
+            [1, redGlow],
+          ]) {
+            if (!beaconLit(v, side)) continue;
+            const off = side ? 1.6 : -1.6;
+            poolAt.set(v.x - Math.sin(heading) * off, 0.03, position.z + Math.cos(heading) * off);
+            poolSize.set(11, 1, 9);
+            matrix.compose(poolAt, flatTurn, poolSize);
+            if (side) redGlow.setMatrixAt(reds++, matrix);
+            else blueGlow.setMatrixAt(blues++, matrix);
+          }
+        }
         // Lamps lit: their light on the road ahead and behind.
         if (lamps > 0.5) {
           flatTurn.setFromEuler(euler);
@@ -1185,15 +1220,24 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
         for (const { mesh, flat } of list) {
           if (flat) {
             flat.count = showShadows ? counts[type] : 0;
+            // (An empty instanced mesh still costs a draw call.)
+            flat.visible = flat.count > 0;
             flat.instanceMatrix.needsUpdate = true;
           }
           mesh.count = counts[type];
+          mesh.visible = mesh.count > 0;
           mesh.instanceMatrix.needsUpdate = true;
           if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
         }
       shadow.count = shadows;
       shadow.instanceMatrix.needsUpdate = true;
       headPool.count = tailPool.count = pools;
+      blueGlow.count = blues;
+      redGlow.count = reds;
+      blueGlow.visible = blues > 0;
+      redGlow.visible = reds > 0;
+      headPool.visible = tailPool.visible = pools > 0;
+      blueGlow.instanceMatrix.needsUpdate = redGlow.instanceMatrix.needsUpdate = true;
       headPool.instanceMatrix.needsUpdate = tailPool.instanceMatrix.needsUpdate = true;
     },
   };
