@@ -3,6 +3,9 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { roadCenterZ, roadCenterSlope, roadHeight } from './road-profile.js';
 import { tunnelCover, bridgeShade, structureUniforms } from './road-structures.js';
 import { OncomingTraffic, Traffic, rideOver, vehicleTypes } from './traffic.js';
+// The part kinds that hold wheels (tyres, recesses and hub caps; rims and
+// spokes).
+const wheelKinds = Object.freeze({ trim: true, metal: true });
 import { roadSeed, seededRandom } from './road-seed.js';
 
 // The traffic's vehicles, drawn: each type a few instanced meshes (paint,
@@ -75,17 +78,20 @@ const box = (sx, sy, sz, x, y, z) => {
 };
 // A five-spoke alloy on a tyre's outer face: rim, spokes and centre cap in
 // metal over a dark recess.
+// A wheel's piece, marked with its hub (x along the vehicle, height r) so
+// the shader turns it as the vehicle rolls.
+const onHub = (g, x, r) => ((g.userData.hub = [x, r]), g);
 function alloy(parts, r, w, x, z, side) {
   const face = z + side * (w / 2 + 0.006);
   const recess = new THREE.CylinderGeometry(r * 0.66, r * 0.66, 0.012, 16);
   recess.rotateX(Math.PI / 2);
   recess.translate(x, r, face - side * 0.004);
   recess.deleteAttribute('uv');
-  parts.trim.push(recess);
+  parts.trim.push(onHub(recess, x, r));
   const rim = new THREE.TorusGeometry(r * 0.64, 0.022, 5, 20);
   rim.translate(x, r, face);
   rim.deleteAttribute('uv');
-  parts.metal.push(rim);
+  parts.metal.push(onHub(rim, x, r));
   for (let i = 0; i < 5; i++) {
     const a = (i / 5) * Math.PI * 2;
     const spoke = new THREE.BoxGeometry(0.05, r * 0.6, 0.02);
@@ -93,13 +99,13 @@ function alloy(parts, r, w, x, z, side) {
     spoke.rotateZ(a);
     spoke.translate(x, r, face + side * 0.004);
     spoke.deleteAttribute('uv');
-    parts.metal.push(spoke);
+    parts.metal.push(onHub(spoke, x, r));
   }
   const cap = new THREE.CylinderGeometry(r * 0.14, r * 0.14, 0.03, 10);
   cap.rotateX(Math.PI / 2);
   cap.translate(x, r, face + side * 0.008);
   cap.deleteAttribute('uv');
-  parts.metal.push(cap);
+  parts.metal.push(onHub(cap, x, r));
 }
 
 // The parts of a vehicle, by what they are drawn with.
@@ -155,7 +161,7 @@ function tyre(r, w, x, z) {
   g.rotateX(Math.PI / 2);
   g.translate(x, r, z);
   g.deleteAttribute('uv');
-  return g;
+  return onHub(g, x, r);
 }
 // A plain steel wheel with its hub cap, on a van or a lorry.
 function steelWheel(parts, r, w, x, z, side) {
@@ -165,12 +171,12 @@ function steelWheel(parts, r, w, x, z, side) {
   rim.rotateX(Math.PI / 2);
   rim.translate(x, r, face);
   rim.deleteAttribute('uv');
-  parts.metal.push(rim);
+  parts.metal.push(onHub(rim, x, r));
   const cap = new THREE.CylinderGeometry(r * 0.24, r * 0.3, 0.06, 12);
   cap.rotateX(Math.PI / 2);
   cap.translate(x, r, face + side * 0.03);
   cap.deleteAttribute('uv');
-  parts.trim.push(cap);
+  parts.trim.push(onHub(cap, x, r));
 }
 // A slanted box: `sx` long, `sy` tall, `sz` deep, tilted back by `lean`
 // (radians) about its own centre.
@@ -763,6 +769,34 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
       );
   };
   materials.plate.customProgramCacheKey = () => 'traffic-plates';
+  // The wheels turn as the vehicle rolls: each piece marked with its hub is
+  // turned about the axle by the distance rolled over the wheel's radius
+  // (the hub's height).
+  for (const kind of Object.keys(wheelKinds)) {
+    const material = materials[kind];
+    material.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          attribute vec3 wheelHub;
+          attribute float wheelRoll;`
+        )
+        .replace(
+          '#include <beginnormal_vertex>',
+          `#include <beginnormal_vertex>
+          float wheelAngle = wheelHub.z > .5 ? -wheelRoll / max(wheelHub.y, .05) : 0.;
+          mat2 wheelTurn = mat2(cos(wheelAngle), sin(wheelAngle), -sin(wheelAngle), cos(wheelAngle));
+          objectNormal.xy = wheelTurn * objectNormal.xy;`
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          if (wheelHub.z > .5) transformed.xy = wheelHub.xy + wheelTurn * (transformed.xy - wheelHub.xy);`
+        );
+    };
+    material.customProgramCacheKey = () => `traffic-wheels-${kind}`;
+  }
   const builders = {
     hatch: (spec) => car(spec, profiles.hatch),
     sedan: (spec) => car(spec, profiles.sedan),
@@ -810,12 +844,32 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
     meshes[type] = Object.entries(parts)
       .filter(([, list]) => list.length)
       .map(([kind, list]) => {
-        const pieces = list.map((g) => (g.index ? g.toNonIndexed() : g));
+        const rolling = kind in wheelKinds;
+        const pieces = list.map((g) => {
+          const piece = g.index ? g.toNonIndexed() : g;
+          // Each vertex's hub (x, height, 1), or nothing (0, 0, 0).
+          if (rolling) {
+            const [hx, hy] = g.userData.hub ?? [0, 0];
+            const flag = g.userData.hub ? 1 : 0;
+            const hub = new Float32Array(piece.attributes.position.count * 3);
+            for (let i = 0; i < hub.length; i += 3) hub.set([hx, hy, flag], i);
+            piece.setAttribute('wheelHub', new THREE.BufferAttribute(hub, 3));
+          }
+          return piece;
+        });
         const geometry = mergeGeometries(pieces, false);
         for (const g of pieces) g.dispose();
         for (const g of list) g.dispose();
         const lamp = ['tail', 'head', 'left', 'right'].includes(kind);
         const material = lamp ? materials.lamp : materials[kind];
+        // How far each vehicle has rolled (m), turning its wheels.
+        if (rolling)
+          geometry.setAttribute(
+            'wheelRoll',
+            new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(
+              THREE.DynamicDrawUsage
+            )
+          );
         if (kind === 'plate')
           geometry.setAttribute(
             'plateIndex',
@@ -1012,6 +1066,9 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
       opposite?.update(dt, x);
       for (const v of opposite ? [...traffic.vehicles, ...opposite.vehicles] : traffic.vehicles) {
         const index = counts[v.type]++;
+        // (Kept under a kilometre for the shader's precision; the jump at
+        // the wrap is lost in a fast-turning wheel.)
+        v.rolled = ((v.rolled ?? 0) + Math.max(0, v.speed) * dt) % 1000;
         const z = roadCenterZ(v.x) + v.lat;
         const heading =
           -Math.atan(roadCenterSlope(v.x)) -
@@ -1043,6 +1100,10 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
           bridgeShade(v.x, z, structureUniforms.structureSunShift.value, 1) < 0.5;
         for (const { kind, mesh, flat } of meshes[v.type]) {
           mesh.setMatrixAt(index, matrix);
+          if (kind in wheelKinds) {
+            mesh.geometry.attributes.wheelRoll.setX(index, v.rolled);
+            mesh.geometry.attributes.wheelRoll.needsUpdate = true;
+          }
           if (kind === 'plate') {
             mesh.geometry.attributes.plateIndex.setX(index, v.id % (plateGrid * plateGrid));
             mesh.geometry.attributes.plateIndex.needsUpdate = true;

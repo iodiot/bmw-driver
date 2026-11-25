@@ -1971,7 +1971,12 @@ renderer.setAnimationLoop((time) => {
   const evening = Math.min(1, Math.max(0, (light.darkness - 0.25) / 0.5));
   fuelStation.update(sim?.x ?? 0, evening, sunDirection, sunlight);
   village.update(sim?.x ?? 0, evening, sunDirection, sunlight, winterLevel, dt);
-  routeLand?.update(sim?.x ?? 0, { evening, winter: winterLevel });
+  routeLand?.update(sim?.x ?? 0, {
+    evening,
+    winter: winterLevel,
+    sun: sunDirection,
+    sunlight,
+  });
   foxes.update(driving ? dt : 0, sim?.x ?? 0, sim?.z ?? 0, winterLevel);
   routeSignsView?.update(sim?.x ?? 0);
   if (sim) routeCard?.update(dt, sim.x);

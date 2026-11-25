@@ -4,6 +4,7 @@ import { structureLayout } from './road-structures.js';
 import { powerLineLayout } from './power-lines.js';
 import { Kit } from './build-kit.js';
 import { route } from './route.js';
+import { shadowMaterial, shadowOpacity, sunProjection } from './sun-shadows.js';
 
 // The buildings beside a real route as they are, from OpenStreetMap (see
 // tools/routes/build.py): the villages' houses, sheds and garages, farm
@@ -151,7 +152,7 @@ function addBuilding(b, solid, lit, dark) {
     const count = Math.max(1, Math.floor(L / 3.4));
     for (let i = 0; i < count; i++) {
       const x = (i - (count - 1) / 2) * (L / count);
-      for (const z of [-W / 2 - 0.03, W / 2 + 0.03])
+      for (const z of [-W / 2 - 0.06, W / 2 + 0.06])
         pane(glass(10 + i * 2 + (z > 0 ? 1 : 0)), x, 0.95, z, 1.05, 1.25);
     }
     return;
@@ -171,12 +172,12 @@ function addBuilding(b, solid, lit, dark) {
     for (let f = 0; f < floors; f++)
       for (let i = 0; i < columns; i++) {
         const x = (i - (columns - 1) / 2) * (L / columns);
-        for (const z of [-W / 2 - 0.03, W / 2 + 0.03])
+        for (const z of [-W / 2 - 0.06, W / 2 + 0.06])
           pane(glass(100 + f * 97 + i * 2 + (z > 0 ? 1 : 0)), x, f * 3 + 0.9, z, 1.3, 1.45);
       }
   } else if (r(3) < 0.5) {
     // A shop or an office: a band of windows along the front.
-    for (const z of [-W / 2 - 0.03, W / 2 + 0.03])
+    for (const z of [-W / 2 - 0.06, W / 2 + 0.06])
       pane(glass(5 + (z > 0 ? 1 : 0)), 0, 1.1, z, L * 0.7, Math.min(2, h - 1.6));
   }
 }
@@ -226,7 +227,14 @@ export function setupRouteLand(scene) {
     roughness: 0.15,
     metalness: 0.3,
   });
+  // Windows lie just off the walls: pulled toward the camera in depth so
+  // far off they do not flicker through them.
+  for (const m of [litGlass, darkGlass])
+    Object.assign(m, { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8 });
   const blocks = new Map();
+  const buildingShadow = shadowMaterial('Route building shadows'),
+    projection = new THREE.Matrix4();
+  let shadowsOn = false;
   const matrix = new THREE.Matrix4();
   function buildBlock(k) {
     const from = k * landLayout.block,
@@ -262,14 +270,38 @@ export function setupRouteLand(scene) {
       mesh.userData.noShadow = true;
       group.add(mesh);
       meshes.push(mesh);
+      // Their sun shadows: the walls and roofs again (already where they
+      // stand), flattened onto the ground along the sun, as the village's
+      // and the fuel station's are.
+      if (material === solidMaterial) {
+        const shadow = new THREE.Mesh(mesh.geometry, buildingShadow);
+        shadow.name = 'Route building shadows';
+        shadow.matrixAutoUpdate = false;
+        shadow.frustumCulled = false;
+        shadow.renderOrder = 2;
+        shadow.userData.noShadow = true;
+        shadow.userData.sunShadow = true;
+        shadow.matrix.copy(projection);
+        shadow.matrixWorld.copy(projection);
+        group.add(shadow);
+        meshes.push(shadow);
+      }
     }
     return meshes;
   }
   return {
     land,
     group,
-    // `x`: where the car is; `evening` (0–1) lights the windows.
-    update(x, { evening = 0, winter = 0 } = {}) {
+    // `x`: where the car is; `evening` (0–1) lights the windows; `sun`
+    // and `sunlight` lay the buildings' shadows.
+    update(x, { evening = 0, winter = 0, sun = null, sunlight = 0 } = {}) {
+      shadowsOn = Boolean(sun) && sunlight > 0.02;
+      if (shadowsOn) {
+        // (Laid a little above the ground: far off, a shadow 2 cm up is lost
+        // in the depth buffer under the fields.)
+        sunProjection(sun, projection, 0.3);
+        buildingShadow.opacity = shadowOpacity(sunlight);
+      }
       // Buildings within sight, one block built a frame.
       const first = Math.floor((x - landLayout.reach - 60) / landLayout.block),
         last = Math.floor((x + landLayout.reach + 60) / landLayout.block);
@@ -284,12 +316,20 @@ export function setupRouteLand(scene) {
         if (k < first - 4 || k > last + 4) {
           for (const m of meshes) {
             group.remove(m);
-            m.geometry.dispose();
+            // (A shadow shares its block's geometry.)
+            if (!m.userData.sunShadow) m.geometry.dispose();
           }
           blocks.delete(k);
           continue;
         }
-        for (const m of meshes) m.visible = k >= first && k <= last;
+        for (const m of meshes) {
+          m.visible = k >= first && k <= last;
+          if (m.userData.sunShadow) {
+            m.visible &&= shadowsOn;
+            m.matrix.copy(projection);
+            m.matrixWorld.copy(projection);
+          }
+        }
       }
       litGlass.emissiveIntensity = (0.9 + 0.4 * winter) * evening;
     },
