@@ -276,8 +276,8 @@ test('Guardrails stop a car coming from the field too', () => {
 });
 
 test('The autopilot keeps left and flashes slower cars out of its way', async () => {
-  const { fastLanePlan, fastLane } = await import('../public/lane-keeping.js');
-  const base = { cruise: 32, clearLeft: true, clearRight: true, flashes: 0, sinceFlash: 99 };
+  const { fastLanePlan, fastLane, pressingOn } = await import('../public/lane-keeping.js');
+  const base = { cruise: 32, clearLeft: true, flashes: 0, sinceFlash: 99 };
   assert.equal(fastLanePlan({ ...base, lane: 2, leader: null }), 'left', 'Moves left when clear');
   assert.equal(fastLanePlan({ ...base, lane: 1, clearLeft: false, leader: null }), null);
   assert.equal(fastLanePlan({ ...base, lane: 0, leader: null }), null, 'Stays left');
@@ -302,10 +302,15 @@ test('The autopilot keeps left and flashes slower cars out of its way', async ()
     null,
     'Not at faster cars'
   );
+  // Ignored, it never goes round on the right: it keeps flashing.
   const ignored = { ...base, lane: 0, leader: slow, flashes: fastLane.patience };
-  assert.equal(fastLanePlan(ignored), 'right', 'Ignored, goes round on the right');
-  assert.equal(fastLanePlan({ ...ignored, clearRight: false, sinceFlash: 5 }), null);
-  assert.equal(fastLanePlan({ ...ignored, clearRight: false }), 'flash', 'No room: flashes again');
+  assert.equal(fastLanePlan(ignored), 'flash', 'Ignored: flashes again');
+  assert.equal(fastLanePlan({ ...ignored, sinceFlash: fastLane.flashAgain - 0.5 }), null);
+  // Held up, the left indicator says “move over”; not once it does.
+  assert.equal(pressingOn({ ...base, lane: 0, leader: slow }), true);
+  assert.equal(pressingOn({ ...base, lane: 0, leader: { ...slow, moving: true } }), false);
+  assert.equal(pressingOn({ ...base, lane: 1, leader: slow }), false);
+  assert.equal(pressingOn({ ...base, lane: 0, leader: null }), false);
 });
 
 test('In the left lane the autopilot presses on in spells, up toward 180 km/h', async () => {

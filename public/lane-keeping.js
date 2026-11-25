@@ -84,35 +84,40 @@ export function bumpSpeed(x, { over = 13.9, braking = 2.2 } = {}) {
 
 // The self-driving car keeps to the left, fast lane: from another lane it
 // moves over as soon as the left one is clear; in it, held up by something
-// slower within `flashRange` m, it flashes its headlights (no more often than
-// every `flashEvery` s) and waits for it to move over; ignored `patience`
-// times, it goes round on the right and comes back, or with no room there
-// flashes again now and then. `lane` is the lane's
-// index from the left, `leader` {gap, speed, moving} the vehicle ahead in
-// it (moving: already changing lanes), `cruise` the car's own pace.
-// Returns 'left', 'right', 'flash' or null.
-// (Close up, as a driver in a hurry does: some 40 m behind at 170 km/h.)
-export const fastLane = Object.freeze({ flashGap: 35, flashEvery: 3, patience: 2, slower: 1 });
+// slower within `flashRange` m, it presses on as a driver in a hurry does
+// on a Ukrainian motorway: close behind with the left indicator on (move
+// over), flashing its headlights, first twice `flashEvery` s apart and then
+// every `flashAgain` s till the other moves over. It never goes round on
+// the right. `lane` is the lane's index from the left, `leader` {gap,
+// speed, moving} the vehicle ahead in it (moving: already changing lanes),
+// `cruise` the car's own pace. Returns 'left', 'flash' or null.
+// (Close up: some 40 m behind at 170 km/h.)
+export const fastLane = Object.freeze({
+  flashGap: 35,
+  flashEvery: 2.5,
+  flashAgain: 3.5,
+  patience: 2,
+  slower: 1,
+});
 export const flashRange = (speed = 0) => Math.max(fastLane.flashGap, 5 + 0.8 * speed);
-export function fastLanePlan({
-  lane,
-  leader,
-  cruise,
-  speed = 0,
-  clearLeft,
-  clearRight,
-  flashes,
-  sinceFlash,
-}) {
+// Held up in the left lane by a slower vehicle that is not moving over:
+// the left indicator goes on (and stays on while it lasts).
+export function pressingOn({ lane, leader, cruise, speed = 0 }) {
+  return (
+    lane === 0 &&
+    Boolean(leader) &&
+    !leader.moving &&
+    leader.gap < flashRange(speed) + 20 &&
+    leader.speed < cruise - fastLane.slower
+  );
+}
+export function fastLanePlan({ lane, leader, cruise, speed = 0, clearLeft, flashes, sinceFlash }) {
   if (lane > 0) return clearLeft ? 'left' : null;
   const heldUp =
     leader && leader.gap < flashRange(speed) && leader.speed < cruise - fastLane.slower;
   if (!heldUp || leader.moving) return null;
-  if (flashes < fastLane.patience) return sinceFlash >= fastLane.flashEvery ? 'flash' : null;
-  if (sinceFlash < fastLane.flashEvery) return null;
-  // Ignored: round it on the right, or with no room there, a flash now and
-  // then till it moves over.
-  return clearRight ? 'right' : sinceFlash >= 2 * fastLane.flashEvery ? 'flash' : null;
+  const every = flashes < fastLane.patience ? fastLane.flashEvery : fastLane.flashAgain;
+  return sinceFlash >= every ? 'flash' : null;
 }
 
 // How hard the self-driving car presses on in the left lane, as a driver

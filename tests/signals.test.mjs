@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { TurnSignals, highBeamWanted, signalTiming } from '../public/signals.js';
+import { TurnSignals, glareDistance, highBeamWanted, signalTiming } from '../public/signals.js';
 import { highBeamProfile, lowBeamProfile } from '../public/headlight-profile.js';
 
 test('Turn signals flash about 85 times a minute with a relay click each way', () => {
@@ -85,4 +85,20 @@ test('Flashing the headlights blinks the main beam twice, with a click each way'
   }
   assert.deepEqual(clicks, ['off', 'on', 'off']);
   assert.equal(f.lit, false, 'Done within a second');
+});
+
+test('the main beam dips for a vehicle in the next lane or coming the other way', () => {
+  // The car in the left lane (lat -3.6); a van 60 m ahead in the right one.
+  const van = { x: 160, lat: 3.6, length: 5 };
+  assert.equal(glareDistance(100, -3.6, [van]), 57.5);
+  // Behind the car, or far off to the side, it does not count.
+  assert.equal(glareDistance(200, -3.6, [van]), Infinity);
+  assert.equal(glareDistance(100, -3.6, [{ ...van, lat: 40 }]), Infinity);
+  // Coming the other way on the far carriageway.
+  assert.equal(glareDistance(100, -3.6, [], [{ x: 300, lat: -18, length: 4 }]), 198);
+  const open = { night: true, speed: 30, raining: false };
+  assert.equal(
+    highBeamWanted({ ...open, trafficDistance: glareDistance(100, -3.6, [van]) }),
+    false
+  );
 });

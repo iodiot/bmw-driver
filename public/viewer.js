@@ -66,6 +66,7 @@ import {
   bumpSpeed,
   fastLanePlan,
   flashRange,
+  pressingOn,
   followSpeed,
   AutopilotPace,
 } from './lane-keeping.js';
@@ -92,6 +93,7 @@ import {
   TurnSignals,
   HeadlightFlasher,
   highBeamWanted,
+  glareDistance,
   setupReversingLamps,
   setupSignalLamps,
 } from './signals.js';
@@ -1351,13 +1353,15 @@ controls.addEventListener('start', () => {
 // AutopilotPace in lane-keeping.js).
 const autopilotSpeed = 25,
   autopilotPacing = new AutopilotPace();
-let autopilotPassing = false;
+let autopilotPassing = false,
+  // Held up in the left lane, its left indicator on (see pressingOn).
+  autopilotPressing = false;
 // The self-driving car in traffic keeps to the left lane (see fastLanePlan
-// in lane-keeping.js): it moves over whenever the left lane is clear,
-// flashes its headlights at a slower car ahead there, which then moves over
-// to the right, and if one will not, goes round it on the right and comes
-// back. Each change is signalled (a lane is a constant offset; lane keeping
-// steers there).
+// in lane-keeping.js): it moves over whenever the left lane is clear, and
+// held up there by a slower car it sits close behind it with the left
+// indicator on and flashes its headlights till it moves over to the right;
+// it never goes round on the right. Each change is signalled (a lane is a
+// constant offset; lane keeping steers there).
 let autopilotPlan = 0,
   // The indicator the autopilot put on (it turns off only its own).
   autopilotSignal = null,
@@ -1372,7 +1376,7 @@ function autopilotTraffic(dt) {
   sinceBeamFlash += dt;
   const lat = roadLateral(sim.x, sim.z);
   const settled = Math.abs(lat - keptLane) < 0.4;
-  if (settled && autopilotSignal && signals.side === autopilotSignal) {
+  if (settled && autopilotSignal && !autopilotPressing && signals.side === autopilotSignal) {
     signals.set(null);
     autopilotSignal = null;
   }
@@ -1386,15 +1390,30 @@ function autopilotTraffic(dt) {
     flashedVehicle = ahead?.who ?? null;
     flashCount = 0;
   }
-  const left = roadLanes[lane - 1],
-    right = roadLanes[lane + 1];
+  const left = roadLanes[lane - 1];
+  const leader = ahead && {
+    gap: ahead.gap,
+    speed: ahead.speed,
+    moving: Boolean(ahead.who.change),
+  };
+  // Held up in the left lane: the left indicator on, “move over”.
+  const pressing = pressingOn({ lane, leader, cruise: autopilotPacing.set, speed: sim.speed });
+  if (pressing && signals.side !== 'left') {
+    signals.set('left');
+    autopilotSignal = 'left';
+  } else if (!pressing && autopilotPressing && signals.side === 'left') {
+    signals.set(null);
+    autopilotSignal = null;
+  }
+  autopilotPressing = pressing;
+  // (Seen in the mirror, the indicator asks as a flash does.)
+  if (pressing && ahead) traffic.signalledAt(sim.x, keptLane, flashRange(sim.speed) + 30);
   const plan = fastLanePlan({
     lane,
-    leader: ahead && { gap: ahead.gap, speed: ahead.speed, moving: Boolean(ahead.who.change) },
+    leader,
     cruise: autopilotPacing.set,
     speed: sim.speed,
     clearLeft: left !== undefined && traffic.laneClearFor(sim.x, sim.speed, left, 4.9, 1.9, 20),
-    clearRight: right !== undefined && traffic.laneClearFor(sim.x, sim.speed, right, 4.9, 1.9, 25),
     flashes: flashCount,
     sinceFlash: sinceBeamFlash,
   });
@@ -1404,9 +1423,8 @@ function autopilotTraffic(dt) {
     flashCount++;
     traffic.flashedAt(sim.x, keptLane, flashRange(sim.speed) + 30);
   } else if (plan) {
-    keptLane = plan === 'left' ? left : right;
-    // Going round on the right keeps up its pace.
-    autopilotPassing = plan === 'right';
+    keptLane = left;
+    autopilotPassing = false;
     signals.set(plan);
     autopilotSignal = plan;
   }
@@ -1522,7 +1540,8 @@ renderer.setAnimationLoop((time) => {
       // It keeps close, as a driver in a hurry does: some 0.6 s behind
       // (more on snow), and closing up it brakes late and firmly, as late as
       // its brakes allow to come down to the other's speed there.
-      const headway = 0.6 + 0.5 * winterLevel,
+      // Closer still behind one it is pressing to move over.
+      const headway = (autopilotPressing ? 0.45 : 0.6) + 0.5 * winterLevel,
         closing = 3.5 - 1.5 * winterLevel;
       const follow = leader
         ? followSpeed(leader.gap - (4 + headway * leader.speed), leader.speed, closing)
@@ -1554,6 +1573,12 @@ renderer.setAnimationLoop((time) => {
       input.cruiseGain = 1;
     } else {
       keptLane = null;
+      // Taking the wheel while it pressed on: its left indicator goes off.
+      if (autopilotPressing) {
+        if (signals.side === 'left' && autopilotSignal === 'left') signals.set(null);
+        autopilotPressing = false;
+        autopilotSignal = null;
+      }
       delete input.steerAngle;
       delete input.cruiseSpeed;
       delete input.cruiseAccel;
@@ -1706,7 +1731,12 @@ renderer.setAnimationLoop((time) => {
           speed: sim.speed,
           raining: rainMode,
           enabled: highBeamAssistOn,
-          trafficDistance: traffic.distanceAhead(sim.x, roadLateral(sim.x, sim.z)),
+          trafficDistance: glareDistance(
+            sim.x,
+            roadLateral(sim.x, sim.z),
+            traffic.vehicles,
+            trafficView.oncoming?.vehicles
+          ),
         })
     );
     headlights.update(dt);

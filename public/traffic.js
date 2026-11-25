@@ -82,6 +82,9 @@ export const trafficLayout = Object.freeze({
   signalLead: 1.3,
   // Flashed at: the indicator only this long before it moves over.
   yieldLead: 0.8,
+  // Having moved over for the car, it keeps right this long (s) rather
+  // than pulling out in front of it again.
+  gaveWay: 12,
   // The share of cars in the left lane that sit there (see place).
   campers: 0.45,
   changeTime: { car: 3.4, lorry: 5.5 },
@@ -262,6 +265,7 @@ export class Traffic {
       v.clock += dt;
       v.sinceChange += dt;
       if (v.hurried > 0) v.hurried -= dt;
+      if (v.gaveWay > 0) v.gaveWay -= dt;
       // Who is ahead in the lane, or in either lane while crossing.
       let leader = this.neighbour(v, v.lat, users, 1);
       if (v.change) {
@@ -312,7 +316,7 @@ export class Traffic {
     // Overtake on the left when held up by something slower.
     const heldUp =
       leader && leader.gap < 40 + v.speed * 1.6 && leader.speed < desired - (v.lorry ? 1.2 : 2);
-    if (heldUp && can(v.lane - 1) && (!v.lorry || this.random() < 0.35)) {
+    if (heldUp && can(v.lane - 1) && !(v.gaveWay > 0) && (!v.lorry || this.random() < 0.35)) {
       const there = this.neighbour(v, lanes[v.lane - 1], users, 1);
       const better = !there || there.speed > leader.speed + 1 || there.gap > leader.gap + 30;
       if (better && this.laneOpen(v, v.lane - 1, users, 12 + 0.5 * v.speed))
@@ -409,6 +413,11 @@ export class Traffic {
   flashedAt(x, lat, range = 150) {
     return this.askToYield(x, lat, range, trafficLayout.yieldLead - trafficLayout.signalLead);
   }
+  // The car close behind with its left indicator on: move over, as soon as
+  // there is room on the right (asked again while it lasts).
+  signalledAt(x, lat, range = 80) {
+    return this.askToYield(x, lat, range, trafficLayout.yieldLead - trafficLayout.signalLead);
+  }
   askToYield(x, lat, range, reaction = 0) {
     const ahead = this.leaderFor(x, lat);
     if (!ahead || ahead.gap > range) return null;
@@ -421,6 +430,7 @@ export class Traffic {
     if (v.lane < 2 && spec.lanes.includes(v.lane + 1) && this.laneOpen(v, v.lane + 1, users, 12)) {
       this.begin(v, v.lane + 1, reaction);
       v.sinceChange = 0;
+      v.gaveWay = trafficLayout.gaveWay;
     } else v.hurried = 8;
     return v;
   }

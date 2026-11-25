@@ -68,7 +68,23 @@ export class TurnSignals {
 // High-beam assistant: main beam at night on an open road, above town
 // speed, dipped in rain or fog spray and for traffic ahead or oncoming
 // within `glare` metres.
-export const highBeamAssist = Object.freeze({ minSpeed: 14, glare: 400 });
+export const highBeamAssist = Object.freeze({ minSpeed: 14, glare: 400, across: 12 });
+// How far ahead the nearest vehicle the main beam would dazzle is: any on
+// the car's own carriageway, in its lane or beside it (lit squarely from
+// behind, a van's doors went white), and any coming the other way. Each
+// is {x, lat, length}; `oncoming` are on the other carriageway.
+export function glareDistance(x, lat, vehicles = [], oncoming = []) {
+  let best = Infinity;
+  for (const v of vehicles) {
+    const d = v.x - v.length / 2 - x;
+    if (d > 0 && Math.abs(v.lat - lat) < highBeamAssist.across) best = Math.min(best, d);
+  }
+  for (const v of oncoming) {
+    const d = v.x - v.length / 2 - x;
+    if (d > 0) best = Math.min(best, d);
+  }
+  return best;
+}
 export function highBeamWanted({
   night,
   speed,
