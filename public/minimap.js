@@ -196,23 +196,37 @@ export function setupMinimap(container) {
       const samples = [];
       for (let x = from; x <= to; x += 3 + 0.03 * Math.max(0, x - simulation.x)) samples.push(x);
       samples.push(to);
-      // A band along the road between two lateral offsets (as drawn).
+      // A band along the road between two lateral offsets (as drawn), each
+      // a number or a function of x (null where the band is absent).
       const band = (a, b, colour, start = from, end = to) => {
-        const xs = samples.filter((x) => x >= start && x <= end);
-        if (xs.length < 2) return;
-        ctx.beginPath();
-        xs.forEach((x, i) => {
-          const [px, py] = P(x, a);
-          if (i) ctx.lineTo(px, py);
-          else ctx.moveTo(px, py);
-        });
-        for (let i = xs.length - 1; i >= 0; i--) {
-          const [px, py] = P(xs[i], b);
-          ctx.lineTo(px, py);
+        const at = (f, x) => (typeof f === 'function' ? f(x) : f);
+        let run = [];
+        const fill = () => {
+          if (run.length > 1) {
+            ctx.beginPath();
+            run.forEach(([x, lo], i) => {
+              const [px, py] = P(x, lo);
+              if (i) ctx.lineTo(px, py);
+              else ctx.moveTo(px, py);
+            });
+            for (let i = run.length - 1; i >= 0; i--) {
+              const [px, py] = P(run[i][0], run[i][2]);
+              ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            ctx.fillStyle = colour;
+            ctx.fill();
+          }
+          run = [];
+        };
+        for (const x of samples) {
+          if (x < start || x > end) continue;
+          const lo = at(a, x),
+            hi = at(b, x);
+          if (lo === null || hi === null || hi <= lo) fill();
+          else run.push([x, lo, hi]);
         }
-        ctx.closePath();
-        ctx.fillStyle = colour;
-        ctx.fill();
+        fill();
       };
       // A line along the road at a lateral offset (or a function of x, null
       // where absent), its width in metres so it narrows with distance.
@@ -244,32 +258,6 @@ export function setupMinimap(container) {
         ctx.fillStyle = `rgba(190,220,170,${Math.min(0.16, scale * 0.05)})`;
         ctx.fillRect(0, py, w, Math.max(0.6, scale * 4));
       }
-      // The country road: an unpaved track.
-      // (A band of its own, in runs where it exists, so it is drawn evenly.)
-      let run = [];
-      const track = () => {
-        if (run.length > 1) {
-          ctx.beginPath();
-          run.forEach((x, i) => {
-            const [px, py] = P(x, drawnLateral(branchOffset(x) - 1.5));
-            if (i) ctx.lineTo(px, py);
-            else ctx.moveTo(px, py);
-          });
-          for (let i = run.length - 1; i >= 0; i--) {
-            const [px, py] = P(run[i], drawnLateral(branchOffset(run[i]) + 1.5));
-            ctx.lineTo(px, py);
-          }
-          ctx.closePath();
-          ctx.fillStyle = 'rgba(220,184,124,0.6)';
-          ctx.fill();
-        }
-        run = [];
-      };
-      for (const x of samples) {
-        if (branchOffset(x) === null) track();
-        else run.push(x);
-      }
-      track();
       // The motorway: a dark casing, the light see-through asphalt, its
       // edge lines and the lane dashes, fixed to the road so they run.
       // (On the route the oncoming carriageway beside it, a little dimmer,
@@ -284,19 +272,64 @@ export function setupMinimap(container) {
         strip(oncomingCentre - roadEdge + 0.3, 0.35, 'rgba(255,255,255,0.6)');
         strip(oncomingCentre + roadEdge - 0.3, 0.35, 'rgba(255,255,255,0.6)');
       }
-      band(-roadEdge - 1.4, roadEdge + 1.4, 'rgba(6,10,16,0.5)');
-      band(-roadEdge, roadEdge, 'rgba(226,234,242,0.42)');
-      strip(-roadEdge + 0.3, 0.35, 'rgba(255,255,255,0.85)');
-      strip(roadEdge - 0.3, 0.35, 'rgba(255,255,255,0.85)');
+      // The service lane, asphalt as the road: leaving it on the right, out
+      // beside it to the services and back. Across its mouth, where it runs
+      // alongside, the right edge line is broken into dashes, as painted.
+      const E = roadEdge,
+        { halfWidth } = roadBranch;
+      const service = (x) => branchOffset(x);
+      const mouth = (x) => service(x) !== null && service(x) - halfWidth < E + 0.5;
+      const serviceFrom = (x, pad) =>
+        service(x) === null ? null : mouth(x) ? E : drawnLateral(service(x) - halfWidth - pad);
+      const serviceTo = (x, pad) =>
+        service(x) === null ? null : drawnLateral(service(x) + halfWidth + pad);
+      const dark = 'rgba(6,10,16,0.5)',
+        asphalt = 'rgba(226,234,242,0.42)',
+        paint = 'rgba(255,255,255,0.85)';
+      band(-E - 1.4, -E, dark);
+      band(E, (x) => (mouth(x) ? null : E + 1.4), dark);
+      band(
+        (x) => serviceFrom(x, 0.8),
+        (x) => serviceTo(x, 0.8),
+        dark
+      );
+      band(-E, E, asphalt);
+      band(
+        (x) => serviceFrom(x, 0),
+        (x) => serviceTo(x, 0),
+        asphalt
+      );
+      strip(-E + 0.3, 0.35, paint);
+      strip((x) => (mouth(x) ? null : E - 0.3), 0.35, paint);
+      // The service lane's own edge lines, where it is clear of the road.
+      strip((x) => (service(x) !== null && !mouth(x) ? service(x) - 1.95 : null), 0.3, paint);
+      strip((x) => (service(x) !== null ? service(x) + 1.95 : null), 0.3, paint);
+      for (let x = Math.ceil(from / 6) * 6; x < to; x += 6) {
+        if (!mouth(x) || !mouth(x + 3)) continue;
+        const [ax, ay, scale] = P(x, E - 0.3),
+          [bx, by] = P(x + 3, E - 0.3);
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.lineWidth = Math.max(0.6, 0.35 * scale);
+        ctx.strokeStyle = paint;
+        ctx.lineCap = 'butt';
+        ctx.stroke();
+      }
+      // The lane dashes, and the oncoming carriageway's (dimmer, mirrored).
+      const dividers = roadLanes.slice(0, -1).map((lane) => [lane + 1.8, 'rgba(255,255,255,0.9)']);
+      if (oncoming)
+        for (const lane of roadLanes.slice(0, -1))
+          dividers.push([oncomingCentre - (lane + 1.8), 'rgba(255,255,255,0.6)']);
       for (let x = Math.ceil(from / 12) * 12; x < to; x += 12)
-        for (const lane of roadLanes.slice(0, -1)) {
-          const [ax, ay, scale] = P(x, lane + 1.8),
-            [bx, by] = P(x + 6, lane + 1.8);
+        for (const [lateral, colour] of dividers) {
+          const [ax, ay, scale] = P(x, lateral),
+            [bx, by] = P(x + 6, lateral);
           ctx.beginPath();
           ctx.moveTo(ax, ay);
           ctx.lineTo(bx, by);
           ctx.lineWidth = Math.max(0.5, 0.25 * scale);
-          ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+          ctx.strokeStyle = colour;
           ctx.lineCap = 'butt';
           ctx.stroke();
         }
