@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Traffic, collideWithTraffic, rideOver, trafficLayout } from '../public/traffic.js';
+import {
+  Traffic,
+  collideWithTraffic,
+  policeLayout,
+  rideOver,
+  trafficLayout,
+} from '../public/traffic.js';
 import { roadCenterZ, roadLanes } from '../public/road-profile.js';
 
 function seeded(seed) {
@@ -223,4 +229,55 @@ test('oncoming traffic comes the other way in its own lanes and keeps its gaps',
   // Still round the car after two minutes, the passed ones turned up ahead.
   assert.ok(traffic.vehicles.length >= 8);
   assert.ok(traffic.vehicles.every((v) => v.x > x - oncomingLayout.behind));
+});
+
+test('a patrol car chases the car, the traffic makes way, then it gives up', () => {
+  let seed = 7;
+  const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+  const traffic = new Traffic({ random });
+  traffic.reset(0, roadLanes[0]);
+  // (The endless road's speed bumps hold it, as everyone, to about
+  // 100 km/h between them and slow over each: the car here goes slower.)
+  const player = { x: 0, lat: roadLanes[0], speed: 11 };
+  // Never one drawn at random.
+  assert.ok(traffic.vehicles.every((v) => !v.police));
+  const police = traffic.callPolice(player);
+  assert.ok(police?.police.lights && police.lane === 0);
+  assert.equal(traffic.chaser, police);
+  assert.ok(player.x - police.x === policeLayout.behind);
+  // It closes in on the car.
+  let closest = Infinity;
+  const dt = 0.1;
+  for (let t = 0; t < 30; t += dt) {
+    player.x += player.speed * dt;
+    traffic.step(dt, player);
+    closest = Math.min(closest, player.x - police.x);
+  }
+  assert.ok(closest < 120, `closest ${closest}`);
+  // Long enough on, it switches its lights off and drops back.
+  for (let t = 0; t < 120; t += dt) {
+    player.x += player.speed * dt;
+    traffic.step(dt, player);
+  }
+  assert.equal(traffic.chaser, null);
+});
+
+test('its light bar flashes blue and red by turns', async () => {
+  const { beaconLit } = await import('../public/traffic-view.js');
+  const v = { police: { lights: true }, clock: 0 };
+  let blue = 0,
+    red = 0,
+    both = 0;
+  for (let t = 0; t < 2; t += 0.01) {
+    v.clock = t;
+    const b = beaconLit(v, 0),
+      r = beaconLit(v, 1);
+    blue += b;
+    red += r;
+    both += b && r;
+  }
+  assert.ok(blue > 40 && red > 40, `${blue} ${red}`);
+  assert.equal(both, 0);
+  v.police.lights = false;
+  assert.equal(beaconLit(v, 0) || beaconLit(v, 1), false);
 });

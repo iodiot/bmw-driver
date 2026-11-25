@@ -188,6 +188,24 @@ const leaning = (sx, sy, sz, x, y, z, lean) => {
   return g;
 };
 
+// A police car: the saloon in white, with a light bar on the roof, blue on
+// the left and red on the right.
+function police(spec) {
+  const parts = car(spec, profiles.sedan);
+  const { width: W } = spec;
+  // The bar: a dark base across the roof and a lamp each side of it.
+  parts.trim.push(box(0.32, 0.06, W * 0.8, -0.25, 1.49, 0));
+  parts.beaconBlue = [box(0.27, 0.1, W * 0.36, -0.25, 1.57, -W * 0.2)];
+  parts.beaconRed = [box(0.27, 0.1, W * 0.36, -0.25, 1.57, W * 0.2)];
+  return parts;
+}
+// Its light bar flashing, blue and red by turns, each a double flash: lamp
+// `side` (0 blue, 1 red) lit now?
+export function beaconLit(v, side) {
+  if (!v.police?.lights) return false;
+  const t = (v.clock * 2.2 + side * 0.5) % 1;
+  return t < 0.42 && (t < 0.16 || t > 0.24);
+}
 // A car: a body with its wheel arches cut out and dark wells behind them,
 // a glasshouse leaning in with black pillars and a bright line along the
 // windows, a roof, bumpers with their dark lower parts, a grille, lamps in
@@ -803,6 +821,7 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
     suv: (spec) => car(spec, profiles.suv),
     van,
     lorry,
+    police,
   };
   const group = new THREE.Group();
   group.name = 'Traffic';
@@ -860,7 +879,7 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
         const geometry = mergeGeometries(pieces, false);
         for (const g of pieces) g.dispose();
         for (const g of list) g.dispose();
-        const lamp = ['tail', 'head', 'left', 'right'].includes(kind);
+        const lamp = ['tail', 'head', 'left', 'right', 'beaconBlue', 'beaconRed'].includes(kind);
         const material = lamp ? materials.lamp : materials[kind];
         // How far each vehicle has rolled (m), turning its wheels.
         if (rolling)
@@ -1024,6 +1043,10 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
       headNight: new THREE.Color(3, 2.9, 2.6),
       signalOff: new THREE.Color(0.25, 0.12, 0.02),
       signalOn: new THREE.Color(3.2, 1.35, 0.08),
+      blueOn: new THREE.Color(0.25, 0.7, 5),
+      blueOff: new THREE.Color(0.04, 0.07, 0.3),
+      redOn: new THREE.Color(5, 0.25, 0.18),
+      redOff: new THREE.Color(0.3, 0.03, 0.03),
     };
   const paintCache = new Map();
   const paintOf = (hex) => {
@@ -1114,6 +1137,16 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
           else if (kind === 'tail')
             colour.copy(braking ? lit.brake : lamps > 0.5 ? lit.tail : lit.off);
           else if (kind === 'head') colour.copy(lamps > 0.5 ? lit.headNight : lit.headDay);
+          else if (kind === 'beaconBlue' || kind === 'beaconRed')
+            colour.copy(
+              kind === 'beaconBlue'
+                ? beaconLit(v, 0)
+                  ? lit.blueOn
+                  : lit.blueOff
+                : beaconLit(v, 1)
+                  ? lit.redOn
+                  : lit.redOff
+            );
           else if (kind === 'left' || kind === 'right')
             colour.copy(
               Traffic.blink(v) && (v.crash || (kind === 'left') === v.signal < 0)

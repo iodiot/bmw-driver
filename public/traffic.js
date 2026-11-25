@@ -21,6 +21,8 @@ export const vehicleTypes = Object.freeze({
   suv: { length: 4.65, width: 1.88, speed: [28, 35], lanes: [0, 1, 2], weight: 3, lorry: false },
   van: { length: 5.93, width: 2.0, speed: [25, 30], lanes: [1, 2], weight: 2, lorry: false },
   lorry: { length: 16.5, width: 2.55, speed: [21.5, 24.5], lanes: [1, 2], weight: 3, lorry: true },
+  // Never drawn at random: called up to chase the car (see callPolice).
+  police: { length: 4.8, width: 1.83, speed: [30, 34], lanes: [0, 1, 2], weight: 0, lorry: false },
 });
 // Roof heights (m), for the shadows they cast.
 export const vehicleHeights = Object.freeze({
@@ -29,6 +31,7 @@ export const vehicleHeights = Object.freeze({
   suv: 1.72,
   van: 2.45,
   lorry: 3.95,
+  police: 1.62,
 });
 
 // How much of a set of points (x, y, z) lies in the traffic's sun shadow,
@@ -70,6 +73,8 @@ export function trafficShade(vehicles, points, shift) {
 const drivers = {
   car: { a: 1.6, b: 2.6, T: 1.3, s0: 2.5 },
   lorry: { a: 0.55, b: 2, T: 1.8, s0: 3.5 },
+  // A patrol car on a chase: hard on the throttle, close behind.
+  police: { a: 3.5, b: 4.5, T: 0.6, s0: 2 },
 };
 export const trafficLayout = Object.freeze({
   count: 16,
@@ -122,10 +127,28 @@ const trailerPaints = [
 function pick(list, random) {
   const total = list.reduce((n, [, w]) => n + w, 0);
   let r = random() * total;
-  for (const [value, w] of list) if ((r -= w) <= 0) return value;
+  for (const [value, w] of list) if (w > 0 && (r -= w) <= 0) return value;
   return list[0][0];
 }
 const smoothstep = (t) => t * t * (3 - 2 * t);
+
+// The police: now and then, on any road, a patrol car comes up from behind with its light bar flashing and chases it, closing in at
+// up to 260 km/h; the traffic gives way to it. After a while, or once left
+// far behind, it switches its lights off and drops back. Times in seconds.
+export const policeLayout = Object.freeze({
+  firstAfter: [40, 80],
+  every: [90, 180],
+  // Called only while the car is moving at least this fast (m/s).
+  speeding: 12,
+  behind: 160,
+  chase: [55, 90],
+  giveUp: 600,
+  // How much faster than the car it closes in, and its top speed (m/s).
+  closing: 12,
+  top: 72,
+  // Traffic ahead of it in its lane, within this, moves over.
+  clearAhead: 140,
+});
 
 export class Traffic {
   constructor({ count = trafficLayout.count, random = Math.random } = {}) {
@@ -133,6 +156,89 @@ export class Traffic {
     this.random = random;
     this.vehicles = [];
     this.serial = 0;
+    const [a, b] = policeLayout.firstAfter;
+    this.policeIn = a + (b - a) * random();
+  }
+
+  // The patrol car chasing the car, if any (its lights on).
+  get chaser() {
+    return this.vehicles.find((v) => v.police?.lights) ?? null;
+  }
+
+  // A patrol car behind the car (`player` {x, lat, speed}), lights on, in
+  // the lane it is in. Returns it, or null when there is no room.
+  callPolice(player) {
+    const spec = vehicleTypes.police;
+    let lane = 0;
+    for (let i = 1; i < lanes.length; i++)
+      if (Math.abs(lanes[i] - player.lat) < Math.abs(lanes[lane] - player.lat)) lane = i;
+    const at = player.x - policeLayout.behind;
+    const lat = lanes[lane];
+    if (this.vehicles.some((o) => Math.abs(o.x - at) < 30 && Math.abs(o.lat - lat) < 2.5))
+      return null;
+    const [c0, c1] = policeLayout.chase;
+    const speed = Math.min(policeLayout.top, player.speed + policeLayout.closing);
+    const v = {
+      id: this.serial++,
+      type: 'police',
+      lorry: false,
+      length: spec.length,
+      width: spec.width,
+      x: at,
+      lat,
+      lane,
+      from: lane,
+      speed,
+      desired: speed,
+      accel: 0,
+      latSpeed: 0,
+      yaw: 0,
+      crash: null,
+      change: null,
+      signal: 0,
+      clock: 0,
+      decide: 0,
+      sinceChange: 10,
+      hurried: 0,
+      camper: false,
+      colour: '#f3f4f5',
+      trailer: null,
+      police: { lights: true, chase: c0 + (c1 - c0) * this.random() },
+    };
+    this.vehicles.push(v);
+    return v;
+  }
+
+  // The patrol car's part of a step: the chase, then lights off.
+  pursue(v, dt, player) {
+    const p = v.police;
+    if (p.lights) {
+      p.chase -= dt;
+      const behind = player ? player.x - v.x : Infinity;
+      if (!player || p.chase <= 0 || behind > policeLayout.giveUp) p.lights = false;
+      else {
+        // Closing in, then sitting on the car's tail.
+        const gap = behind - (v.length + 4.9) / 2;
+        const over = gap > 60 ? policeLayout.closing : gap > 20 ? 3 : 0.5;
+        v.desired = Math.max(30, Math.min(policeLayout.top, player.speed + over));
+      }
+    }
+    if (!p.lights) v.desired = 31;
+  }
+  // Ahead of a chasing patrol car in its lane: move over for it.
+  makeWay(v, chaser, users) {
+    if (!chaser || v === chaser || v.change || v.crash) return;
+    const ahead = v.x - chaser.x;
+    if (ahead <= 0 || ahead > policeLayout.clearAhead || v.lane !== chaser.lane) return;
+    const spec = vehicleTypes[v.type];
+    for (const to of [v.lane + 1, v.lane - 1])
+      if (to >= 0 && to <= 2 && spec.lanes.includes(to) && this.laneOpen(v, to, users, 10)) {
+        this.begin(v, to, -0.6);
+        v.sinceChange = 0;
+        v.gaveWay = trafficLayout.gaveWay;
+        return;
+      }
+    v.hurried = 6;
   }
 
   // Vehicles spread over the window round x, clear of the car (at `lateral`).
@@ -220,8 +326,8 @@ export class Traffic {
   }
 
   // Intelligent driver model acceleration toward `desired` behind `leader`.
-  static acceleration(v, desired, leader, lorry) {
-    const p = lorry ? drivers.lorry : drivers.car;
+  static acceleration(v, desired, leader, lorry, driver = null) {
+    const p = driver ?? (lorry ? drivers.lorry : drivers.car);
     let a = p.a * (1 - Math.pow(Math.max(0, v) / desired, 4));
     if (leader) {
       const dv = v - leader.speed;
@@ -261,6 +367,15 @@ export class Traffic {
     if (dt <= 0) return;
     const users = [...this.vehicles];
     if (player) users.push({ ...player, length: 4.9, width: 1.9, isPlayer: true });
+    // Now and then a patrol car, while the car goes fast.
+    if (player && !this.vehicles.some((v) => v.police)) {
+      this.policeIn -= dt;
+      if (this.policeIn <= 0 && player.speed > policeLayout.speeding && this.callPolice(player)) {
+        const [a, b] = policeLayout.every;
+        this.policeIn = a + (b - a) * this.random();
+      }
+    }
+    const chaser = this.chaser;
     for (const v of this.vehicles) {
       v.clock += dt;
       v.sinceChange += dt;
@@ -272,11 +387,19 @@ export class Traffic {
         const other = this.neighbour(v, lanes[v.change.to], users, 1);
         if (other && (!leader || other.gap < leader.gap)) leader = other;
       }
+      if (v.police) this.pursue(v, dt, player);
+      else this.makeWay(v, chaser, users);
       const desired = this.limitAt(v);
       // Hills: a laden lorry slows on a climb and runs on downhill; cars
       // mostly make up for them.
       v.accel =
-        Traffic.acceleration(v.speed, desired, leader, v.lorry) -
+        Traffic.acceleration(
+          v.speed,
+          desired,
+          leader,
+          v.lorry,
+          v.police?.lights ? drivers.police : null
+        ) -
         9.81 * roadGrade(v.x) * (v.lorry ? 0.75 : 0.2);
       // Hit by the car: thrown off line, it brakes to a stop with its
       // hazard lights on, waits, then drives on.
@@ -306,6 +429,8 @@ export class Traffic {
 
   decide(v, leader, users, dt, desired) {
     if (v.change) return;
+    // Chasing: into the car's lane, or round whatever holds it up.
+    if (v.police?.lights) return this.chase(v, leader, users, dt);
     v.decide -= dt;
     if (v.decide > 0) return;
     v.decide = 0.8 + this.random() * 0.8;
@@ -331,6 +456,27 @@ export class Traffic {
       const roomy = !there || there.gap > 70 + v.speed * 1.5 || there.speed > desired - 1;
       if (roomy && this.laneOpen(v, v.lane + 1, users, 40)) return this.begin(v, v.lane + 1);
     }
+  }
+
+  chase(v, leader, users, dt) {
+    v.decide -= dt;
+    if (v.decide > 0) return;
+    v.decide = 0.5;
+    const player = users.find((u) => u.isPlayer);
+    if (!player) return;
+    let target = 0;
+    for (let i = 1; i < lanes.length; i++)
+      if (Math.abs(lanes[i] - player.lat) < Math.abs(lanes[target] - player.lat)) target = i;
+    const held = leader && !leader.who?.isPlayer && leader.gap < 40;
+    const to =
+      target !== v.lane
+        ? v.lane + Math.sign(target - v.lane)
+        : held
+          ? v.lane > 0
+            ? v.lane - 1
+            : 1
+          : null;
+    if (to !== null && this.laneOpen(v, to, users, 12)) this.begin(v, to);
   }
 
   begin(v, to, reaction = 0) {
@@ -381,6 +527,8 @@ export class Traffic {
     for (let i = this.vehicles.length - 1; i >= 0; i--) {
       const v = this.vehicles[i];
       if (v.x > px - trafficLayout.behind && v.x < px + trafficLayout.ahead) continue;
+      // A patrol car still chasing stays till it gives up.
+      if (v.police?.lights && v.x < px) continue;
       this.vehicles.splice(i, 1);
     }
     let tries = 0;

@@ -241,6 +241,10 @@ export function setupVehicleAudio({ sound, volume, status }) {
   let output = null,
     recording = null;
   let context, master, engineBus, engineFilter, cabin, outside, noiseBuffer, loading;
+  // The police siren (made when first heard), its clock and how far off it is.
+  let siren = null,
+    sirenTime = 0,
+    sirenDistance = Infinity;
   let ready = false,
     elapsed = 0,
     windTime = 0;
@@ -675,9 +679,21 @@ export function setupVehicleAudio({ sound, volume, status }) {
     update(
       dt,
       simulation,
-      { driving, raining, accelerate, brake, distance, inside = 0, winter = 0, wind = 0 }
+      {
+        driving,
+        raining,
+        accelerate,
+        brake,
+        distance,
+        inside = 0,
+        winter = 0,
+        wind = 0,
+        siren: sirenAt = Infinity,
+      }
     ) {
       windTime += dt;
+      sirenTime += dt;
+      sirenDistance = sirenAt;
       // Knocks are caught every frame; the mix itself updates 30 times a second.
       if (simulation && driving) {
         const c = Math.cos(simulation.heading),
@@ -795,6 +811,37 @@ export function setupVehicleAudio({ sound, volume, status }) {
       tune('roll', road.rollFreq);
       tune('scrape', road.scrapeFreq);
       engineFilter.frequency.setTargetAtTime(mix.cutoff * road.engineCutoff, now, 0.08);
+      // A patrol car's siren: a wail rising and falling over four seconds,
+      // louder as it comes nearer (and muffled in the cabin, as the
+      // outside is). Made when first heard.
+      const heard = Number.isFinite(sirenDistance) && sirenDistance < 700;
+      if (heard && !siren) {
+        const osc = context.createOscillator(),
+          shape = context.createBiquadFilter(),
+          gain = context.createGain();
+        osc.type = 'sawtooth';
+        shape.type = 'bandpass';
+        shape.frequency.value = 1100;
+        shape.Q.value = 0.9;
+        gain.gain.value = 0;
+        osc.connect(shape).connect(gain).connect(outside);
+        osc.start();
+        siren = { osc, gain };
+      }
+      if (siren) {
+        const sweep = 0.5 - 0.5 * Math.cos((2 * Math.PI * sirenTime) / 4);
+        siren.osc.frequency.setTargetAtTime(620 + 760 * sweep, now, 0.05);
+        siren.gain.gain.setTargetAtTime(
+          heard ? sirenLevel(sirenDistance) : 0,
+          now,
+          heard ? 0.1 : 0.6
+        );
+      }
     },
   };
+}
+
+// How loud a siren `distance` m off is (0 to about 0.16).
+export function sirenLevel(distance) {
+  return 0.16 / (1 + Math.max(0, distance) / 35);
 }

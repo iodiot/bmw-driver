@@ -99,7 +99,7 @@ import {
 } from './signals.js';
 import { readPad, setupTouchControls } from './touch-controls.js';
 import { setupBodyDirt } from './body-dirt.js';
-import { openingGroups, setupCarOpenings } from './car-openings.js';
+import { setupCarOpenings } from './car-openings.js';
 import {
   roadLateral,
   roadCenterZ,
@@ -399,7 +399,6 @@ const lookPicker = setupLookPicker(document.body, {
   look,
   graphics,
   onGraphics: (level) => chooseGraphics(level),
-  onOpen: (group) => toggleOpening(group),
   onChange(chosen) {
     look = chosen;
     saveLook(look);
@@ -835,7 +834,13 @@ const dayBar = setupDayBar($('#day-bar'), {
   openWeather(button) {
     lookPicker.close();
     captureMenu.close();
+    dayBar.closeTime();
     weatherPicker.toggle(button);
+  },
+  openTime() {
+    lookPicker.close();
+    captureMenu.close();
+    weatherPicker.close();
   },
   // Back to the autopilot after taking the wheel (in its lane, the pedals
   // let go, moving off if paused), or the wheel taken from it.
@@ -860,11 +865,13 @@ const dayBar = setupDayBar($('#day-bar'), {
     if (clipRecorder.recording) return clipRecorder.toggle();
     weatherPicker.close();
     lookPicker.close();
+    dayBar.closeTime();
     captureMenu.toggle(button);
   },
   openLook(button) {
     weatherPicker.close();
     captureMenu.close();
+    dayBar.closeTime();
     lookPicker.toggle(button);
   },
   nextGraphics() {
@@ -1043,16 +1050,10 @@ const actions = {
 // paused).
 let carOpenings = null;
 const openingKeys = { KeyO: 'doors', KeyB: 'bonnet', KeyK: 'boot' };
-function showOpenings() {
-  lookPicker.setOpen(
-    Object.fromEntries(openingGroups.map((g) => [g, Boolean(carOpenings?.isOpen(g))]))
-  );
-}
 function toggleOpening(group) {
   if (!carOpenings || !sim) return;
   if (!carOpenings.toggle(group, driving ? sim.speed : 0))
     toasts.show({ label: 'Stop the car', shown: 'to open it' }, 2);
-  showOpenings();
 }
 addEventListener('keydown', (e) => {
   // Driving keys work wherever focus is, except while typing; Space still
@@ -1291,6 +1292,8 @@ new GLTFLoader().load(
       // particular place); ?paused=1 holds the car still.
       const query = new URLSearchParams(location.search);
       if (Number(query.get('at'))) restart(Number(query.get('at')));
+      // ?police: a patrol car takes up the chase a few seconds in.
+      if (query.has('police')) traffic.policeIn = 5;
       // ?time=17.5 sets the time of day (hours).
       if (query.has('time') && Number.isFinite(Number(query.get('time'))))
         setTimeOfDay(Number(query.get('time')));
@@ -1372,6 +1375,20 @@ let autopilotPlan = 0,
 const beamFlasher = new HeadlightFlasher();
 // The tell-tales lit on both clusters (the overlay's and the cabin's).
 const clusterLamps = { left: false, right: false, low: false, high: false };
+// A patrol car chasing the car, within sight behind it: on autopilot the
+// car runs for it (see autopilotTraffic and the cruise below).
+const escapeSpeed = 69,
+  escapeRange = 500;
+let sinceEscapeMove = 0,
+  escaping = false,
+  // The patrol car last announced.
+  policeSeen = null;
+function chasedBy() {
+  const chaser = sim ? traffic.chaser : null;
+  if (!chaser) return null;
+  const behind = sim.x - chaser.x;
+  return behind > -10 && behind < escapeRange ? chaser : null;
+}
 function autopilotTraffic(dt) {
   sinceBeamFlash += dt;
   const lat = roadLateral(sim.x, sim.z);
@@ -1391,6 +1408,49 @@ function autopilotTraffic(dt) {
     flashCount = 0;
   }
   const left = roadLanes[lane - 1];
+  // Running from the police: into whichever lane next to it has the most
+  // room ahead (the right one too), flashing slower traffic out of the way;
+  // no more than one move every 1.2 s, so it threads rather than weaves.
+  if (escaping) {
+    if (autopilotPressing && signals.side === 'left') signals.set(null);
+    autopilotPressing = false;
+    sinceEscapeMove += 0.5;
+    const right = roadLanes[lane + 1];
+    const room = (l) => {
+      const lead = traffic.leaderFor(sim.x, l);
+      return lead ? lead.gap + 6 * Math.max(0, lead.speed - sim.speed) : 1e4;
+    };
+    const slow = ahead && ahead.gap < flashRange(sim.speed) + 30 && ahead.speed < sim.speed - 1;
+    if (slow && sinceBeamFlash > 1.5) {
+      beamFlasher.start();
+      sinceBeamFlash = 0;
+      flashCount++;
+      traffic.flashedAt(sim.x, keptLane, flashRange(sim.speed) + 30);
+    }
+    if (sinceEscapeMove < 1.2) return;
+    const here = room(keptLane);
+    let to = null,
+      best = here + 15;
+    for (const [side, l] of [
+      ['left', left],
+      ['right', right],
+    ]) {
+      if (l === undefined || !traffic.laneClearFor(sim.x, sim.speed, l, 4.9, 1.9, 20)) continue;
+      const r = room(l) + (side === 'left' ? 10 : 0);
+      if (r > best) {
+        best = r;
+        to = side;
+      }
+    }
+    if (to && (slow || to === 'left')) {
+      keptLane = to === 'left' ? left : right;
+      autopilotPassing = true;
+      signals.set(to);
+      autopilotSignal = to;
+      sinceEscapeMove = 0;
+    }
+    return;
+  }
   const leader = ahead && {
     gap: ahead.gap,
     speed: ahead.speed,
@@ -1530,6 +1590,29 @@ renderer.setAnimationLoop((time) => {
     // Self-driving after page load and Restart: the car keeps its lane through
     // the curves. Once the driver presses any driving key, steering is fully
     // manual with no assistance.
+    // The police: a notice when a patrol car takes up the chase and when
+    // it gives up; on autopilot the car runs for it meanwhile.
+    const chaser = chasedBy();
+    escaping = Boolean(autopilot && driving && chaser);
+    // How far behind a chasing patrol car is (m), for the tests.
+    document.body.dataset.police = traffic.chaser
+      ? String(Math.round(sim.x - traffic.chaser.x))
+      : '';
+    if (chaser && chaser !== policeSeen) {
+      policeSeen = chaser;
+      toasts.show(
+        {
+          label: 'POLICE',
+          shown: 'on your tail',
+          note: autopilot ? 'the autopilot runs for it' : 'lose them',
+          tone: 'fine',
+        },
+        3.5
+      );
+    } else if (policeSeen && !traffic.chaser) {
+      policeSeen = null;
+      toasts.show({ label: 'POLICE', shown: 'gave up', tone: 'record' }, 3);
+    }
     if (autopilot && driving) {
       keptLane ??= nearestLane(roadLateral(sim.x, sim.z));
       autopilotTraffic(dt);
@@ -1541,7 +1624,7 @@ renderer.setAnimationLoop((time) => {
       // (more on snow), and closing up it brakes late and firmly, as late as
       // its brakes allow to come down to the other's speed there.
       // Closer still behind one it is pressing to move over.
-      const headway = (autopilotPressing ? 0.45 : 0.6) + 0.5 * winterLevel,
+      const headway = (escaping ? 0.35 : autopilotPressing ? 0.45 : 0.6) + 0.5 * winterLevel,
         closing = 3.5 - 1.5 * winterLevel;
       const follow = leader
         ? followSpeed(leader.gap - (4 + headway * leader.speed), leader.speed, closing)
@@ -1550,12 +1633,13 @@ renderer.setAnimationLoop((time) => {
       if (fastLane) autopilotPassing = false;
       const pace = autopilotPacing.step(dt, {
         fastLane,
-        passing: autopilotPassing,
+        passing: autopilotPassing || escaping,
         speed: sim.speed,
       });
       // The weather tames it: in rain it keeps to about 145 km/h, on snow
       // to some 70% of its pace (125 at most), and in fog to about 70.
-      let wanted = pace.speed;
+      // Running from the police: flat out, whatever the cameras.
+      let wanted = escaping ? Math.max(pace.speed, escapeSpeed) : pace.speed;
       wanted += (Math.min(wanted, 40) - wanted) * rainLevel;
       const onSnow = fastLane ? winterDriving.autopilotPace : winterDriving.autopilotSpeed;
       wanted += (Math.min(wanted * onSnow, 35) - wanted) * winterLevel;
@@ -1565,7 +1649,7 @@ renderer.setAnimationLoop((time) => {
         follow,
         curveSpeed(sim.x, keptLane, { lateral: rainMode ? 2.5 : 3.5 }),
         bumpSpeed(sim.x),
-        cameraSpeed(sim.x)
+        escaping ? Infinity : cameraSpeed(sim.x)
       );
       input.cruiseAccel = pace.accel;
       // Firmer on the brakes at speed, gentler on snow.
@@ -1884,9 +1968,7 @@ renderer.setAnimationLoop((time) => {
       blizzard: stormLevel > 0.5,
     });
     // Moving off closes the doors, bonnet and boot.
-    const wasOpen = openingGroups.some((g) => carOpenings.isOpen(g));
     carOpenings.update(dt, driving ? sim.speed : 0);
-    if (wasOpen && !openingGroups.some((g) => carOpenings.isOpen(g))) showOpenings();
     document.body.dataset.frost = `${frost.screen.toFixed(3)} ${frost.ice.toFixed(3)}`;
     const exhaustParticles = exhaust.update(dt, sim, {
       enabled: driving,
@@ -1953,6 +2035,8 @@ renderer.setAnimationLoop((time) => {
     brake: Boolean(sim?.reversing ? input.accelerate : input.brake),
     distance: cameraView !== 'chase' ? 4 : rig ? camera.position.distanceTo(rig.root.position) : 8,
     inside: cameraViews[cameraView].inside ? 1 : 0,
+    // The chasing patrol car's siren, by how far off it is.
+    siren: sim && traffic.chaser ? Math.abs(traffic.chaser.x - sim.x) : Infinity,
   });
   dayBar.setSound(vehicleAudio.audible, $('#sound').checked);
   radio.update(dt, { inside: cameraViews[cameraView].inside ? 1 : 0 });

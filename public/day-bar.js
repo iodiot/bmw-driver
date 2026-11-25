@@ -1,10 +1,10 @@
 import { dayCycle, dayPhase, formatClock, sunElevation, wrapHours } from './time-of-day.js';
 
-// Top-centre panel, coloured like the sky at the moment: the sun's path over
-// 24 hours with the sun or moon at the current time (click or drag to set
-// the time), the clock with a glowing sun or moon, the frame rate under it,
-// a Day / Sunset / Night switch with the current
-// phase lit, rain, the autopilot, the radio, sound and restart.
+// Top-centre panel, see-through over the scene: the sun's path over 24
+// hours with the sun or moon at the current time (click or drag to set the
+// time), the clock with a glowing sun or moon, the frame rate under it, a
+// time-of-day button showing the current phase (it opens Day, Sunset and
+// Night), the weather, the autopilot, the radio, sound and restart.
 const width = 132,
   height = 46,
   horizonY = 25;
@@ -45,59 +45,6 @@ export function nextSunEvent(hours) {
 export function presetFor(hours) {
   const elevation = sunElevation(hours);
   return elevation > 10 ? 'day' : elevation < -6 ? 'night' : 'sunset';
-}
-
-// Panel colours (top, bottom) for the sky at a moment.
-const skyColours = {
-  day: [
-    [59, 120, 196],
-    [111, 167, 220],
-  ],
-  sunset: [
-    [196, 103, 58],
-    [122, 74, 143],
-  ],
-  night: [
-    [14, 26, 51],
-    [29, 43, 76],
-  ],
-  rain: [
-    [74, 85, 98],
-    [96, 108, 122],
-  ],
-  storm: [
-    [40, 45, 56],
-    [62, 68, 82],
-  ],
-  fog: [
-    [168, 172, 176],
-    [196, 198, 199],
-  ],
-  snow: [
-    [150, 162, 178],
-    [196, 205, 216],
-  ],
-  blizzard: [
-    [92, 102, 118],
-    [140, 150, 164],
-  ],
-};
-const mixRgb = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
-// `weather`: 'clear', 'rain', 'storm' or 'fog' (true and false stand for
-// rain and clear).
-export function panelSky(light, weather) {
-  const kind = weather === true ? 'rain' : weather || 'clear';
-  return [0, 1].map((i) => {
-    let c = mixRgb(skyColours.day[i], skyColours.night[i], light.darkness);
-    c = mixRgb(c, skyColours.sunset[i], light.sunset * (1 - light.darkness * 0.5));
-    if (kind !== 'clear')
-      c = mixRgb(
-        c,
-        mixRgb(skyColours[kind][i], skyColours.night[i], light.darkness),
-        kind === 'fog' ? 0.7 : 0.6
-      );
-    return `rgb(${c.map((v) => Math.round(v)).join(' ')})`;
-  });
 }
 
 const icons = {
@@ -143,7 +90,7 @@ const weatherNames = {
   snow: 'snow',
   blizzard: 'blizzard',
 };
-const presetLabels = { day: 'Day (13:00)', sunset: 'Sunset (18:54)', night: 'Night (23:00)' };
+const presetNames = { day: 'Day', sunset: 'Sunset', night: 'Night' };
 
 export function setupDayBar(
   container,
@@ -158,6 +105,7 @@ export function setupDayBar(
     nextGraphics,
     openCapture,
     nextStation,
+    openTime,
   }
 ) {
   container.innerHTML = `
@@ -179,14 +127,7 @@ export function setupDayBar(
       <button type="button" class="day-fps" data-level="good" title="Frames per second · graphics: Auto (click to change)"><i></i><b>–</b> FPS</button>
     </div>
     <div class="day-buttons">
-      <div class="day-presets" role="group" aria-label="Time presets">
-        ${Object.keys(presetLabels)
-          .map(
-            (p) =>
-              `<button type="button" data-preset="${p}" aria-label="${presetLabels[p]}" title="${presetLabels[p]}">${icon(p)}</button>`
-          )
-          .join('')}
-      </div>
+      <button type="button" class="day-time" aria-label="Time of day" title="Time of day" aria-expanded="false">${icon('day')}</button>
       <button type="button" class="day-rain" aria-label="Weather and season" title="Weather and season" aria-pressed="false" aria-expanded="false">${icon('clear')}</button>
       <button type="button" class="day-autopilot" aria-label="Autopilot" title="Autopilot" aria-pressed="true">${icon('autopilot')}</button>
       <button type="button" class="day-paint" aria-label="Paint, wheels and graphics" title="Paint, wheels and graphics" aria-expanded="false">${icon('paint')}</button>
@@ -205,13 +146,53 @@ export function setupDayBar(
     fpsValue = fps.querySelector('b'),
     sun = container.querySelector('.day-celestial .sun'),
     moon = container.querySelector('.day-celestial .moon'),
-    presets = [...container.querySelectorAll('[data-preset]')],
+    timeButton = container.querySelector('.day-time'),
     rain = container.querySelector('.day-rain'),
     autopilotButton = container.querySelector('.day-autopilot'),
     soundButton = container.querySelector('.day-sound'),
     cameraButton = container.querySelector('.day-camera');
+  // The time of day's panel, as the weather's: Day, Sunset and Night with
+  // their times, the current one lit; a choice closes it.
+  const timePanel = document.createElement('div');
+  timePanel.className = 'look-picker time-picker';
+  timePanel.hidden = true;
+  timePanel.setAttribute('role', 'dialog');
+  timePanel.setAttribute('aria-label', 'Time of day');
+  timePanel.innerHTML = `
+    <h3>Time of day</h3>
+    <div class="weather-kinds time-kinds" role="group" aria-label="Time of day">
+      ${Object.keys(presetNames)
+        .map(
+          (p) =>
+            `<button type="button" data-preset="${p}" title="${presetNames[p]} (${formatClock(dayCycle.presets[p])})">${icon(p)}<span>${presetNames[p]}</span><small>${formatClock(dayCycle.presets[p])}</small></button>`
+        )
+        .join('')}
+    </div>`;
+  document.body.append(timePanel);
+  const presets = [...timePanel.querySelectorAll('[data-preset]')];
+  const closeTime = () => {
+    timePanel.hidden = true;
+    timeButton.setAttribute('aria-expanded', 'false');
+  };
+  timeButton.onclick = () => {
+    const opening = timePanel.hidden;
+    if (opening) openTime?.();
+    timePanel.hidden = !opening;
+    timeButton.setAttribute('aria-expanded', String(opening));
+  };
   for (const button of presets)
-    button.onclick = () => setTime(dayCycle.presets[button.dataset.preset]);
+    button.onclick = () => {
+      setTime(dayCycle.presets[button.dataset.preset]);
+      closeTime();
+      button.blur();
+    };
+  document.addEventListener('pointerdown', (e) => {
+    if (!timePanel.hidden && !timePanel.contains(e.target) && !timeButton.contains(e.target))
+      closeTime();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !timePanel.hidden) closeTime();
+  });
   rain.onclick = () => openWeather?.(rain);
   autopilotButton.onclick = () => toggleAutopilot?.();
   container.querySelector('.day-restart').onclick = () => restart?.();
@@ -249,6 +230,8 @@ export function setupDayBar(
     soundShown = '';
   let autopilotShown = null;
   return {
+    // Closes the time of day's panel (another panel opening).
+    closeTime,
     // The autopilot on (the button lit) or off; a click turns it on again
     // after the driver has taken the wheel, or hands the wheel over.
     setAutopilot(on) {
@@ -333,14 +316,16 @@ export function setupDayBar(
       // The phase of day and next sunrise or sunset, for screen readers.
       const next = nextSunEvent(light.hours),
         name = dayPhase(light.hours);
-      const [top, bottom] = panelSky(light, weather);
-      container.style.setProperty('--sky-top', top);
-      container.style.setProperty('--sky-bottom', bottom);
-      container.style.setProperty('--sky-glow', (light.sunset * (1 - light.darkness)).toFixed(2));
       container.style.setProperty('--day-progress', (light.hours / 24).toFixed(3));
       const active = presetFor(light.hours);
       for (const button of presets)
-        button.setAttribute('aria-current', String(button.dataset.preset === active));
+        button.setAttribute('aria-pressed', String(button.dataset.preset === active));
+      if (timeButton.dataset.phase !== active) {
+        timeButton.dataset.phase = active;
+        timeButton.innerHTML = icon(active);
+        timeButton.title =
+          timeButton.ariaLabel = `Time of day: ${presetNames[active]} (click to choose)`;
+      }
       if (rain.dataset.weather !== weather) {
         rain.dataset.weather = weather;
         rain.innerHTML = icon(weather);
