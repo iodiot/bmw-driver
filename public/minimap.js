@@ -383,30 +383,48 @@ export function setupMinimap(container) {
         ctx.textBaseline = 'middle';
         ctx.fillText('⛽', sx, sy + 0.5);
       }
-      // The traffic, each vehicle a block of its size in its lane.
+      // The traffic, each vehicle a block of its size in its lane, its four
+      // corners projected as the road is, so it bends with the road's
+      // curves and leans into a lane change. `from`–`to`: the share of its
+      // length from the rear (a lorry's cab is its front fifth).
+      const block = (v, from, to) => {
+        // (Its angle to the road, folded to within a right angle — an
+        // oncoming one's half turn is no lean — and held to a moderate lean.)
+        const raw = Math.atan2(v.latSpeed ?? 0, Math.max(v.speed ?? 0, 1)) + (v.yaw ?? 0);
+        const turn = Math.max(-0.6, Math.min(0.6, Math.atan(Math.tan(raw))));
+        // Oncoming vehicles face the other way: their front is behind.
+        const dir = v.oncoming ? -1 : 1;
+        const along = (k) => v.x + dir * (k - 0.5) * v.length;
+        const off = (k) => v.lat + dir * (k - 0.5) * v.length * Math.tan(turn);
+        const half = v.width / 2;
+        const corners = [
+          P(along(from), off(from) - half),
+          P(along(from), off(from) + half),
+          P(along(to), off(to) + half),
+          P(along(to), off(to) - half),
+        ];
+        ctx.beginPath();
+        ctx.moveTo(corners[0][0], corners[0][1]);
+        for (let i = 1; i < 4; i++) ctx.lineTo(corners[i][0], corners[i][1]);
+        ctx.closePath();
+        ctx.fill();
+        // (Far off, a hairline outline keeps it at least a pixel or two.)
+        ctx.lineWidth = 0.8;
+        ctx.strokeStyle = ctx.fillStyle;
+        ctx.stroke();
+      };
       for (const v of vehicles) {
         if (v.x < from || v.x > to) continue;
-        const half = v.width / 2;
-        const [ax, ay] = P(v.x - v.length / 2, v.lat - half),
-          [bx] = P(v.x - v.length / 2, v.lat + half),
-          [, cy2] = P(v.x + v.length / 2, v.lat);
-        const wide = Math.max(1.6, bx - ax),
-          tall = Math.max(1.6, ay - cy2);
         if (v.lorry) {
           // A lorry: a long light trailer and a dark cab at its front (the
           // end toward its way).
           ctx.fillStyle = 'rgba(214,224,234,0.95)';
-          roundRect(ax, cy2, wide, tall, Math.min(1.2, wide / 4));
-          ctx.fill();
-          const cab = Math.max(1.4, tall * 0.2),
-            ahead = !v.oncoming;
+          block(v, 0, 0.8);
           ctx.fillStyle = 'rgba(28,40,56,0.95)';
-          roundRect(ax, ahead ? cy2 : cy2 + tall - cab, wide, cab, Math.min(1.2, wide / 4));
-          ctx.fill();
+          block(v, 0.8, 1);
         } else {
-          ctx.fillStyle = 'rgba(22,30,42,0.88)';
-          roundRect(ax, cy2, wide, tall, Math.min(1.5, wide / 3));
-          ctx.fill();
+          ctx.fillStyle = v.police?.lights ? 'rgba(70,120,230,0.95)' : 'rgba(22,30,42,0.88)';
+          block(v, 0, 1);
         }
       }
       // The car at its place in the lane, tilted by its angle to the road,
