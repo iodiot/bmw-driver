@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { seasonUniforms } from './season.js';
 import { structuresGLSL, structureUniforms } from './road-structures.js';
-import { roadProfileGLSL } from './road-profile.js';
+import { obstacleReach, roadProfileGLSL } from './road-profile.js';
 
 // A small, tileable surface mask is sampled in world space. It stays fixed on
 // the asphalt as the road mesh is recentered and is uploaded only once.
@@ -169,11 +169,15 @@ export function setupRoad(scene, { lite = false } = {}) {
       material.map = asphaltTexture('asphalt.jpg', true);
       material.bumpMap = null;
       material.normalMap = asphaltTexture('asphalt-normal.jpg', false);
+      // Full anisotropy for the colour, where it shows; less for the
+      // relief, roughness and the parallax's height, which far off fade.
+      material.normalMap.anisotropy = arm.anisotropy = 4;
       material.normalScale.set(1, 1);
       material.roughnessMap = arm;
       material.aoMap = arm;
       material.aoMapIntensity = 0.7;
       asphaltHeight.value = asphaltTexture('asphalt-height.jpg', false);
+      asphaltHeight.value.anisotropy = 2;
     }
     ground.geometry.computeBoundingBox();
     ground.geometry.boundingBox.min.z = -0.15;
@@ -235,9 +239,16 @@ export function setupRoad(scene, { lite = false } = {}) {
         'varying vec2 vRoadXZ;\nuniform float roadWetness;\nuniform float winterCover;\nuniform sampler2D roadWetnessMap;\nuniform sampler2D grassMap;\nuniform sampler2D gravelMap;\nuniform sampler2D asphaltHeight;\nuniform float asphaltUvPerMetre;\n' +
         visibleProfile +
         structuresGLSL +
-        `vec4 asphaltTexel(sampler2D t, vec2 uv, vec4 fallback, bool on, vec2 shift, vec2 dx, vec2 dy) {
+        `// How far toward the tile's mean the asphalt's photographs are taken
+        // (0 near, 1 beyond some 75 m): at a grazing angle far off, the
+        // anisotropic lookups cost dozens of reads and show only the mean.
+        float asphaltFarMix = 0.;
+        vec4 asphaltTexel(sampler2D t, vec2 uv, vec4 fallback, bool on, vec2 shift, vec2 dx, vec2 dy) {
           if (!on) return fallback;
-          return textureGrad(t, uv + shift, dx, dy);
+          // The smallest mip: the whole tile's mean, one read.
+          if (asphaltFarMix >= 1.) return textureLod(t, uv, 12.);
+          vec4 near = textureGrad(t, uv + shift, dx, dy);
+          return asphaltFarMix > 0. ? mix(near, textureLod(t, uv, 12.), asphaltFarMix) : near;
         }
         ` +
         shader.fragmentShader;
@@ -280,6 +291,7 @@ export function setupRoad(scene, { lite = false } = {}) {
           // Only near the camera, where the shift is visible.
           mapDx = dFdx(vMapUv);
           mapDy = dFdy(vMapUv);
+          asphaltFarMix = smoothstep(45., 75., eyeDistance);
           if (eyeDistance < ${lite ? '0.' : '25.'} && onAsphalt) {
             // The height map averages .82: stones above it, pores below.
             float relief = textureGrad(asphaltHeight, vMapUv, mapDx, mapDy).r - .82;
@@ -447,7 +459,8 @@ export function setupRoad(scene, { lite = false } = {}) {
         // height (which fades in from 60 m), so bumps and holes do not pop
         // into colour as they approach; the geometry rises smoothly under it.
         float profileDistance = length(cameraPosition.xz - vRoadXZ);
-        float height = profileDistance < 160. ? roadHeight(vRoadXZ) : 0.;
+        // (Not at all beyond the carriageway, where no bump or hole lies.)
+        float height = profileDistance < 160. && abs(rawLat) < ${(obstacleReach + 0.05).toFixed(2)} ? roadHeight(vRoadXZ) : 0.;
         float raised = smoothstep(.004, .018, height);
         // Yellow-black stripes, filtered by their size on screen: sharp up
         // close, softened as they shrink, and plain amber once narrower than
