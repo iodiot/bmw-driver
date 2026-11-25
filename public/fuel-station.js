@@ -47,13 +47,15 @@ export const pumpLane = 2.4;
 // of the islands) between `turnIn`, back to the service lane between
 // `turnOut`; paved `width` wide where it runs off the forecourt.
 export const forecourtWay = Object.freeze({
-  turnIn: Object.freeze([-50, -20]),
-  turnOut: Object.freeze([16, 46]),
+  turnIn: Object.freeze([-56, -20]),
+  turnOut: Object.freeze([16, 52]),
   width: 5.2,
 });
+// (Its bend eases in and out: the curvature too starts and ends at nought,
+// so the wheel turns smoothly rather than with a jerk at each end.)
 const ease = (a, b, x) => {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
+  return t * t * t * (t * (6 * t - 15) + 10);
 };
 // How far over from the service lane onto the way past the pumps (0–1).
 export function wayShare(along) {
@@ -69,9 +71,9 @@ const brandGreen = 0x109b3c;
 // The steel barrier along the outside of the way off, leading back to the
 // motorway (m along), and how far out from the way's middle it stands.
 export const wayBarriers = Object.freeze([
-  Object.freeze([fuelStationPlace.length / 2 + 2, forecourtWay.turnOut[1] + 6]),
+  Object.freeze([fuelStationPlace.length / 2 + 8, forecourtWay.turnOut[1] + 6]),
 ]);
-export const wayBarrierOut = forecourtWay.width / 2 + 1.6;
+export const wayBarrierOut = forecourtWay.width / 2 + 2.6;
 
 // The car's fuel: an 80 L tank with only 10 L in it at the start (some
 // 70 km driven hard, so the first fuel station is worth a stop), using

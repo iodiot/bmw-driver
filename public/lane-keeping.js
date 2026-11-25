@@ -1,4 +1,4 @@
-import { roadCenterSlope, roadLateral, roadLanes, obstacles, roadPeriod } from './road-profile.js';
+import { roadCenterZ, roadLateral, roadLanes, obstacles, roadPeriod } from './road-profile.js';
 
 const wrap = (angle) => Math.atan2(Math.sin(angle), Math.cos(angle));
 
@@ -14,9 +14,14 @@ export function nearestLane(lateral) {
 const offsetAt = (path, x) => (typeof path === 'function' ? path(x) : path);
 
 // Heading of a path at x, in the simulation's convention (positive turns
-// toward -z), and its curvature (1/m).
+// toward -z), and its curvature (1/m). The road's own direction is read
+// over 10 m: a route's road runs straight between samples 10 m apart and
+// turns at each, and read at a point it jumps at every sample, which jerked
+// the wheel at each one (plain to see at a walking pace onto a forecourt).
+const roadSpan = 5;
 function pathHeading(path, x, h = 0.5) {
-  const slope = roadCenterSlope(x) + (offsetAt(path, x + h) - offsetAt(path, x - h)) / (2 * h);
+  const road = (roadCenterZ(x + roadSpan) - roadCenterZ(x - roadSpan)) / (2 * roadSpan);
+  const slope = road + (offsetAt(path, x + h) - offsetAt(path, x - h)) / (2 * h);
   return -Math.atan(slope);
 }
 export function pathCurvature(path, x, h = 0.5) {
