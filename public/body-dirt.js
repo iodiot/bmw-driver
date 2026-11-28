@@ -119,6 +119,59 @@ export function addScratchWear(row, x, wear, angle = Math.PI / 2, spread = scrat
   return changed;
 }
 
+// Dents where the car hit something hard: the body pushed in round the
+// point it struck, deeper and wider the harder the knock; another knock
+// close by deepens the same dent. Up to `count` stay till Restart.
+export const dentLayout = Object.freeze({
+  count: 8,
+  // A knock harder than this (m/s into it) dents the body.
+  from: 2.5,
+  // Depth (m) and radius (m) for a knock of v m/s, and the most of each.
+  depth: (v) => Math.min(0.08, 0.015 + 0.005 * v),
+  radius: (v) => Math.min(0.75, 0.3 + 0.025 * v),
+  deepest: 0.11,
+  // A knock this near a dent (m) adds to it.
+  merge: 0.35,
+});
+
+// Where on the body (body space: x forward, y up, z right) a contact
+// struck, and the dent it leaves; null for a scrape too light to dent.
+export function dentFrom(contact, simulation) {
+  if (!contact || contact.impact < dentLayout.from) return null;
+  const c = Math.cos(simulation.heading),
+    s = Math.sin(simulation.heading);
+  const dx = contact.x - simulation.x,
+    dz = contact.z - simulation.z;
+  const along = dx * c - dz * s,
+    across = dx * s + dz * c;
+  // Nose or tail first: the bumper; otherwise the side it came from.
+  const end = Math.abs(along) > 2 && Math.abs(across) < 0.85;
+  return {
+    x: end ? Math.sign(along) * 2.45 : Math.max(-2.3, Math.min(2.3, along)),
+    y: end ? -0.1 : -0.05,
+    z: end ? Math.max(-0.75, Math.min(0.75, across)) : Math.sign(across || 1) * 0.92,
+    depth: dentLayout.depth(contact.impact) * (end ? 0.7 : 1),
+    // (The bumper's dents tighter: it wraps round, and a wide one reached
+    // the lamps and the grille.)
+    radius: dentLayout.radius(contact.impact) * (end ? 0.7 : 1),
+  };
+}
+// Adds a dent to the list (merging it into one close by); true if changed.
+export function addDent(dents, dent) {
+  if (!dent) return false;
+  const near = dents.find(
+    (d) => Math.hypot(d.x - dent.x, d.y - dent.y, d.z - dent.z) < dentLayout.merge
+  );
+  if (near) {
+    near.depth = Math.min(dentLayout.deepest, near.depth + dent.depth * 0.6);
+    near.radius = Math.max(near.radius, dent.radius);
+    return true;
+  }
+  dents.push(dent);
+  if (dents.length > dentLayout.count) dents.shift();
+  return true;
+}
+
 // Shader additions for the paint, chained after the water beads (which
 // provide the body-space position and normal varyings).
 const dirtFunctions = `
@@ -156,7 +209,38 @@ export function setupBodyDirt(rig, paintMaterials) {
     dirtWheels: { value: new THREE.Vector4(front, rear, hub, track) },
     scratchMap: { value: null },
     scratchRange: { value: new THREE.Vector2(scratchLayout.from, scratchLayout.length) },
+    dentAt: {
+      value: Array.from({ length: dentLayout.count }, () => new THREE.Vector4(0, -9, 0, 0.1)),
+    },
+    dentDepth: { value: new Array(dentLayout.count).fill(0) },
   };
+  // The dents, and each paint vertex's way in: its normal turned inward, in
+  // its mesh's own units for a metre of the body's.
+  const dents = [];
+  const uploadDents = () => {
+    for (let i = 0; i < dentLayout.count; i++) {
+      const d = dents[i];
+      uniforms.dentAt.value[i].set(d?.x ?? 0, d?.y ?? -9, d?.z ?? 0, d?.radius ?? 0.1);
+      uniforms.dentDepth.value[i] = d?.depth ?? 0;
+    }
+  };
+  rig.body.updateMatrixWorld(true);
+  const inverseBody = rig.body.matrixWorld.clone().invert(),
+    scale = new THREE.Vector3();
+  rig.body.traverse((mesh) => {
+    if (!mesh.isMesh || !paintMaterials.includes(mesh.material)) return;
+    if (mesh.geometry.attributes.dentInward) return;
+    scale.setFromMatrixScale(inverseBody.clone().multiply(mesh.matrixWorld));
+    const k = 3 / (scale.x + scale.y + scale.z);
+    const normals = mesh.geometry.attributes.normal;
+    const inward = new Float32Array(normals.count * 3);
+    for (let i = 0; i < normals.count; i++) {
+      inward[i * 3] = -normals.getX(i) * k;
+      inward[i * 3 + 1] = -normals.getY(i) * k;
+      inward[i * 3 + 2] = -normals.getZ(i) * k;
+    }
+    mesh.geometry.setAttribute('dentInward', new THREE.BufferAttribute(inward, 3));
+  });
   // Wear per column and side, uploaded when it changes.
   const { columns } = scratchLayout;
   const wear = [new Float32Array(columns), new Float32Array(columns)];
@@ -179,6 +263,63 @@ export function setupBodyDirt(rig, paintMaterials) {
     material.onBeforeCompile = (shader, renderer) => {
       previousCompile.call(material, shader, renderer);
       Object.assign(shader.uniforms, uniforms);
+      // Dents: each paint vertex within one's reach pushed in along its
+      // normal, most at its middle (a little, for the silhouette); the
+      // shading follows the dent's own smooth shape worked out at each
+      // pixel, as a bump map does, with a faint crumple in the metal (the
+      // body's triangles are too large to shade it by their faces).
+      const dentField = `
+        uniform vec4 dentAt[${dentLayout.count}];
+        uniform float dentDepth[${dentLayout.count}];
+        float dentAmount(vec3 p, float crumple) {
+          float dent = 0.;
+          for (int i = 0; i < ${dentLayout.count}; i++) {
+            float r = length(p - dentAt[i].xyz) / dentAt[i].w;
+            float fall = clamp(1. - r * r, 0., 1.);
+            dent = max(dent, dentDepth[i] * fall * fall * (1. + crumple));
+          }
+          return dent;
+        }
+      `;
+      shader.vertexShader =
+        dentField +
+        `attribute vec3 dentInward;
+        ` +
+        shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          transformed += dentInward * dentAmount(waterPosition, 0.) * .35;`
+        );
+      shader.fragmentShader =
+        dentField +
+        `vec3 dentBump(vec3 at, vec3 n, float h) {
+          vec3 sx = dFdx(at), sy = dFdy(at);
+          vec3 r1 = cross(sy, n), r2 = cross(n, sx);
+          float det = dot(sx, r1);
+          vec3 grad = sign(det) * (dFdx(h) * r1 + dFdy(h) * r2);
+          return normalize(abs(det) * n - grad);
+        }
+        ` +
+        shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <normal_fragment_maps>',
+        `#include <normal_fragment_maps>
+        float dentCrumple = (dirtNoise(vWaterPosition * 5.) - .5) * .45 +
+          (dirtNoise(vWaterPosition * 11. + 3.1) - .5) * .2;
+        float dentHeight = -dentAmount(vWaterPosition, dentCrumple);
+        bool dentHere = dentHeight < -.0004;
+        // (Derivatives taken everywhere, outside any branch.)
+        vec3 dentNormal = dentBump(-vViewPosition, normal, dentHeight);
+        if (dentHere) normal = dentNormal;`
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <clearcoat_normal_fragment_maps>',
+        `#include <clearcoat_normal_fragment_maps>
+        #ifdef USE_CLEARCOAT
+          vec3 dentCoat = dentBump(-vViewPosition, clearcoatNormal, dentHeight);
+          if (dentHere) clearcoatNormal = dentCoat;
+        #endif`
+      );
       shader.fragmentShader = dirtFunctions + shader.fragmentShader;
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <roughnessmap_fragment>',
@@ -275,7 +416,7 @@ export function setupBodyDirt(rig, paintMaterials) {
       );
     };
     const previousKey = material.customProgramCacheKey.bind(material);
-    material.customProgramCacheKey = () => `${previousKey()}-dirt`;
+    material.customProgramCacheKey = () => `${previousKey()}-dirt-dents`;
     material.needsUpdate = true;
   }
   // Snow packed onto the tyres and the rims' edges, turning with them.
@@ -328,12 +469,18 @@ export function setupBodyDirt(rig, paintMaterials) {
       wear[0].fill(0);
       wear[1].fill(0);
       uploadScratches();
+      dents.length = 0;
+      uploadDents();
     },
     // A rail contact this step leaves scratches where it rubs.
     scrape(contact, simulation, dt) {
       if (!contact) return;
       const { x, side, wear: amount, angle, spread } = scratchAt(contact, simulation, dt);
       if (addScratchWear(wear[side], x, amount, angle, spread)) uploadScratches();
+      if (addDent(dents, dentFrom(contact, simulation))) uploadDents();
+    },
+    get dents() {
+      return dents;
     },
     get scratches() {
       return wear;

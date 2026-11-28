@@ -888,18 +888,45 @@ export class OncomingTraffic {
 }
 
 export const playerBox = Object.freeze({ halfLength: 2.45, halfWidth: 0.95 });
+// (The car as the rectangle it is, turned as it is, against each vehicle
+// along the road: overlapping on all four axes of the two, and parted along
+// the one it overlaps least, nose to tail or side by side.)
+function overlapOf(sim, dx, dLat, hx, hz) {
+  const turn = sim.heading + Math.atan(roadCenterSlope(sim.x)),
+    c = Math.cos(turn),
+    s = Math.sin(turn);
+  const ahead = [c, -s],
+    across = [s, c];
+  let least = Infinity,
+    along = false;
+  for (const a of [[1, 0], [0, 1], ahead, across]) {
+    const car =
+      playerBox.halfLength * Math.abs(a[0] * ahead[0] + a[1] * ahead[1]) +
+      playerBox.halfWidth * Math.abs(a[0] * across[0] + a[1] * across[1]);
+    const overlap =
+      car + hx * Math.abs(a[0]) + hz * Math.abs(a[1]) - Math.abs(a[0] * dx + a[1] * dLat);
+    if (overlap <= 0) return null;
+    if (overlap < least) {
+      least = overlap;
+      along = Math.abs(a[0]) > Math.abs(a[1]);
+    }
+  }
+  return { least, along };
+}
 export function collideWithTraffic(sim, traffic) {
   const lat = sim.z - roadCenterZ(sim.x);
   let contact = null;
   for (const v of traffic.vehicles) {
     const dx = v.x - sim.x,
       dLat = v.lat - lat;
-    const overlapX = v.length / 2 + playerBox.halfLength - Math.abs(dx),
-      overlapL = v.width / 2 + playerBox.halfWidth - Math.abs(dLat);
-    if (overlapX <= 0 || overlapL <= 0) continue;
+    if (Math.abs(dx) > 12 || Math.abs(dLat) > 6) continue;
+    const overlap = overlapOf(sim, dx, dLat, v.length / 2, v.width / 2);
+    if (!overlap) continue;
+    const overlapX = overlap.least,
+      overlapL = overlap.least;
     const heavy = v.lorry ? 0.12 : 0.5;
     let impact, side;
-    if (overlapX < overlapL) {
+    if (overlap.along) {
       // Nose to tail: the closing speed is shared out.
       const ahead = dx > 0 ? 1 : -1;
       const closing = ahead * (sim.speed - v.speed);

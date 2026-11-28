@@ -99,3 +99,23 @@ test('winter cakes the car in snow and slush on any road; it thaws after', () =>
   for (let t = 0; t < 60; t += 0.1) state.step(0.1, { surfaces, speed: 0, winter: 0 });
   assert.ok(state.slush < 0.1, `thawed ${state.slush}`);
 });
+
+test('a hard knock dents the body where it struck, a second nearby deepens it', async () => {
+  const { dentFrom, addDent, dentLayout } = await import('../public/body-dirt.js');
+  const car = { x: 100, z: 0, heading: 0 };
+  // A scrape too light to dent.
+  assert.equal(dentFrom({ x: 100, z: -1.4, impact: 1 }, car), null);
+  // Into the left front door: on the left side, near the front.
+  const door = dentFrom({ x: 100.6, z: -1.4, impact: 10 }, car);
+  assert.ok(door.z < -0.9 && Math.abs(door.x - 0.6) < 1e-9);
+  // Nose first: the front bumper.
+  const nose = dentFrom({ x: 103, z: 0.2, impact: 8 }, car);
+  assert.ok(nose.x > 2.4 && Math.abs(nose.z - 0.2) < 1e-9);
+  const dents = [];
+  addDent(dents, door);
+  addDent(dents, nose);
+  const before = dents[0].depth;
+  addDent(dents, dentFrom({ x: 100.7, z: -1.4, impact: 10 }, car));
+  assert.equal(dents.length, 2);
+  assert.ok(dents[0].depth > before && dents[0].depth <= dentLayout.deepest);
+});

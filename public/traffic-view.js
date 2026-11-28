@@ -1120,6 +1120,63 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
     (g, w, h) =>
       paintPool(g, w, h, (along, across) => Math.exp(-((along / 0.45) ** 2) - (across / 0.6) ** 2))
   );
+  // Headlamps seen from in front after dark: each a soft glow with a thin
+  // horizontal streak, turned to the eye and brightest straight on, so a car
+  // coming the other way dazzles a little (and one behind does in the
+  // mirror). One instanced draw for them all, lifted with the land.
+  const glareMap = (() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 128;
+    const g = canvas.getContext('2d');
+    const halo = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    halo.addColorStop(0, 'rgba(255,250,235,1)');
+    halo.addColorStop(0.08, 'rgba(255,246,225,0.85)');
+    halo.addColorStop(0.3, 'rgba(255,236,205,0.22)');
+    halo.addColorStop(1, 'rgba(255,230,200,0)');
+    g.fillStyle = halo;
+    g.fillRect(0, 0, 128, 128);
+    const streak = g.createLinearGradient(0, 0, 128, 0);
+    streak.addColorStop(0, 'rgba(255,240,220,0)');
+    streak.addColorStop(0.5, 'rgba(255,245,230,0.55)');
+    streak.addColorStop(1, 'rgba(255,240,220,0)');
+    g.fillStyle = streak;
+    g.fillRect(0, 62, 128, 4);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+  })();
+  const glareMaterial = new THREE.MeshBasicMaterial({
+    name: 'Headlamp glare',
+    map: glareMap,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    toneMapped: false,
+    fog: false,
+  });
+  glareMaterial.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <project_vertex>',
+      `vec4 glareAt = modelMatrix * instanceMatrix * vec4(0., 0., 0., 1.);
+      glareAt.y += terrainLift(glareAt.x);
+      vec4 mvPosition = viewMatrix * glareAt;
+      mvPosition.xy += position.xy * length(instanceMatrix[0].xyz);
+      gl_Position = projectionMatrix * mvPosition;`
+    );
+  };
+  glareMaterial.customProgramCacheKey = () => 'traffic-glare';
+  const glare = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), glareMaterial, capacity * 2);
+  glare.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  glare.setColorAt(0, new THREE.Color(1, 1, 1));
+  glare.count = 0;
+  glare.frustumCulled = false;
+  glare.renderOrder = 4;
+  glare.name = 'Headlamp glare';
+  group.add(glare);
+  const glareAt = new THREE.Vector3(),
+    glareSize = new THREE.Vector3(),
+    glareColour = new THREE.Color(),
+    identity = new THREE.Quaternion();
   // A patrol car's light bar at night: a blue and a red wash on the road
   // either side of it, each lit as its lamp flashes.
   const roundGlow = (g, w, h) => {
@@ -1182,7 +1239,15 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
     // it already); `sun` points toward the sun and `sunlight` (0–1) is how
     // strong its shadows are. Those within `rideRange` of `x` ride the
     // road's bumps and potholes (dt in seconds).
-    update({ night = 0, playerCover = 0, sun = null, sunlight = 0, x = 0, dt = 0 } = {}) {
+    update({
+      night = 0,
+      playerCover = 0,
+      sun = null,
+      sunlight = 0,
+      x = 0,
+      dt = 0,
+      eye = null,
+    } = {}) {
       // Flatten onto the road (y = 0.02) along the sun's direction, the sun
       // kept off the horizon so shadows stay a sensible length.
       const showShadows = Boolean(sun) && sunlight > 0.02;
@@ -1201,6 +1266,7 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
       const counts = Object.fromEntries(Object.keys(meshes).map((t) => [t, 0]));
       let shadows = 0,
         pools = 0,
+        glares = 0,
         blues = 0,
         reds = 0;
       opposite?.update(dt, x);
@@ -1313,6 +1379,28 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
           matrix.compose(poolAt, flatTurn, poolSize);
           tailPool.setMatrixAt(pools, matrix);
           pools++;
+          // Its headlamps' glare, as much as it faces the eye.
+          if (eye) {
+            const fx = v.x + c * (front + 0.25),
+              fz = position.z - s * (front + 0.25);
+            const tx = eye.x - fx,
+              tz = eye.z - fz,
+              away = Math.hypot(tx, tz);
+            const facing = away > 1 ? (c * tx - s * tz) / away : 0;
+            const strength = Math.max(0, facing) ** 3 * (1 - Math.min(1, away / 420));
+            if (strength > 0.02) {
+              const size = 0.8 + away * 0.026;
+              glareColour.setScalar(1.2 * strength);
+              for (const side of [-1, 1]) {
+                const off = side * (v.width / 2 - 0.35);
+                glareAt.set(fx + s * off, 0.68 + (v.type === 'van' ? 0.32 : 0), fz + c * off);
+                glareSize.set(size, size, size);
+                matrix.compose(glareAt, identity, glareSize);
+                glare.setMatrixAt(glares, matrix);
+                glare.setColorAt(glares++, glareColour);
+              }
+            }
+          }
         }
       }
       for (const [type, list] of Object.entries(meshes))
@@ -1331,6 +1419,10 @@ export function setupTraffic(scene, { count, oncoming = 0 } = {}) {
       shadow.count = shadows;
       shadow.instanceMatrix.needsUpdate = true;
       headPool.count = tailPool.count = pools;
+      glare.count = glares;
+      glare.visible = glares > 0;
+      glare.instanceMatrix.needsUpdate = true;
+      if (glare.instanceColor) glare.instanceColor.needsUpdate = true;
       blueGlow.count = blues;
       redGlow.count = reds;
       blueGlow.visible = blues > 0;

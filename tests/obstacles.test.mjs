@@ -41,3 +41,17 @@ test('a car drawn up beside a pump, along the forecourt, touches nothing', () =>
 test('the open road has nothing solid on it', () => {
   for (let x = 0; x < 3000; x += 25) assert.equal(collideWithSolids(car(x, 3.6, 0, 30)), null);
 });
+
+test('a car at an angle touches a solid only where its body is, not its box', async () => {
+  const { solidsNear } = await import('../public/obstacles.js');
+  // The shop's back corner (clear of the canopy's columns), a car turned
+  // 35° heading past it a metre off its body's corner: the box round it
+  // along the road would overlap.
+  const shop = solidsNear(fuelStationPlace.at).find((b) => b.hx > 5);
+  const corner = { x: shop.x + shop.hx, lat: shop.lat + shop.hz };
+  const sim = car(corner.x + 2.3, corner.lat + 1.3, Math.PI - 0.61, 3);
+  assert.equal(collideWithSolids(sim), null);
+  // Nose into the wall it meets it.
+  const into = car(shop.x, shop.lat - shop.hz - 2.3, -Math.PI / 2 + 0.3, 5);
+  assert.ok(collideWithSolids(into));
+});

@@ -35,12 +35,45 @@ const decode = (text) => {
 // about here too).
 export const routeDatum = 170;
 
+// A curve through samples (a Catmull-Rom spline), `fine` points to each
+// step: the road bends smoothly between them instead of running straight
+// and turning at each one.
+export function refineSamples(array, fine) {
+  const n = array.length;
+  if (n < 2 || fine <= 1) return Float32Array.from(array);
+  const out = new Float32Array((n - 1) * fine + 1);
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = array[Math.max(0, i - 1)],
+      p1 = array[i],
+      p2 = array[i + 1],
+      p3 = array[Math.min(n - 1, i + 2)];
+    for (let k = 0; k < fine; k++) {
+      const t = k / fine;
+      out[i * fine + k] =
+        0.5 *
+        (2 * p1 +
+          (p2 - p0) * t +
+          (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t +
+          (3 * p1 - p0 - 3 * p2 + p3) * t * t * t);
+    }
+  }
+  out[out.length - 1] = array[n - 1];
+  return out;
+}
+// The road's samples are refined to this many to each of the route's.
+export const routeRefine = 4;
+
 export function makeRoute(data) {
-  const centre =
-    typeof data.centre === 'string' ? decode(data.centre) : Float32Array.from(data.centre);
-  const height =
-    typeof data.height === 'string' ? decode(data.height) : Float32Array.from(data.height);
-  const { step, length } = data;
+  const centre = refineSamples(
+    typeof data.centre === 'string' ? decode(data.centre) : data.centre,
+    routeRefine
+  );
+  const height = refineSamples(
+    typeof data.height === 'string' ? decode(data.height) : data.height,
+    routeRefine
+  );
+  const step = data.step / routeRefine,
+    { length } = data;
   const last = centre.length - 1;
   // Linear between samples, held level beyond the ends.
   const at = (array, x) => {
@@ -115,7 +148,7 @@ export const routeGLSL = route
   ? `
 uniform sampler2D routeMap;
 vec2 routeAt(float x) {
-  float f = clamp(x / ${route.step.toFixed(1)}, 0., ${(route.samples - 1.001).toFixed(3)});
+  float f = clamp(x / ${route.step.toFixed(4)}, 0., ${(route.samples - 1.001).toFixed(3)});
   int i = int(f);
   vec2 a = texelFetch(routeMap, ivec2(i % ${route.width}, i / ${route.width}), 0).rg;
   vec2 b = texelFetch(routeMap, ivec2((i + 1) % ${route.width}, (i + 1) / ${route.width}), 0).rg;

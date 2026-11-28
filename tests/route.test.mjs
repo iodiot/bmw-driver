@@ -106,3 +106,22 @@ test('on the N-08 the service areas stand at the real fuel stations, two lanes e
       assert.ok(m < 1550 || m > 3200);
     }
 });
+
+test('a route bends smoothly between its samples rather than at each', async () => {
+  const { refineSamples, routeRefine } = await import('../public/route.js');
+  // A bend drawn as straight runs 10 m long: the curve keeps every sample
+  // and its heading turns a little at each finer point instead of all at
+  // once at the samples.
+  const coarse = Array.from({ length: 30 }, (_, i) => (i < 10 ? 0 : 0.02 * (i - 10) ** 2 * 10));
+  const fine = refineSamples(coarse, routeRefine);
+  coarse.forEach((v, i) => assert.ok(Math.abs(fine[i * routeRefine] - v) < 1e-4));
+  const turn = (a, i, h) => (a[i + 1] - a[i]) / h - (a[i] - a[i - 1]) / h;
+  let coarseMax = 0,
+    fineMax = 0;
+  for (let i = 1; i < coarse.length - 1; i++)
+    coarseMax = Math.max(coarseMax, Math.abs(turn(coarse, i, 10)));
+  // (Away from the last sample, where the curve has nothing beyond it.)
+  for (let i = 1; i < fine.length - 2 * routeRefine; i++)
+    fineMax = Math.max(fineMax, Math.abs(turn(fine, i, 10 / routeRefine)));
+  assert.ok(fineMax < coarseMax / 2.5, `${fineMax} vs ${coarseMax}`);
+});

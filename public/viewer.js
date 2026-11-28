@@ -51,7 +51,7 @@ import { setupInstruments } from './instruments.js';
 import { setupSuspensionDisplay } from './suspension-display.js';
 import { GearShiftShake } from './shift-shake.js';
 import { RoadJolt } from './road-jolt.js';
-import { setupVehicleAudio } from './vehicle-audio.js';
+import { passingWhoosh, setupVehicleAudio } from './vehicle-audio.js';
 import { setupSkidMarks } from './skid-marks.js';
 import { setupLicensePlates } from './license-plates.js';
 import { setupContactShadow } from './contact-shadow.js';
@@ -499,7 +499,9 @@ function applyMirrors() {
   // On a phone, from behind the car the door mirrors (each a whole scene
   // render) keep their first picture, and the cabin is not drawn.
   const lite = lowPower || graphics === 'low';
-  setMirrorInterval(lite ? (cameraView === 'chase' ? 1e9 : 4) : cameraView === 'chase' ? 4 : 2);
+  // (Each door mirror redraws the whole scene: in the chase view, where
+  // they are small, every eighth frame is plenty.)
+  setMirrorInterval(lite ? (cameraView === 'chase' ? 1e9 : 4) : cameraView === 'chase' ? 8 : 2);
   if (interior) interior.interior.visible = !(lowPower && cameraView === 'chase');
 }
 function setCameraView(view) {
@@ -2155,6 +2157,13 @@ renderer.setAnimationLoop((time) => {
     inside: cameraViews[cameraView].inside ? 1 : 0,
     // The chasing patrol car's siren, by how far off it is.
     siren: sim && traffic.chaser ? Math.abs(traffic.chaser.x - sim.x) : Infinity,
+    // Cars going by close, either way.
+    passing: sim
+      ? passingWhoosh({ x: sim.x, lat: roadLateral(sim.x, sim.z), speed: sim.speed }, [
+          ...traffic.vehicles,
+          ...(trafficView.oncoming?.vehicles ?? []),
+        ])
+      : 0,
   });
   dayBar.setSound(vehicleAudio.audible, $('#sound').checked);
   radio.update(dt, { inside: cameraViews[cameraView].inside ? 1 : 0 });
@@ -2189,6 +2198,8 @@ renderer.setAnimationLoop((time) => {
     (projectedShadows ? 1 : 0);
   trafficView.update({
     night: lowBeamsOn ? 1 : 0,
+    // (Where the eye is: lamps facing it dazzle.)
+    eye: camera.position,
     playerCover: cameraShelter,
     sun: sunDirection,
     sunlight,

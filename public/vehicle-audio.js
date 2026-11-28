@@ -67,6 +67,25 @@ export const surfaceAudio = Object.freeze({
 // tyres hiss through slush instead.
 export const snowAudio = Object.freeze({ asphalt: 0.03, gravel: 0.3, dirt: 0.3, grass: 0.32 });
 
+// The rush of air past a car going by close, 0–1: by how fast it passes
+// (one coming the other way at both speeds) and how near it is, along and
+// across, loudest as it draws level.
+export function passingWhoosh(player, vehicles) {
+  let loudest = 0;
+  for (const v of vehicles) {
+    const along = Math.abs(v.x - player.x),
+      across = Math.abs(v.lat - player.lat);
+    if (along > 10 || across > 9) continue;
+    const closing = v.oncoming ? player.speed + v.speed : Math.abs(player.speed - v.speed);
+    const near = (1 - along / 10) ** 2 * (1 - across / 9);
+    loudest = Math.max(loudest, Math.min(1, closing / 40) * near);
+  }
+  return loudest;
+}
+// The air the car itself pushes through: a rush rising with speed, from
+// nothing in town to loud at 250 km/h (0–1).
+export const airflowLevel = (speed) => Math.min(1, Math.max(0, (speed - 14) / 56)) ** 1.5;
+
 // Synthesised layers from the motion: the road under the tyres (by the
 // share of wheels on each surface; wheels in the air add nothing), spray off
 // a wet road, cornering squeal on asphalt, and metal scraping along a rail.
@@ -352,6 +371,10 @@ export function setupVehicleAudio({ sound, volume, status }) {
     // Wind: a low roar and a howl whose pitch rises with the gusts.
     layer('wind', noiseBuffer, [['lowpass', 420, 0.5]]);
     layer('howl', noiseBuffer, [['bandpass', 700, 5]]);
+    // The car's own airflow, brighter as it speeds up, and the whoosh of
+    // a car going by.
+    layer('airflow', noiseBuffer, [['bandpass', 800, 0.6]]);
+    layer('pass', noiseBuffer, [['bandpass', 520, 0.8]]);
     // Metal on metal: two narrow resonances over the noise.
     layer('scrape', noiseBuffer, [
       ['bandpass', 1700, 7],
@@ -675,7 +698,8 @@ export function setupVehicleAudio({ sound, volume, status }) {
       sound.checked = !sound.checked;
       sound.dispatchEvent(new Event('change'));
     },
-    // `winter` (0–1): snow on the ground; `wind` (0–1): how hard it blows.
+    // `winter` (0–1): snow on the ground; `wind` (0–1): how hard it blows;
+    // `passing` (0–1): a car going by close (see passingWhoosh).
     update(
       dt,
       simulation,
@@ -688,6 +712,7 @@ export function setupVehicleAudio({ sound, volume, status }) {
         inside = 0,
         winter = 0,
         wind = 0,
+        passing = 0,
         siren: sirenAt = Infinity,
       }
     ) {
@@ -800,6 +825,11 @@ export function setupVehicleAudio({ sound, volume, status }) {
       level('snow', road.snow);
       level('wind', 0.3 * wind * gusts);
       level('howl', 0.11 * wind * gusts * gusts);
+      // (Muffled from the cabin.)
+      const air = airflowLevel(Math.abs(simulation?.speed ?? 0)) * (driving ? 1 : 0);
+      level('airflow', air * (inside ? 0.07 : 0.14));
+      tune('airflow', 600 + 900 * air);
+      level('pass', passing * (inside ? 0.22 : 0.4));
       pitch('snow', road.snowRate, 0.1);
       tune('howl', 520 + 520 * gusts);
       gains.get('scrape').gain.setTargetAtTime(road.scrape, now, 0.03);

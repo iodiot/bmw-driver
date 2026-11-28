@@ -149,3 +149,19 @@ test('winter: snow crunches off the asphalt, slush hisses on it, grass is muffle
     assert.ok(g >= 0.25 && g <= 1);
   }
 });
+
+test('a car going by close whooshes, loudest drawing level; the air rushes with speed', async () => {
+  const { passingWhoosh, airflowLevel } = await import('../public/vehicle-audio.js');
+  const me = { x: 100, lat: 1.8, speed: 30 };
+  // Overtaking a slow car in the next lane, level with it.
+  const level = passingWhoosh(me, [{ x: 100, lat: -1.8, speed: 20 }]);
+  const before = passingWhoosh(me, [{ x: 106, lat: -1.8, speed: 20 }]);
+  assert.ok(level > before && before > 0);
+  // One coming the other way passes much faster: louder.
+  const oncoming = passingWhoosh(me, [{ x: 100, lat: -6, speed: 25, oncoming: true }]);
+  assert.ok(oncoming > passingWhoosh(me, [{ x: 100, lat: -6, speed: 25 }]));
+  // Nobody near: nothing.
+  assert.equal(passingWhoosh(me, [{ x: 200, lat: 1.8, speed: 0 }]), 0);
+  assert.equal(airflowLevel(10), 0);
+  assert.ok(airflowLevel(40) < airflowLevel(60) && airflowLevel(80) === 1);
+});

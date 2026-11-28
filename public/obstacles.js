@@ -69,32 +69,50 @@ export function solidsNear(x, range = 40) {
 // road) out of anything solid: driving into it, it stops dead; glancing, it
 // slides along. Returns the hardest contact (shaped like a traffic hit, for
 // the crash's sound and the drift's wipe-out) or null.
+// The car is the rectangle it stands on, turned as it is (not the box
+// round it along the road, which grew metres wide at an angle and caught
+// rails and columns it never touched): tested against each solid on the four
+// axes of the two rectangles, and pushed out along the one it overlaps least.
 export function collideWithSolids(sim, { halfLength = 2.45, halfWidth = 0.95 } = {}) {
-  // The car's heading to the road, its extent along and across it, and its
-  // velocity along and across it.
+  // The car's heading to the road, its axes (along the road, across it) and
+  // its velocity along them.
   const turn = sim.heading + Math.atan(roadCenterSlope(sim.x)),
     c = Math.cos(turn),
     s = Math.sin(turn);
-  const extentX = Math.abs(c) * halfLength + Math.abs(s) * halfWidth,
-    extentL = Math.abs(s) * halfLength + Math.abs(c) * halfWidth;
+  const ahead = [c, -s],
+    across = [s, c];
   const forward = sim.reversing ? -sim.speed : sim.speed;
   let contact = null;
   for (const b of solidsNear(sim.x, 10)) {
     const lat = sim.z - roadCenterZ(sim.x);
     const dx = b.x - sim.x,
       dLat = b.lat - lat;
-    const overlapX = b.hx + extentX - Math.abs(dx),
-      overlapL = b.hz + extentL - Math.abs(dLat);
-    if (overlapX <= 0 || overlapL <= 0) continue;
-    // Out the shorter way; what the car's motion does into it.
-    const alongRoad = overlapX < overlapL;
-    const toward = alongRoad ? Math.sign(dx) : Math.sign(dLat);
-    const into = toward * (alongRoad ? c * forward : -s * forward);
-    if (alongRoad) {
-      sim.x -= toward * overlapX;
-      sim.z = roadCenterZ(sim.x) + lat;
-    } else sim.z = roadCenterZ(sim.x) + lat - toward * overlapL;
-    const headOn = Math.abs(alongRoad ? c : s) > 0.7;
+    // Separating axes: the solid's (along and across the road) and the car's.
+    let least = Infinity,
+      axis = null;
+    for (const a of [[1, 0], [0, 1], ahead, across]) {
+      const car =
+        halfLength * Math.abs(a[0] * ahead[0] + a[1] * ahead[1]) +
+        halfWidth * Math.abs(a[0] * across[0] + a[1] * across[1]);
+      const solid = b.hx * Math.abs(a[0]) + b.hz * Math.abs(a[1]);
+      const apart = a[0] * dx + a[1] * dLat;
+      const overlap = car + solid - Math.abs(apart);
+      if (overlap <= 0) {
+        axis = null;
+        break;
+      }
+      if (overlap < least) {
+        least = overlap;
+        // (Out of it: away from the solid.)
+        axis = [-Math.sign(apart || 1) * a[0], -Math.sign(apart || 1) * a[1]];
+      }
+    }
+    if (!axis) continue;
+    sim.x += axis[0] * least;
+    sim.z = roadCenterZ(sim.x) + lat + axis[1] * least;
+    // What the car's motion does into it, and whether it meets it nose first.
+    const into = -forward * (axis[0] * ahead[0] + axis[1] * ahead[1]);
+    const headOn = Math.abs(axis[0] * ahead[0] + axis[1] * ahead[1]) > 0.7;
     const impact = Math.max(0, into) + (headOn ? 0 : Math.abs(sim.lateralVelocity));
     if (into > 0 && headOn) sim.speed = 0;
     else {
@@ -105,7 +123,7 @@ export function collideWithSolids(sim, { halfLength = 2.45, halfWidth = 0.95 } =
     const hit = {
       x: sim.x + dx * 0.5,
       z: roadCenterZ(sim.x + dx * 0.5) + lat + dLat * 0.5,
-      side: alongRoad ? 0 : toward,
+      side: Math.abs(axis[1]) > Math.abs(axis[0]) ? Math.sign(dLat) : 0,
       impact,
       scrape: Math.abs(sim.speed),
       strength: impact + 0.25 * Math.abs(sim.speed),

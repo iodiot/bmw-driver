@@ -200,7 +200,7 @@ export function isOldRearMirrorTriangle(a, b, c, meshName) {
 const mirrorFar = 700;
 // Frames between updates of each door mirror. Seen close, from the driver's
 // seat, they update every other frame (the two in turn, one extra scene
-// render per frame); small in the chase view, every fourth.
+// render per frame); small in the chase view, every eighth.
 let mirrorInterval = 2;
 export function setMirrorInterval(frames) {
   mirrorInterval = Math.max(2, Math.round(frames));
